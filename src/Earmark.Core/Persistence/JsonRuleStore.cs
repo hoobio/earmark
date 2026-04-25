@@ -27,7 +27,8 @@ public sealed class JsonRuleStore : IRuleStore, IDisposable
     }
 
     public static string DefaultPath { get; } = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+        "Hoobi",
         "Earmark",
         "rules.json");
 
@@ -63,15 +64,28 @@ public sealed class JsonRuleStore : IRuleStore, IDisposable
         {
             Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
 
-            var tmp = _path + ".tmp";
-            await using (var stream = File.Create(tmp))
-            {
-                await JsonSerializer
-                    .SerializeAsync(stream, rules.ToList(), SerializerOptions, ct)
-                    .ConfigureAwait(false);
-            }
+            await using var buffer = new MemoryStream();
+            await JsonSerializer
+                .SerializeAsync(buffer, rules.ToList(), SerializerOptions, ct)
+                .ConfigureAwait(false);
 
-            File.Move(tmp, _path, overwrite: true);
+            var bytes = buffer.ToArray();
+            for (var attempt = 0; attempt < 5; attempt++)
+            {
+                try
+                {
+                    await File.WriteAllBytesAsync(_path, bytes, ct).ConfigureAwait(false);
+                    return;
+                }
+                catch (IOException) when (attempt < 4)
+                {
+                    await Task.Delay(100 * (attempt + 1), ct).ConfigureAwait(false);
+                }
+                catch (UnauthorizedAccessException) when (attempt < 4)
+                {
+                    await Task.Delay(100 * (attempt + 1), ct).ConfigureAwait(false);
+                }
+            }
         }
         finally
         {

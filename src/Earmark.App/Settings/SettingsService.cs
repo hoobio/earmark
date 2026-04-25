@@ -13,7 +13,8 @@ internal sealed class SettingsService : ISettingsService, IDisposable
     };
 
     private static readonly string DefaultPath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+        "Hoobi",
         "Earmark",
         "settings.json");
 
@@ -55,15 +56,28 @@ internal sealed class SettingsService : ISettingsService, IDisposable
         {
             Directory.CreateDirectory(Path.GetDirectoryName(DefaultPath)!);
 
-            var tmp = DefaultPath + ".tmp";
-            await using (var stream = File.Create(tmp))
-            {
-                await JsonSerializer
-                    .SerializeAsync(stream, Current, SerializerOptions, ct)
-                    .ConfigureAwait(false);
-            }
+            await using var buffer = new MemoryStream();
+            await JsonSerializer
+                .SerializeAsync(buffer, Current, SerializerOptions, ct)
+                .ConfigureAwait(false);
 
-            File.Move(tmp, DefaultPath, overwrite: true);
+            var bytes = buffer.ToArray();
+            for (var attempt = 0; attempt < 5; attempt++)
+            {
+                try
+                {
+                    await File.WriteAllBytesAsync(DefaultPath, bytes, ct).ConfigureAwait(false);
+                    break;
+                }
+                catch (IOException) when (attempt < 4)
+                {
+                    await Task.Delay(100 * (attempt + 1), ct).ConfigureAwait(false);
+                }
+                catch (UnauthorizedAccessException) when (attempt < 4)
+                {
+                    await Task.Delay(100 * (attempt + 1), ct).ConfigureAwait(false);
+                }
+            }
         }
         finally
         {
