@@ -52,7 +52,7 @@ If you only edited `Earmark.Core` or `Earmark.Audio` you can build those individ
 - Settings: `%UserProfile%\Documents\Hoobi\Earmark\settings.json`
 - Logs: `%LocalAppData%\Earmark\logs\earmark-{yyyyMMdd-HHmmss}.log` (one per launch; file logger flushes per call)
 
-Rules and settings are intentionally kept in `Documents` so OneDrive backs them up across machines. Logs stay in `LocalAppData` because they're noisy churn that shouldn't sync. There's a one-shot legacy importer in both `JsonRuleStore` and `SettingsService` that copies `%LocalAppData%\Earmark\{rules,settings}.json` to the new location on first load if the new file doesn't yet exist - safe to delete the importer once everyone's migrated.
+Rules and settings live in `Documents` so OneDrive backs them up across machines. Logs stay in `LocalAppData` because they're noisy churn that shouldn't sync. Both stores write atomically with a 5-attempt retry loop to survive the OneDrive sync agent briefly holding the file.
 
 ## How routing actually works (what to know before changing the audio code)
 
@@ -64,7 +64,7 @@ The "per-app default endpoint" feature is undocumented Windows. Two distinct int
 
 The COM factory is **created once** and cached in `AudioPolicyService` - re-activating per call is slow enough to make the periodic timer freeze the UI thread. Per-app `Set` is preceded by `Get` and skipped if the persisted value already matches the target, which avoids the brief audio glitch from a redundant `SetPersistedDefaultAudioEndpoint`.
 
-The `RoutingApplier` keeps two dedupe caches: `_appliedSessionKeys` (per pid|rule|endpoint|flow) and `_appliedDefaults` (per flow). On a rule change, `OnRulesChanged` clears both and re-runs. On a default-device-changed notification, `OnDefaultsChanged` clears only `_appliedDefaults` and re-evaluates - this catches Windows reverting our pin or the user changing it manually. The 10-second timer is a safety net using `skipIfBusy: true`.
+`RoutingApplier` keeps a single dedupe set `_appliedSessionKeys` (per `pid|rule|endpoint|flow`). On a rule change, `OnRulesChanged` re-applies with `force: true`, which clears the set. Default-device dedupe is *not* cached: the Get-before-Set check inside `ApplyDefaultRole` short-circuits if the OS already has our target. `OnDefaultsChanged` therefore just calls `ApplyAllInternalAsync(force: false, skipIfBusy: true)` and lets that check do the work. The 10-second timer is a safety net (also `skipIfBusy: true`).
 
 ## Rule schema
 
@@ -74,21 +74,19 @@ Four types, single `DevicePattern` field per rule:
 |---|---|---|
 | `ApplicationOutput` | `AppPattern`, `DevicePattern` | Pin per-app render endpoint for matching processes |
 | `ApplicationInput` | `AppPattern`, `DevicePattern` | Pin per-app capture endpoint |
-| `DefaultOutput` | `DevicePattern` | Set system default render endpoint (Console + Multimedia + Communications) |
-| `DefaultInput` | `DevicePattern` | Set system default capture endpoint (all three roles) |
+| `DefaultOutput` | `DevicePattern`, at least one of `SetsDefault` / `SetsCommunications` | Set system default render endpoint. `SetsDefault` covers Console + Multimedia roles; `SetsCommunications` covers the Communications role. Both default to true. |
+| `DefaultInput` | `DevicePattern`, at least one of `SetsDefault` / `SetsCommunications` | Same as `DefaultOutput`, capture flow. |
 
 `AppPattern` is tested against **both** the process name and the full executable path; either match counts. Path is resolved via `QueryFullProcessImageName` (`PROCESS_QUERY_LIMITED_INFORMATION`), which works for almost all processes including anti-cheat-protected games. `Process.MainModule.FileName` does **not** work for those - don't reintroduce it.
 
-Rules apply in **list order** - top of the list wins. `RoutingRule.Priority` is a legacy field kept for JSON compat but not used.
-
-JSON migration: legacy `Application` rules become `ApplicationOutput` (and a paired `ApplicationInput` if the input pattern was set); legacy `DefaultDevice` rules split into one rule per filled slot. The migrator runs at load; the first save rewrites the file in the new schema. See `JsonRuleStore.MigrateRule`.
+Rules apply in **list order** - top of the list wins. There is no priority field; reorder the list to change precedence.
 
 ## UI architecture
 
 - `Program.Main` (custom, `DISABLE_XAML_GENERATED_MAIN`) handles single-instance via `Microsoft.Windows.AppLifecycle.AppInstance.FindOrRegisterForKey("Earmark.SingleInstance")`. A second launch redirects activation to the running process, which calls `App.RestoreFromBackground` -> `IWindowChromeManager.RestoreWindow`.
 - `App.OnLaunched` builds the generic host, loads settings + rules, starts the routing applier, attaches `WindowChromeManager` to `MainWindow`, then activates (or hides to tray if "Launch to tray" is on).
 - DI uses `Microsoft.Extensions.Hosting`. Pages and view-models are registered in `HostBuilderExtensions.ConfigureEarmark`.
-- Pages: `RulesPage` (inline editor - **no dialog**, click a rule to expand and edit, auto-saves 500ms after last keystroke), `SessionsPage`, `SettingsPage`. The Devices page was removed - everything routing-relevant is on Rules.
+- Pages live in `src/Earmark.App/Views/` (namespace `Earmark.App.Views`): `RulesPage` (inline editor - **no dialog**, click a rule to expand and edit, auto-saves 500ms after last keystroke), `SessionsPage`, `SettingsPage`. The Devices page was removed - everything routing-relevant is on Rules.
 - `RuleRow` is the per-rule view-model. It owns its own debounced `SaveAsync`. When the underlying rules list changes, `RulesViewModel.OnRulesChanged` calls `SyncFromRule` on each existing row in place (preserving expanded state) when the order is unchanged; only on add/delete/reorder does it rebuild `Items`.
 - Tray: `H.NotifyIcon.WinUI`. `WindowChromeManager` subclasses the window with `SetWindowSubclass` to intercept `WM_SYSCOMMAND/SC_MINIMIZE` for "minimize to tray", and handles `Closed` for "close to tray".
 
@@ -103,14 +101,103 @@ JSON migration: legacy `Application` rules become `ApplicationOutput` (and a pai
 - **Editor disposable analyzer rules**: `CA1001`, `CA1816`, `CA1848`, `CA1873` etc are silenced in `.editorconfig`. Don't add them back unless you also fix the call sites.
 - **`Microsoft.Win32.Registry`**: don't add as a separate package. Already provided by the windows TFM (`net10.0-windows10.0.26100.0`); adding the package triggers `NU1510`.
 
-## CI / release flow
+## Conventional commits & release-please hygiene
 
-- PR titles validated by `.github/workflows/pr-title-check.yaml` (conventional-commits regex). The workflow is required for release-please to work cleanly.
-- `release-please.yaml` runs on push to `main`. It needs **two** repo settings:
+All commits and PR titles MUST follow the [Conventional Commits](https://www.conventionalcommits.org/) specification, because release-please reads the history off `main` to compute the next version and generate the changelog. This repo is **not** associated with an Azure DevOps project, so commits and PRs DO NOT require an `AB#NNNNN` work-item suffix (in contrast to Nintex repos).
+
+### Required format
+
+```
+<type>[optional scope]: <description>
+
+[optional body]
+
+[optional footer(s)]
+```
+
+### Commit types
+
+| Type | Purpose | Version bump |
+|------|---------|-------------|
+| `feat` | New feature | Minor |
+| `fix` | Bug fix | Patch |
+| `perf` | Performance improvement | Patch |
+| `revert` | Revert a previous commit | Depends |
+| `docs` | Documentation only | None |
+| `style` | Formatting, no logic change | None |
+| `refactor` | Code change with no feature/fix | None |
+| `test` | Add/update tests | None |
+| `chore` | Maintenance, dependency bumps, tooling | None |
+| `build` | Build system / external deps | None |
+| `ci` | CI/CD pipeline changes | None |
+
+### Breaking changes (MAJOR bump)
+
+Either form works:
+
+- Add `!` after the type: `feat!: rename rule schema fields`
+- Or include a `BREAKING CHANGE:` footer in the body
+
+### Scope (optional)
+
+Use a parenthesised scope to narrow the area: `feat(rules): add device-present condition`, `fix(audio): release factory on shutdown`.
+
+### Examples
+
+Good:
+
+```
+feat: add device-present and device-missing conditions
+fix(routing): clear dedupe cache on rule change
+chore: bump CommunityToolkit.WinUI to 8.2.250402
+docs: document rule shadowing in CONTRIBUTING.md
+ci: enforce conventional-commit PR titles
+```
+
+Bad (don't use):
+
+```
+🐛 fix bug
+Fixed the lock issue
+WIP
+Update
+```
+
+### Notes
+
+- First line under 72 characters
+- Imperative mood ("add", not "adds" or "added")
+- No trailing period
+- **No emoji / no gitmoji.** They break the conventional-commit regex that release-please and `pr-title-check.yaml` use, so commits with a leading emoji do not produce changelog entries or version bumps. This overrides the gitmoji preference in the personal global instructions for this repo specifically.
+
+### Multi-change PRs (PR description format)
+
+This repo uses **squash merges**, so the PR description body becomes the commit message that release-please parses. To produce multiple changelog entries from a single PR, append additional conventional-commit footers at the **bottom** of the PR description body:
+
+```
+feat: add per-app input routing
+
+Optional body text explaining the PR.
+
+fix(audio): release COM factory on shutdown
+BREAKING-CHANGE: rename ApplicationOutput field "Priority" to "Order"
+test: cover the new RuleEvaluator shadow logic
+```
+
+- Each footer entry must follow the same `type(scope): description` format
+- `BREAKING-CHANGE:` (or `BREAKING CHANGE:`) triggers a MAJOR bump
+- Additional entries must appear **after** any free-form body text, not between paragraphs
+- Only `feat`, `fix`, `perf`, and `revert` produce changelog entries; `ci`, `test`, `docs`, `chore`, `build`, `style`, `refactor` do not
+- Each entry produces its own changelog line
+
+### Repo CI plumbing
+
+- [pr-title-check.yaml](.github/workflows/pr-title-check.yaml) validates the PR title against the conventional-commits regex. This workflow is required for release-please to work cleanly. The regex deliberately does NOT require an `AB#NNNNN` suffix.
+- [release-please.yaml](.github/workflows/release-please.yaml) runs on push to `main` and needs two repo settings:
   - Secret `RELEASE_PLEASE_APP_PRIVATE_KEY` (private key for the GitHub App that owns the release)
   - Variable `RELEASE_PLEASE_APP_ID` (the GitHub App's numeric App ID)
-- `version.txt` is the single source of truth for `<Version>` (read by `Directory.Build.props` via `System.IO.File.ReadAllText`). release-please bumps it.
-- Branch model: feature work on `dev`, PR to `main`, release-please drafts a release PR. Don't push directly to `main`.
+- [version.txt](version.txt) is the single source of truth for `<Version>` (read by [Directory.Build.props](Directory.Build.props) via `System.IO.File.ReadAllText`). release-please bumps it.
+- Branch model: feature work on `dev`, PR to `main`, release-please drafts a release PR off `main`. Don't push directly to `main`.
 
 ## Verifying behaviour after a change
 
