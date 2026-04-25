@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="Earmark.App.Views.SessionsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:vm="using:Earmark.App.ViewModels"
+    Background="Transparent">
+
+    <Grid Padding="{StaticResource PageHorizontalPadding}">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <StackPanel Orientation="Horizontal" Spacing="12" Margin="0,12,0,16">
+            <TextBlock Text="Sessions" Style="{StaticResource PageHeaderTextStyle}" />
+            <Button Content="Refresh" Command="{x:Bind ViewModel.RefreshCommand}" VerticalAlignment="Center" />
+            <Button Content="Reapply rules" Command="{x:Bind ViewModel.ReapplyAllCommand}" VerticalAlignment="Center" />
+        </StackPanel>
+
+        <ScrollViewer Grid.Row="1">
+            <ItemsRepeater ItemsSource="{x:Bind ViewModel.Items}">
+                <ItemsRepeater.Layout>
+                    <StackLayout Spacing="8" />
+                </ItemsRepeater.Layout>
+                <ItemsRepeater.ItemTemplate>
+                    <DataTemplate x:DataType="vm:SessionRow">
+                        <Border Style="{StaticResource SectionCardStyle}">
+                            <Grid ColumnSpacing="14">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Ellipse Width="10" Height="10" VerticalAlignment="Center"
+                                         Fill="{ThemeResource SystemFillColorSuccessBrush}"
+                                         Visibility="{x:Bind IsActive}" />
+                                <StackPanel Grid.Column="1" Spacing="2">
+                                    <TextBlock Text="{x:Bind Title}" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                                    <TextBlock Text="{x:Bind Subtitle}" Style="{StaticResource CaptionTextBlockStyle}" Opacity="0.7" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="2" HorizontalAlignment="Right" Spacing="2">
+                                    <TextBlock Text="Routed to" Style="{StaticResource CaptionTextBlockStyle}" Opacity="0.6" HorizontalAlignment="Right" />
+                                    <TextBlock Text="{x:Bind CurrentEndpointName}" Style="{StaticResource BodyTextBlockStyle}" HorizontalAlignment="Right" />
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </ItemsRepeater.ItemTemplate>
+            </ItemsRepeater>
+        </ScrollViewer>
+    </Grid>
+</Page>

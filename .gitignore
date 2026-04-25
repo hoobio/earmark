@@ -1,0 +1,43 @@
+# Build
+[Bb]in/
+[Oo]bj/
+[Oo]ut/
+[Ll]og/
+[Ll]ogs/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+ARM/
+ARM64/
+AnyCPU/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+.vs/
+.vscode/
+
+# Generated
+[Gg]enerated/
+*.g.cs
+*.g.i.cs
+
+# WinUI/MSIX
+AppPackages/
+BundleArtifacts/
+Package.StoreAssociation.xml
+_pkginfo.txt
+*.appx
+*.appxbundle
+*.msix
+*.msixbundle
+*.msixupload
+
+# Rider/JetBrains
+.idea/
+
+# Local config
+.env
+.env.local
+*.local

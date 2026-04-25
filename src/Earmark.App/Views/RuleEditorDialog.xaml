@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentDialog
+    x:Class="Earmark.App.Views.RuleEditorDialog"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:vm="using:Earmark.App.ViewModels"
+    xmlns:models="using:Earmark.Core.Models"
+    xmlns:ctrl="using:CommunityToolkit.WinUI.Controls"
+    mc:Ignorable="d"
+    Title="Routing rule"
+    PrimaryButtonText="Save"
+    CloseButtonText="Cancel"
+    DefaultButton="Primary"
+    PrimaryButtonClick="OnSaveClicked">
+
+    <ScrollViewer MaxHeight="560" Padding="0,8,0,0">
+        <StackPanel Spacing="12" Width="540">
+
+            <TextBox Header="Name (optional)" Text="{x:Bind Editor.Name, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
+            <ctrl:SettingsCard Header="Application match" Description="Regex against the chosen target.">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <ComboBox ItemsSource="{x:Bind Editor.AppMatchTargets}"
+                              SelectedItem="{x:Bind Editor.AppTarget, Mode=TwoWay}"
+                              MinWidth="160" />
+                </StackPanel>
+            </ctrl:SettingsCard>
+
+            <TextBox Header="App pattern (regex)"
+                     PlaceholderText="^chrome$  or  ^.*\\Spotify\\.exe$"
+                     Text="{x:Bind Editor.AppPattern, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+            <TextBlock Text="{x:Bind Editor.AppPatternError, Mode=OneWay}"
+                       Visibility="{x:Bind Editor.AppPatternError, Mode=OneWay, Converter={StaticResource NullableToVisibilityConverter}}"
+                       Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+                       Style="{StaticResource CaptionTextBlockStyle}" />
+
+            <Expander Header="App matches preview" IsExpanded="False">
+                <ItemsRepeater ItemsSource="{x:Bind Editor.AppMatches}">
+                    <ItemsRepeater.ItemTemplate>
+                        <DataTemplate x:DataType="vm:MatchPreviewItem">
+                            <Grid ColumnSpacing="8" Margin="0,4">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="{x:Bind Primary}" Style="{StaticResource BodyTextBlockStyle}" />
+                                <TextBlock Grid.Column="1" Text="{x:Bind Secondary}" Style="{StaticResource CaptionTextBlockStyle}" Opacity="0.6" />
+                            </Grid>
+                        </DataTemplate>
+                    </ItemsRepeater.ItemTemplate>
+                </ItemsRepeater>
+            </Expander>
+
+            <TextBox Header="Device pattern (regex)"
+                     PlaceholderText="Headphones|Speakers"
+                     Text="{x:Bind Editor.DevicePattern, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+            <TextBlock Text="{x:Bind Editor.DevicePatternError, Mode=OneWay}"
+                       Visibility="{x:Bind Editor.DevicePatternError, Mode=OneWay, Converter={StaticResource NullableToVisibilityConverter}}"
+                       Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+                       Style="{StaticResource CaptionTextBlockStyle}" />
+
+            <Expander Header="Device matches preview" IsExpanded="True">
+                <ItemsRepeater ItemsSource="{x:Bind Editor.DeviceMatches}">
+                    <ItemsRepeater.ItemTemplate>
+                        <DataTemplate x:DataType="vm:MatchPreviewItem">
+                            <Grid ColumnSpacing="8" Margin="0,4">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="{x:Bind Primary}" Style="{StaticResource BodyTextBlockStyle}" />
+                                <TextBlock Grid.Column="1" Text="{x:Bind Secondary}" Style="{StaticResource CaptionTextBlockStyle}" Opacity="0.6" />
+                            </Grid>
+                        </DataTemplate>
+                    </ItemsRepeater.ItemTemplate>
+                </ItemsRepeater>
+            </Expander>
+
+            <Grid ColumnSpacing="8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <ComboBox Header="Flow" ItemsSource="{x:Bind Editor.Flows}" SelectedItem="{x:Bind Editor.Flow, Mode=TwoWay}" HorizontalAlignment="Stretch" />
+                <ComboBox Grid.Column="1" Header="Role" ItemsSource="{x:Bind Editor.Roles}" SelectedItem="{x:Bind Editor.Role, Mode=TwoWay}" HorizontalAlignment="Stretch" />
+                <NumberBox Grid.Column="2" Header="Priority" Value="{x:Bind Editor.Priority, Mode=TwoWay}" Minimum="-1000" Maximum="1000" SpinButtonPlacementMode="Inline" />
+            </Grid>
+
+            <ToggleSwitch Header="Enabled" IsOn="{x:Bind Editor.Enabled, Mode=TwoWay}" />
+
+        </StackPanel>
+    </ScrollViewer>
+</ContentDialog>
