@@ -5,13 +5,13 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 
 namespace Earmark.App.Views;
 
 public sealed partial class RulesPage : Page
 {
     private readonly ILogger<RulesPage>? _logger;
-    private bool _editorOpen;
 
     public RulesPage(RulesViewModel viewModel)
     {
@@ -22,47 +22,31 @@ public sealed partial class RulesPage : Page
 
     public RulesViewModel ViewModel { get; }
 
-    private async void OnAddClicked(object sender, RoutedEventArgs e)
+    private void OnHeaderTapped(object sender, TappedRoutedEventArgs e)
     {
-        _logger?.LogInformation("Add rule clicked");
-        await OpenEditorAsync(null);
-    }
-
-    private async void OnRuleClicked(object sender, ItemClickEventArgs e)
-    {
-        if (e.ClickedItem is RuleRow row)
+        if (sender is FrameworkElement { DataContext: RuleRow row })
         {
-            _logger?.LogInformation("Rule clicked: {Id}", row.Id);
-            await OpenEditorAsync(row.Rule);
+            row.IsExpanded = !row.IsExpanded;
+            _logger?.LogInformation("Rule {Id} expanded={Expanded}", row.Id, row.IsExpanded);
         }
     }
 
-    private async Task OpenEditorAsync(RoutingRule? rule)
+    private async void OnDeleteClicked(object sender, RoutedEventArgs e)
     {
-        if (_editorOpen)
+        if (sender is FrameworkElement { Tag: RuleRow row })
         {
-            _logger?.LogWarning("OpenEditorAsync ignored: dialog already open");
-            return;
+            await ViewModel.DeleteCommand.ExecuteAsync(row);
         }
+    }
 
-        _editorOpen = true;
-        try
+    private void OnTypeChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (sender is ComboBox combo &&
+            combo.DataContext is RuleRow row &&
+            combo.SelectedItem is RuleTypeOption option &&
+            row.Type != option.Value)
         {
-            var editor = App.Current.Services.GetRequiredService<RuleEditorViewModel>();
-            editor.Load(rule);
-
-            var dialog = new RuleEditorDialog
-            {
-                XamlRoot = XamlRoot,
-                Editor = editor,
-            };
-
-            var result = await dialog.ShowAsync();
-            _logger?.LogInformation("Editor dialog closed: {Result}", result);
-        }
-        finally
-        {
-            _editorOpen = false;
+            row.Type = option.Value;
         }
     }
 }

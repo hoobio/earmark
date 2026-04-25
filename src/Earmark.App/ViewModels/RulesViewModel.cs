@@ -38,7 +38,7 @@ public partial class RulesViewModel : ObservableObject, IDisposable
         _endpoints = endpoints ?? throw new ArgumentNullException(nameof(endpoints));
         _dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
 
-        Items = new ObservableCollection<RuleRow>(_rules.Rules.Select(r => new RuleRow(r)));
+        Items = new ObservableCollection<RuleRow>(_rules.Rules.Select(BuildRow));
         Items.CollectionChanged += OnItemsCollectionChanged;
         _rules.RulesChanged += OnRulesChanged;
         _sessions.SessionsChanged += OnSessionsOrEndpointsChanged;
@@ -51,6 +51,29 @@ public partial class RulesViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     public partial RuleRow? Selected { get; set; }
 
+    private RuleRow BuildRow(RoutingRule rule) => new(rule, r => _rules.UpsertAsync(r));
+
+    [RelayCommand]
+    private async Task AddAsync()
+    {
+        var rule = new RoutingRule
+        {
+            Name = "New rule",
+            Type = RuleType.ApplicationOutput,
+            Enabled = true,
+        };
+
+        await _rules.UpsertAsync(rule);
+
+        // Find the newly added row and expand it.
+        var row = Items.FirstOrDefault(r => r.Id == rule.Id);
+        if (row is not null)
+        {
+            row.IsExpanded = true;
+            Selected = row;
+        }
+    }
+
     [RelayCommand]
     private async Task DeleteAsync(RuleRow? row)
     {
@@ -58,6 +81,11 @@ public partial class RulesViewModel : ObservableObject, IDisposable
         {
             return;
         }
+
+        // Cancel any pending debounced save before removing the rule, otherwise the save
+        // can fire after deletion and Upsert will re-add the rule.
+        row.CancelPendingSave();
+        row.Dispose();
 
         await _rules.DeleteAsync(row.Id);
     }
@@ -67,6 +95,7 @@ public partial class RulesViewModel : ObservableObject, IDisposable
     {
         await _applier.ApplyAllAsync(force: true);
     }
+
 
     private async void OnItemsCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
@@ -85,6 +114,9 @@ public partial class RulesViewModel : ObservableObject, IDisposable
     private void OnRulesChanged(object? sender, EventArgs e) =>
         _dispatcher.Enqueue(() =>
         {
+            // The rows are the source of truth while editing. Only rebuild Items when
+            // the structure (set of rules / order) actually changed - otherwise our own
+            // saves would round-trip and clobber whatever the user is mid-typing.
             if (SequenceMatches(Items, _rules.Rules))
             {
                 QueueMatchRefresh();
@@ -94,10 +126,15 @@ public partial class RulesViewModel : ObservableObject, IDisposable
             _suppressItemEvents = true;
             try
             {
+                foreach (var oldRow in Items)
+                {
+                    oldRow.Dispose();
+                }
+
                 Items.Clear();
                 foreach (var rule in _rules.Rules)
                 {
-                    Items.Add(new RuleRow(rule));
+                    Items.Add(BuildRow(rule));
                 }
             }
             finally
@@ -137,7 +174,9 @@ public partial class RulesViewModel : ObservableObject, IDisposable
         var (sessions, endpoints) = await Task.Run(() =>
         {
             var s = _sessions.GetSessions();
-            var e = _endpoints.GetEndpoints();
+            var e = _endpoints.GetEndpoints(EndpointFlow.Render)
+                .Concat(_endpoints.GetEndpoints(EndpointFlow.Capture))
+                .ToList();
             return (s, e);
         }, ct).ConfigureAwait(false);
 

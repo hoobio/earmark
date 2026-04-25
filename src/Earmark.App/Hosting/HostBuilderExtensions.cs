@@ -47,7 +47,6 @@ internal static class HostBuilderExtensions
         builder.Services.AddTransient<RulesViewModel>();
         builder.Services.AddTransient<SessionsViewModel>();
         builder.Services.AddTransient<SettingsViewModel>();
-        builder.Services.AddTransient<RuleEditorViewModel>();
 
         builder.Services.AddTransient<RulesPage>();
         builder.Services.AddTransient<SessionsPage>();
