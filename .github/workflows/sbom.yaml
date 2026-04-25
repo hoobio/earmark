@@ -13,6 +13,9 @@ permissions:
 env:
   # 5.1.0+ supports .slnx solution files; pinned to current stable.
   CYCLONEDX_DOTNET_VERSION: "6.1.1"
+  # Pin emitted spec to 1.6 - the default 1.7 isn't recognised by every
+  # Dependency-Track build yet.
+  CYCLONEDX_SPEC_VERSION: "1.6"
   DOTNET_SDK_VERSION: "10.0.x"
   SOLUTION_PATH: Earmark.slnx
   BOM_FILE: sbom.cdx.json
@@ -44,7 +47,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Path .sbom-out -Force | Out-Null
-          dotnet CycloneDX $env:SOLUTION_PATH --json --output .sbom-out --filename $env:BOM_FILE
+          dotnet CycloneDX $env:SOLUTION_PATH --spec-version $env:CYCLONEDX_SPEC_VERSION --json --output .sbom-out --filename $env:BOM_FILE
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Move-Item -Path ".sbom-out/$env:BOM_FILE" -Destination $env:BOM_FILE -Force
           Remove-Item .sbom-out -Recurse -Force
@@ -130,7 +133,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Path .sbom-out -Force | Out-Null
-          dotnet CycloneDX $env:SOLUTION_PATH --json --output .sbom-out --filename $env:BOM_FILE
+          dotnet CycloneDX $env:SOLUTION_PATH --spec-version $env:CYCLONEDX_SPEC_VERSION --json --output .sbom-out --filename $env:BOM_FILE
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Move-Item -Path ".sbom-out/$env:BOM_FILE" -Destination $env:BOM_FILE -Force
           Remove-Item .sbom-out -Recurse -Force
