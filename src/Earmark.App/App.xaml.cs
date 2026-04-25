@@ -67,6 +67,33 @@ public partial class App : Application
     {
         var logger = _host?.Services.GetService<ILogger<App>>();
         logger?.LogCritical(e.Exception, "Unhandled exception");
+        System.Diagnostics.Debug.WriteLine($"[Earmark] Unhandled: {e.Exception}");
+
+        if (_window?.Content?.XamlRoot is { } root)
+        {
+            _ = ShowErrorAsync(root, e.Exception);
+        }
+
         e.Handled = true;
+    }
+
+    private static async Task ShowErrorAsync(Microsoft.UI.Xaml.XamlRoot root, Exception ex)
+    {
+        try
+        {
+            var dialog = new Microsoft.UI.Xaml.Controls.ContentDialog
+            {
+                XamlRoot = root,
+                Title = "Earmark hit an error",
+                Content = ex.ToString(),
+                CloseButtonText = "Dismiss",
+            };
+
+            await dialog.ShowAsync();
+        }
+        catch
+        {
+            // Last-ditch silent swallow.
+        }
     }
 }

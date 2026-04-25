@@ -7,7 +7,7 @@
     xmlns:models="using:Earmark.Core.Models"
     Background="Transparent">
 
-    <Grid Padding="{StaticResource PageHorizontalPadding}">
+    <Grid Padding="{StaticResource PagePadding}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />

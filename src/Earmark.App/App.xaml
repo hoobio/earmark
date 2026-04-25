@@ -27,8 +27,7 @@
             <converters:NullableToVisibilityConverter x:Key="NullableToVisibilityConverter" />
             <converters:EnumToStringConverter x:Key="EnumToStringConverter" />
 
-            <x:Double x:Key="PageHorizontalPadding">28</x:Double>
-            <x:Double x:Key="PageVerticalPadding">20</x:Double>
+            <Thickness x:Key="PagePadding">28,12,28,20</Thickness>
 
             <Style x:Key="PageHeaderTextStyle" TargetType="TextBlock" BasedOn="{StaticResource TitleTextBlockStyle}">
                 <Setter Property="FontWeight" Value="SemiBold" />

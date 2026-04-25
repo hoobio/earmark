@@ -10,7 +10,7 @@
     mc:Ignorable="d"
     Background="Transparent">
 
-    <Grid Padding="{StaticResource PageHorizontalPadding}">
+    <Grid Padding="{StaticResource PagePadding}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />

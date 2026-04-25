@@ -27,13 +27,23 @@ public sealed partial class MainWindow : Window
 
         NavView.Loaded += (_, _) =>
         {
-            NavView.SelectedItem = NavView.MenuItems[0];
+            var first = (NavigationViewItem)NavView.MenuItems[0];
+            NavigateTo(first);
+            NavView.SelectedItem = first;
         };
     }
 
     private void NavView_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
     {
-        if (args.SelectedItem is not NavigationViewItem { Tag: string tag })
+        if (args.SelectedItem is NavigationViewItem item)
+        {
+            NavigateTo(item);
+        }
+    }
+
+    private void NavigateTo(NavigationViewItem item)
+    {
+        if (item.Tag is not string tag)
         {
             return;
         }
