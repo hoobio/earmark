@@ -19,11 +19,19 @@ namespace Earmark.Audio.Services;
 [SupportedOSPlatform("windows10.0.19041.0")]
 public sealed class AudioSessionService : IAudioSessionService, IDisposable
 {
+    private static readonly TimeSpan SafetyRefreshInterval = TimeSpan.FromMinutes(1);
+
     private readonly ILogger<AudioSessionService> _logger;
     private readonly IAudioEndpointService _endpoints;
     private readonly MMDeviceEnumerator _enumerator;
     private readonly Lock _gate = new();
+    private readonly Lock _cacheGate = new();
     private readonly Dictionary<string, SessionWatcher> _watchers = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Timer _safetyTimer;
+
+    private IReadOnlyList<AudioSession> _snapshot = Array.Empty<AudioSession>();
+    private volatile bool _dirty = true;
+    private bool _disposed;
 
     public AudioSessionService(ILogger<AudioSessionService> logger, IAudioEndpointService endpoints)
     {
@@ -32,12 +40,43 @@ public sealed class AudioSessionService : IAudioSessionService, IDisposable
         _enumerator = new MMDeviceEnumerator();
         _endpoints.EndpointsChanged += OnEndpointsChanged;
         AttachAll();
+        _safetyTimer = new Timer(_ => MarkDirty(), null, SafetyRefreshInterval, SafetyRefreshInterval);
     }
 
     public event EventHandler<AudioSessionEvent>? SessionAdded;
     public event EventHandler? SessionsChanged;
 
     public IReadOnlyList<AudioSession> GetSessions()
+    {
+        // Lazy rebuild: re-enumerate only if the cache has been marked dirty since the
+        // last build. Bursts of session events (volume changes, state flips) collapse
+        // into one rebuild on the next read.
+        while (_dirty)
+        {
+            lock (_cacheGate)
+            {
+                if (!_dirty)
+                {
+                    break;
+                }
+
+                _dirty = false;
+                try
+                {
+                    Volatile.Write(ref _snapshot, BuildSnapshot());
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Session cache rebuild failed; serving previous snapshot");
+                    break;
+                }
+            }
+        }
+
+        return Volatile.Read(ref _snapshot);
+    }
+
+    private List<AudioSession> BuildSnapshot()
     {
         var results = new List<AudioSession>();
         foreach (var device in _enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active))
@@ -65,6 +104,8 @@ public sealed class AudioSessionService : IAudioSessionService, IDisposable
         return results;
     }
 
+    private void MarkDirty() => _dirty = true;
+
     private void AttachAll()
     {
         lock (_gate)
@@ -89,6 +130,8 @@ public sealed class AudioSessionService : IAudioSessionService, IDisposable
                 }
             }
         }
+
+        MarkDirty();
     }
 
     private void OnEndpointsChanged(object? sender, EventArgs e)
@@ -99,11 +142,16 @@ public sealed class AudioSessionService : IAudioSessionService, IDisposable
 
     internal void RaiseAdded(AudioSession session)
     {
+        MarkDirty();
         SessionAdded?.Invoke(this, new AudioSessionEvent(session));
         SessionsChanged?.Invoke(this, EventArgs.Empty);
     }
 
-    internal void RaiseChanged() => SessionsChanged?.Invoke(this, EventArgs.Empty);
+    internal void RaiseChanged()
+    {
+        MarkDirty();
+        SessionsChanged?.Invoke(this, EventArgs.Empty);
+    }
 
     internal bool TryMap(AudioSessionControl session, string endpointId, out AudioSession mapped)
     {
@@ -168,6 +216,13 @@ public sealed class AudioSessionService : IAudioSessionService, IDisposable
 
     public void Dispose()
     {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        _safetyTimer.Dispose();
         _endpoints.EndpointsChanged -= OnEndpointsChanged;
         lock (_gate)
         {
