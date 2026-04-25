@@ -13,7 +13,7 @@
     <Company>Hoobi</Company>
     <Copyright>Copyright (c) Hoobi $([System.DateTime]::Now.Year)</Copyright>
     <NeutralLanguage>en-US</NeutralLanguage>
-    <Version>0.1.0</Version>
+    <Version>$([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)version.txt').Trim())</Version>
   </PropertyGroup>
 
 </Project>
