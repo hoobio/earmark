@@ -48,7 +48,11 @@ internal sealed class WindowChromeManager : IWindowChromeManager, IDisposable
         _appWindow = AppWindow.GetFromWindowId(Win32Interop.GetWindowIdFromWindow(_windowHandle));
         _presenter = _appWindow?.Presenter as OverlappedPresenter;
 
-        window.Closed += OnWindowClosed;
+        if (_appWindow is not null)
+        {
+            _appWindow.Closing += OnAppWindowClosing;
+        }
+
         InstallSubclass();
         SyncTrayIcon();
     }
@@ -86,7 +90,21 @@ internal sealed class WindowChromeManager : IWindowChromeManager, IDisposable
         Microsoft.UI.Xaml.Application.Current.Exit();
     }
 
-    private void OnSettingsChanged(object? sender, EventArgs e) => SyncTrayIcon();
+    private void OnSettingsChanged(object? sender, EventArgs e)
+    {
+        // SettingsService raises this after `ConfigureAwait(false)` so we may be
+        // off the UI thread. The tray icon is a XAML FrameworkElement and its
+        // constructor / Dispose must run on the dispatcher.
+        var dispatcher = _window?.DispatcherQueue;
+        if (dispatcher is null || dispatcher.HasThreadAccess)
+        {
+            SyncTrayIcon();
+        }
+        else
+        {
+            dispatcher.TryEnqueue(SyncTrayIcon);
+        }
+    }
 
     private void SyncTrayIcon()
     {
@@ -148,7 +166,10 @@ internal sealed class WindowChromeManager : IWindowChromeManager, IDisposable
         _trayIcon = icon;
     }
 
-    private void OnWindowClosed(object sender, WindowEventArgs args)
+    // AppWindow.Closing is the cancellable close event in WinUI 3.
+    // Window.Closed fires after the close is committed and its Handled flag does
+    // not cancel anything, so route through here instead.
+    private void OnAppWindowClosing(AppWindow sender, AppWindowClosingEventArgs args)
     {
         if (_exitRequested)
         {
@@ -157,7 +178,7 @@ internal sealed class WindowChromeManager : IWindowChromeManager, IDisposable
 
         if (_settings.Current.CloseToTray && _settings.Current.ShowTrayIcon)
         {
-            args.Handled = true;
+            args.Cancel = true;
             HideToTray();
         }
     }
@@ -190,9 +211,9 @@ internal sealed class WindowChromeManager : IWindowChromeManager, IDisposable
     public void Dispose()
     {
         _settings.SettingsChanged -= OnSettingsChanged;
-        if (_window is not null)
+        if (_appWindow is not null)
         {
-            _window.Closed -= OnWindowClosed;
+            _appWindow.Closing -= OnAppWindowClosing;
         }
 
         if (_subclassProc is not null && _windowHandle != 0)
