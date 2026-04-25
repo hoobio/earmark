@@ -105,12 +105,19 @@ public sealed class AudioEndpointService : IAudioEndpointService, IMMNotificatio
             IsDefaultCommunications: defaultCommsId is not null && string.Equals(device.ID, defaultCommsId, StringComparison.OrdinalIgnoreCase));
     }
 
+    public event EventHandler? DefaultsChanged;
+
     private void Raise() => EndpointsChanged?.Invoke(this, EventArgs.Empty);
+    private void RaiseDefaults()
+    {
+        EndpointsChanged?.Invoke(this, EventArgs.Empty);
+        DefaultsChanged?.Invoke(this, EventArgs.Empty);
+    }
 
     void IMMNotificationClient.OnDeviceStateChanged(string deviceId, DeviceState newState) => Raise();
     void IMMNotificationClient.OnDeviceAdded(string pwstrDeviceId) => Raise();
     void IMMNotificationClient.OnDeviceRemoved(string deviceId) => Raise();
-    void IMMNotificationClient.OnDefaultDeviceChanged(DataFlow flow, Role role, string defaultDeviceId) => Raise();
+    void IMMNotificationClient.OnDefaultDeviceChanged(DataFlow flow, Role role, string defaultDeviceId) => RaiseDefaults();
     void IMMNotificationClient.OnPropertyValueChanged(string pwstrDeviceId, PropertyKey key) { }
 
     public void Dispose()

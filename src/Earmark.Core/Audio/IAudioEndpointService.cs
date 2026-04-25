@@ -7,4 +7,5 @@ public interface IAudioEndpointService
     IReadOnlyList<AudioEndpoint> GetEndpoints(EndpointFlow flow = EndpointFlow.Render);
     AudioEndpoint? GetById(string id);
     event EventHandler? EndpointsChanged;
+    event EventHandler? DefaultsChanged;
 }

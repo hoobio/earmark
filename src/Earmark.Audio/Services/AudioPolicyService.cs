@@ -22,6 +22,8 @@ public sealed class AudioPolicyService : IAudioPolicyService
     private IAudioPolicyConfigFactoryWin11? _factoryWin11;
     private IAudioPolicyConfigFactoryWin10? _factoryWin10;
     private bool _factoryProbed;
+    private readonly Lock _policyConfigLock = new();
+    private IPolicyConfigVista? _policyConfig;
 
     public AudioPolicyService(ILogger<AudioPolicyService> logger)
     {
@@ -135,6 +137,87 @@ public sealed class AudioPolicyService : IAudioPolicyService
                 }
             });
         });
+    }
+
+    public bool SetSystemDefaultEndpoint(string endpointId, EndpointFlow flow, RoleScope role)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(endpointId);
+
+        var policy = EnsurePolicyConfig();
+        if (policy is null)
+        {
+            _logger.LogWarning("IPolicyConfigVista not available");
+            return false;
+        }
+
+        var rolesToSet = role switch
+        {
+            RoleScope.Multimedia => new[] { ERole.Multimedia },
+            RoleScope.Communications => new[] { ERole.Communications },
+            RoleScope.Console => new[] { ERole.Console },
+            RoleScope.Default => new[] { ERole.Console, ERole.Multimedia },
+            _ => new[] { ERole.Console, ERole.Multimedia, ERole.Communications },
+        };
+
+        var any = false;
+        foreach (var eRole in rolesToSet)
+        {
+            try
+            {
+                var hr = policy.SetDefaultEndpoint(endpointId, eRole);
+                if (hr >= 0)
+                {
+                    _logger.LogInformation(
+                        "SetDefaultEndpoint(flow={Flow}, role={Role}) -> {EndpointId} HR=0x{HR:X8}",
+                        flow, eRole, endpointId, (uint)hr);
+                    any = true;
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "SetDefaultEndpoint failed: flow={Flow} role={Role} endpoint={EndpointId} HR=0x{HR:X8}",
+                        flow, eRole, endpointId, (uint)hr);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "SetDefaultEndpoint threw for {EndpointId}", endpointId);
+            }
+        }
+
+        return any;
+    }
+
+    private IPolicyConfigVista? EnsurePolicyConfig()
+    {
+        if (_policyConfig is not null)
+        {
+            return _policyConfig;
+        }
+
+        lock (_policyConfigLock)
+        {
+            if (_policyConfig is not null)
+            {
+                return _policyConfig;
+            }
+
+            try
+            {
+                var instance = Activator.CreateInstance(Type.GetTypeFromCLSID(typeof(CPolicyConfigClient).GUID)!);
+                _policyConfig = instance as IPolicyConfigVista;
+                if (_policyConfig is null)
+                {
+                    _logger.LogWarning("PolicyConfigClient does not implement IPolicyConfigVista");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to create PolicyConfigClient");
+            }
+        }
+
+        return _policyConfig;
     }
 
     private static readonly string[] CandidateClassNames =

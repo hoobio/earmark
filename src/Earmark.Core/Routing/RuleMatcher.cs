@@ -4,32 +4,83 @@ using Earmark.Core.Models;
 
 namespace Earmark.Core.Routing;
 
-public sealed record RuleMatch(RoutingRule Rule, AudioEndpoint Endpoint);
+public enum DefaultRoleKind
+{
+    Default,
+    Communications,
+}
+
+public sealed record AppRouteMatch(RoutingRule Rule, AudioEndpoint Endpoint);
 
 public interface IRuleMatcher
 {
-    RuleMatch? FindMatch(AudioSession session, IReadOnlyList<RoutingRule> rules, IReadOnlyList<AudioEndpoint> endpoints);
+    AppRouteMatch? FindAppRoute(AudioSession session, EndpointFlow flow, IReadOnlyList<RoutingRule> rules, IReadOnlyList<AudioEndpoint> endpoints);
+
+    AudioEndpoint? FindDefaultDevice(EndpointFlow flow, DefaultRoleKind roleKind, IReadOnlyList<RoutingRule> rules, IReadOnlyList<AudioEndpoint> endpoints);
 }
 
 public sealed class RuleMatcher : IRuleMatcher
 {
-    public RuleMatch? FindMatch(AudioSession session, IReadOnlyList<RoutingRule> rules, IReadOnlyList<AudioEndpoint> endpoints)
+    public AppRouteMatch? FindAppRoute(AudioSession session, EndpointFlow flow, IReadOnlyList<RoutingRule> rules, IReadOnlyList<AudioEndpoint> endpoints)
     {
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(rules);
         ArgumentNullException.ThrowIfNull(endpoints);
 
-        foreach (var rule in rules.Where(r => r.Enabled && r.IsValid))
+        var requiredType = flow == EndpointFlow.Render
+            ? RuleType.ApplicationOutput
+            : RuleType.ApplicationInput;
+
+        foreach (var rule in rules)
         {
+            if (!rule.Enabled || !rule.IsValid || rule.Type != requiredType)
+            {
+                continue;
+            }
+
             if (!MatchesApp(rule, session))
             {
                 continue;
             }
 
-            var endpoint = MatchesEndpoint(rule, endpoints);
+            var endpoint = MatchEndpoint(rule.DevicePattern, flow, endpoints);
             if (endpoint is not null)
             {
-                return new RuleMatch(rule, endpoint);
+                return new AppRouteMatch(rule, endpoint);
+            }
+        }
+
+        return null;
+    }
+
+    public AudioEndpoint? FindDefaultDevice(EndpointFlow flow, DefaultRoleKind roleKind, IReadOnlyList<RoutingRule> rules, IReadOnlyList<AudioEndpoint> endpoints)
+    {
+        ArgumentNullException.ThrowIfNull(rules);
+        ArgumentNullException.ThrowIfNull(endpoints);
+
+        var requiredType = flow == EndpointFlow.Render
+            ? RuleType.DefaultOutput
+            : RuleType.DefaultInput;
+
+        foreach (var rule in rules)
+        {
+            if (!rule.Enabled || !rule.IsValid || rule.Type != requiredType)
+            {
+                continue;
+            }
+
+            var ruleAppliesToRole = roleKind == DefaultRoleKind.Default
+                ? rule.SetsDefault
+                : rule.SetsCommunications;
+            if (!ruleAppliesToRole)
+            {
+                continue;
+            }
+
+            var endpoint = MatchEndpoint(rule.DevicePattern, flow, endpoints);
+            if (endpoint is not null)
+            {
+                return endpoint;
             }
         }
 
@@ -43,12 +94,12 @@ public sealed class RuleMatcher : IRuleMatcher
             return false;
         }
 
-        var input = rule.AppMatchTarget switch
-        {
-            AppMatchTarget.ExecutablePath => session.ExecutablePath,
-            _ => session.ProcessName,
-        };
+        // Test both process name and full executable path; either match wins.
+        return TryMatch(regex, session.ProcessName) || TryMatch(regex, session.ExecutablePath);
+    }
 
+    private static bool TryMatch(Regex regex, string input)
+    {
         if (string.IsNullOrEmpty(input))
         {
             return false;
@@ -64,15 +115,15 @@ public sealed class RuleMatcher : IRuleMatcher
         }
     }
 
-    private static AudioEndpoint? MatchesEndpoint(RoutingRule rule, IReadOnlyList<AudioEndpoint> endpoints)
+    private static AudioEndpoint? MatchEndpoint(string pattern, EndpointFlow flow, IReadOnlyList<AudioEndpoint> endpoints)
     {
-        if (!RegexCache.TryGet(rule.DevicePattern, out var regex) || regex is null)
+        if (!RegexCache.TryGet(pattern, out var regex) || regex is null)
         {
             return null;
         }
 
         return endpoints
-            .Where(e => e.Flow == rule.Flow && e.State == EndpointState.Active)
+            .Where(e => e.Flow == flow && e.State == EndpointState.Active)
             .Where(e =>
             {
                 try

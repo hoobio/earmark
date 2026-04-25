@@ -62,6 +62,7 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
         _cts = new CancellationTokenSource();
         _sessions.SessionAdded += OnSessionAdded;
         _rules.RulesChanged += OnRulesChanged;
+        _endpoints.DefaultsChanged += OnDefaultsChanged;
 
         _ = Task.Run(async () =>
         {
@@ -113,16 +114,10 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
                 _logger.LogInformation("ApplyAll: forced re-apply, cache cleared");
             }
 
-            await Task.Run(async () =>
+            await Task.Run(() =>
             {
-                var sessions = _sessions.GetSessions();
-                _logger.LogInformation("ApplyAll: {Count} sessions, {RuleCount} rules", sessions.Count, _rules.Rules.Count);
-                foreach (var session in sessions)
-                {
-                    _logger.LogDebug("Session: pid={Pid} name='{Name}' path='{Path}' state={State}",
-                        session.ProcessId, session.ProcessName, session.ExecutablePath, session.State);
-                    await ApplyAsync(session).ConfigureAwait(false);
-                }
+                ApplyDefaultDevices();
+                ApplyApplicationsToSessions();
             }).ConfigureAwait(false);
         }
         finally
@@ -135,65 +130,146 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
     {
         ArgumentNullException.ThrowIfNull(session);
 
-        var endpoints = _endpoints.GetEndpoints(EndpointFlow.Render);
+        var renderEndpoints = _endpoints.GetEndpoints(EndpointFlow.Render);
+        var captureEndpoints = _endpoints.GetEndpoints(EndpointFlow.Capture);
 
-        var match = _matcher.FindMatch(session, _rules.Rules, endpoints);
-        if (match is null)
+        ApplyAppForFlow(session, EndpointFlow.Render, renderEndpoints);
+        ApplyAppForFlow(session, EndpointFlow.Capture, captureEndpoints);
+        return Task.FromResult<AppliedRoute?>(null);
+    }
+
+    private void ApplyApplicationsToSessions()
+    {
+        var sessions = _sessions.GetSessions();
+        if (sessions.Count == 0)
         {
-            _logger.LogDebug(
-                "No rule matched session pid={Pid} name='{Name}' path='{Path}'",
-                session.ProcessId, session.ProcessName, session.ExecutablePath);
-            return Task.FromResult<AppliedRoute?>(null);
+            return;
         }
 
-        var key = BuildKey(session, match);
+        var renderEndpoints = _endpoints.GetEndpoints(EndpointFlow.Render);
+        var captureEndpoints = _endpoints.GetEndpoints(EndpointFlow.Capture);
+
+        _logger.LogInformation("ApplyAll: {Count} sessions, {RuleCount} rules", sessions.Count, _rules.Rules.Count);
+
+        foreach (var session in sessions)
+        {
+            _logger.LogDebug("Session: pid={Pid} name='{Name}' path='{Path}' state={State}",
+                session.ProcessId, session.ProcessName, session.ExecutablePath, session.State);
+
+            ApplyAppForFlow(session, EndpointFlow.Render, renderEndpoints);
+            ApplyAppForFlow(session, EndpointFlow.Capture, captureEndpoints);
+        }
+    }
+
+    private void ApplyAppForFlow(AudioSession session, EndpointFlow flow, IReadOnlyList<AudioEndpoint> endpoints)
+    {
+        var match = _matcher.FindAppRoute(session, flow, _rules.Rules, endpoints);
+        if (match is null)
+        {
+            return;
+        }
+
+        var pidString = session.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        ApplyAppFlow(session, match.Rule, match.Endpoint, pidString, flow);
+    }
+
+    private void ApplyAppFlow(AudioSession session, RoutingRule rule, AudioEndpoint endpoint, string pidString, EndpointFlow flow)
+    {
+        var key = $"app|{session.ProcessId}|{rule.Id}|{endpoint.Id}|{flow}";
         lock (_appliedGate)
         {
             if (!_appliedSessionKeys.Add(key))
             {
-                _logger.LogDebug("Skip re-apply for {Process} (pid {Pid}) -> already pinned to {Endpoint}",
-                    session.ProcessName, session.ProcessId, match.Endpoint.DisplayName);
-                return Task.FromResult<AppliedRoute?>(null);
+                _logger.LogDebug("Skip re-apply for {Process} (pid {Pid}, {Flow}) -> already pinned to {Endpoint}",
+                    session.ProcessName, session.ProcessId, flow, endpoint.DisplayName);
+                return;
             }
         }
 
         try
         {
-            _policy.SetDefaultEndpointForApp(
-                session.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                match.Endpoint.Id,
-                match.Rule.Role,
-                match.Rule.Flow);
-
+            _policy.SetDefaultEndpointForApp(pidString, endpoint.Id, RoleScope.All, flow);
             var applied = new AppliedRoute(
-                match.Rule.Id, match.Rule.Name, session.SessionIdentifier, session.ProcessName,
-                match.Endpoint.Id, match.Endpoint.DisplayName,
+                rule.Id, rule.Name, session.SessionIdentifier, session.ProcessName,
+                endpoint.Id, endpoint.DisplayName,
                 DateTimeOffset.UtcNow, true, null);
             RouteApplied?.Invoke(this, applied);
-            _logger.LogInformation("Applied rule {Rule} to {Process} (pid {Pid}) -> {Endpoint}",
-                match.Rule.Name, session.ProcessName, session.ProcessId, match.Endpoint.DisplayName);
-            return Task.FromResult<AppliedRoute?>(applied);
+            _logger.LogInformation("Applied rule {Rule} to {Process} (pid {Pid}, {Flow}) -> {Endpoint}",
+                rule.Name, session.ProcessName, session.ProcessId, flow, endpoint.DisplayName);
         }
         catch (Exception ex)
         {
-            // On failure, allow retry on next tick.
             lock (_appliedGate)
             {
                 _appliedSessionKeys.Remove(key);
             }
 
-            var applied = new AppliedRoute(
-                match.Rule.Id, match.Rule.Name, session.SessionIdentifier, session.ProcessName,
-                match.Endpoint.Id, match.Endpoint.DisplayName,
-                DateTimeOffset.UtcNow, false, ex.Message);
-            RouteApplied?.Invoke(this, applied);
-            _logger.LogError(ex, "Apply failed for {Process}", session.ProcessName);
-            return Task.FromResult<AppliedRoute?>(applied);
+            _logger.LogError(ex, "Apply failed for {Process} ({Flow})", session.ProcessName, flow);
         }
     }
 
-    private static string BuildKey(AudioSession session, RuleMatch match) =>
-        $"{session.ProcessId}|{match.Rule.Id}|{match.Endpoint.Id}|{match.Rule.Role}|{match.Rule.Flow}";
+    private void ApplyDefaultDevices()
+    {
+        var hasOutputDefault = false;
+        var hasInputDefault = false;
+        foreach (var r in _rules.Rules)
+        {
+            if (!r.Enabled || !r.IsValid)
+            {
+                continue;
+            }
+
+            if (r.Type == RuleType.DefaultOutput) hasOutputDefault = true;
+            if (r.Type == RuleType.DefaultInput) hasInputDefault = true;
+        }
+
+        if (hasOutputDefault)
+        {
+            ApplyDefaultFlow(EndpointFlow.Render, _endpoints.GetEndpoints(EndpointFlow.Render));
+        }
+
+        if (hasInputDefault)
+        {
+            ApplyDefaultFlow(EndpointFlow.Capture, _endpoints.GetEndpoints(EndpointFlow.Capture));
+        }
+    }
+
+    private void ApplyDefaultFlow(EndpointFlow flow, IReadOnlyList<AudioEndpoint> endpoints)
+    {
+        ApplyDefaultRole(flow, DefaultRoleKind.Default, RoleScope.Default, endpoints,
+            current => endpoints.FirstOrDefault(e => e.Flow == flow && e.IsDefault));
+
+        ApplyDefaultRole(flow, DefaultRoleKind.Communications, RoleScope.Communications, endpoints,
+            current => endpoints.FirstOrDefault(e => e.Flow == flow && e.IsDefaultCommunications));
+    }
+
+    private void ApplyDefaultRole(
+        EndpointFlow flow,
+        DefaultRoleKind roleKind,
+        RoleScope scope,
+        IReadOnlyList<AudioEndpoint> endpoints,
+        Func<object?, AudioEndpoint?> currentResolver)
+    {
+        var match = _matcher.FindDefaultDevice(flow, roleKind, _rules.Rules, endpoints);
+        if (match is null)
+        {
+            return;
+        }
+
+        // Get-before-Set: skip if the OS already has our target for this role.
+        var current = currentResolver(null);
+        if (current is not null && string.Equals(current.Id, match.Id, StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogDebug("Skip Set {Flow}/{Role}: OS already has {Endpoint}", flow, roleKind, match.DisplayName);
+            return;
+        }
+
+        var success = _policy.SetSystemDefaultEndpoint(match.Id, flow, scope);
+        if (success)
+        {
+            _logger.LogInformation("Applied default-device rule -> {Flow}/{Role} = {Endpoint}", flow, roleKind, match.DisplayName);
+        }
+    }
 
     private async void OnSessionAdded(object? sender, AudioSessionEvent e)
     {
@@ -218,6 +294,21 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
         catch (Exception ex)
         {
             _logger.LogError(ex, "Reapply on rules change failed");
+        }
+    }
+
+    private async void OnDefaultsChanged(object? sender, EventArgs e)
+    {
+        try
+        {
+            // The Set itself triggers OnDefaultDeviceChanged. Use skipIfBusy so the in-flight
+            // Apply finishes without us stacking another evaluation; the Get-before-Set check
+            // in ApplyDefaultFlow short-circuits when the OS already has our target.
+            await ApplyAllInternalAsync(force: false, skipIfBusy: true).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Default-device-changed handler failed");
         }
     }
 
@@ -250,6 +341,7 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
         _timer = null;
         _sessions.SessionAdded -= OnSessionAdded;
         _rules.RulesChanged -= OnRulesChanged;
+        _endpoints.DefaultsChanged -= OnDefaultsChanged;
         _cts?.Dispose();
         _cts = null;
         _started = false;
