@@ -34,10 +34,16 @@ public sealed class AudioEndpointService : IAudioEndpointService, IMMNotificatio
         var defaultComms = TryGetDefault(dataFlow, Role.Communications);
 
         var list = new List<AudioEndpoint>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var device in _enumerator.EnumerateAudioEndPoints(dataFlow, DeviceState.All))
         {
             try
             {
+                if (!seen.Add(device.ID))
+                {
+                    continue;
+                }
+
                 list.Add(Map(device, defaultMultimedia, defaultComms));
             }
             catch (Exception ex)

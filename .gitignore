@@ -41,3 +41,6 @@ _pkginfo.txt
 .env
 .env.local
 *.local
+
+# Local Claude cache
+.claude/

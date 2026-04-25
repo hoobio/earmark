@@ -19,11 +19,8 @@
         </StackPanel>
 
         <ScrollViewer Grid.Row="1">
-            <StackPanel Spacing="20">
-
-                <StackPanel Spacing="8">
-                    <TextBlock Text="Output" Style="{StaticResource SubtitleTextBlockStyle}" />
-                    <ItemsRepeater ItemsSource="{x:Bind ViewModel.Render}">
+            <StackPanel Spacing="8">
+                <ItemsRepeater ItemsSource="{x:Bind ViewModel.Render}">
                         <ItemsRepeater.Layout>
                             <StackLayout Spacing="8" />
                         </ItemsRepeater.Layout>
@@ -59,38 +56,6 @@
                             </DataTemplate>
                         </ItemsRepeater.ItemTemplate>
                     </ItemsRepeater>
-                </StackPanel>
-
-                <StackPanel Spacing="8">
-                    <TextBlock Text="Input" Style="{StaticResource SubtitleTextBlockStyle}" />
-                    <ItemsRepeater ItemsSource="{x:Bind ViewModel.Capture}">
-                        <ItemsRepeater.Layout>
-                            <StackLayout Spacing="8" />
-                        </ItemsRepeater.Layout>
-                        <ItemsRepeater.ItemTemplate>
-                            <DataTemplate x:DataType="models:AudioEndpoint">
-                                <Border Style="{StaticResource SectionCardStyle}">
-                                    <Grid ColumnSpacing="12">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <FontIcon Glyph="&#xE720;" FontSize="20" />
-                                        <StackPanel Grid.Column="1" Spacing="2">
-                                            <TextBlock Text="{x:Bind FriendlyName}" Style="{StaticResource BodyStrongTextBlockStyle}" />
-                                            <TextBlock Text="{x:Bind DeviceDescription}" Style="{StaticResource CaptionTextBlockStyle}" Opacity="0.7" />
-                                        </StackPanel>
-                                        <Border Grid.Column="2" Background="{ThemeResource SubtleFillColorSecondaryBrush}" CornerRadius="4" Padding="6,2">
-                                            <TextBlock Text="{x:Bind State}" Style="{StaticResource CaptionTextBlockStyle}" />
-                                        </Border>
-                                    </Grid>
-                                </Border>
-                            </DataTemplate>
-                        </ItemsRepeater.ItemTemplate>
-                    </ItemsRepeater>
-                </StackPanel>
-
             </StackPanel>
         </ScrollViewer>
     </Grid>

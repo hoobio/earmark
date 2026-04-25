@@ -1,5 +1,8 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Runtime.Versioning;
+
+using Earmark.Audio.Interop;
 
 using Earmark.Core.Audio;
 using Earmark.Core.Models;
@@ -134,6 +137,8 @@ public sealed class AudioSessionService : IAudioSessionService, IDisposable
         }
     }
 
+    private static readonly ConcurrentDictionary<uint, (string Name, string Path)> ProcessInfoCache = new();
+
     private static (string Name, string Path) ResolveProcess(uint pid)
     {
         if (pid == 0)
@@ -141,26 +146,24 @@ public sealed class AudioSessionService : IAudioSessionService, IDisposable
             return ("System", string.Empty);
         }
 
-        try
+        return ProcessInfoCache.GetOrAdd(pid, static p =>
         {
-            using var process = Process.GetProcessById((int)pid);
-            var name = process.ProcessName;
-            string path;
+            var path = ProcessPath.TryGet(p);
+            string name;
             try
             {
-                path = process.MainModule?.FileName ?? string.Empty;
+                using var process = Process.GetProcessById((int)p);
+                name = process.ProcessName;
             }
             catch
             {
-                path = string.Empty;
+                name = string.IsNullOrEmpty(path)
+                    ? p.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                    : System.IO.Path.GetFileNameWithoutExtension(path);
             }
 
             return (name, path);
-        }
-        catch
-        {
-            return (pid.ToString(System.Globalization.CultureInfo.InvariantCulture), string.Empty);
-        }
+        });
     }
 
     public void Dispose()
@@ -185,10 +188,13 @@ public sealed class AudioSessionService : IAudioSessionService, IDisposable
         private readonly AudioSessionService _owner;
         private readonly NotificationClient _notify;
 
+        private readonly string _deviceId;
+
         public SessionWatcher(MMDevice device, AudioSessionService owner)
         {
             _device = device;
             _owner = owner;
+            _deviceId = device.ID;
             var manager = device.AudioSessionManager;
             manager.RefreshSessions();
             _notify = new NotificationClient(this);
@@ -201,8 +207,11 @@ public sealed class AudioSessionService : IAudioSessionService, IDisposable
             {
                 var control = new AudioSessionControl(newSession);
                 control.RegisterEventClient(this);
-                if (_owner.TryMap(control, _device.ID, out var mapped))
+                if (_owner.TryMap(control, _deviceId, out var mapped))
                 {
+                    _owner._logger.LogInformation(
+                        "OnSessionCreated: pid={Pid} name='{Name}' path='{Path}'",
+                        mapped.ProcessId, mapped.ProcessName, mapped.ExecutablePath);
                     _owner.RaiseAdded(mapped);
                 }
             }

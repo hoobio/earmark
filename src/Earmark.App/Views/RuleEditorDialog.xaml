@@ -13,7 +13,8 @@
     PrimaryButtonText="Save"
     CloseButtonText="Cancel"
     DefaultButton="Primary"
-    PrimaryButtonClick="OnSaveClicked">
+    PrimaryButtonClick="OnSaveClicked"
+    CloseButtonClick="OnCancelClicked">
 
     <ScrollViewer MaxHeight="560" Padding="0,8,0,0">
         <StackPanel Spacing="12" Width="540">
@@ -78,16 +79,7 @@
                 </ItemsRepeater>
             </Expander>
 
-            <Grid ColumnSpacing="8">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="*" />
-                </Grid.ColumnDefinitions>
-                <ComboBox Header="Flow" ItemsSource="{x:Bind Editor.Flows}" SelectedItem="{x:Bind Editor.Flow, Mode=TwoWay}" HorizontalAlignment="Stretch" />
-                <ComboBox Grid.Column="1" Header="Role" ItemsSource="{x:Bind Editor.Roles}" SelectedItem="{x:Bind Editor.Role, Mode=TwoWay}" HorizontalAlignment="Stretch" />
-                <NumberBox Grid.Column="2" Header="Priority" Value="{x:Bind Editor.Priority, Mode=TwoWay}" Minimum="-1000" Maximum="1000" SpinButtonPlacementMode="Inline" />
-            </Grid>
+            <NumberBox Header="Priority" Value="{x:Bind Editor.Priority, Mode=TwoWay}" Minimum="-1000" Maximum="1000" SpinButtonPlacementMode="Inline" HorizontalAlignment="Left" MinWidth="160" />
 
             <ToggleSwitch Header="Enabled" IsOn="{x:Bind Editor.Enabled, Mode=TwoWay}" />
 

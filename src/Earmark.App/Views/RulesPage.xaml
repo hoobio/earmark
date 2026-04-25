@@ -60,14 +60,9 @@
                                     <TextBlock Text="{x:Bind DevicePattern}" Style="{StaticResource CaptionTextBlockStyle}" Opacity="0.85" />
                                 </StackPanel>
                             </StackPanel>
-                            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                                <Border Background="{ThemeResource SubtleFillColorSecondaryBrush}" CornerRadius="4" Padding="6,2">
-                                    <TextBlock Text="{x:Bind Role}" Style="{StaticResource CaptionTextBlockStyle}" />
-                                </Border>
-                                <Border Background="{ThemeResource SubtleFillColorSecondaryBrush}" CornerRadius="4" Padding="6,2">
-                                    <TextBlock Text="{x:Bind Flow}" Style="{StaticResource CaptionTextBlockStyle}" />
-                                </Border>
-                            </StackPanel>
+                            <Border Grid.Column="2" Background="{ThemeResource SubtleFillColorSecondaryBrush}" CornerRadius="4" Padding="8,3" VerticalAlignment="Center">
+                                <TextBlock Text="{x:Bind AppMatchTarget}" Style="{StaticResource CaptionTextBlockStyle}" />
+                            </Border>
                         </Grid>
                     </Border>
                 </DataTemplate>

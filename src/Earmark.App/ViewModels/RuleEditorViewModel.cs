@@ -2,8 +2,8 @@ using System.Collections.ObjectModel;
 using System.Text.RegularExpressions;
 
 using CommunityToolkit.Mvvm.ComponentModel;
-using CommunityToolkit.Mvvm.Input;
 
+using Earmark.App.Services;
 using Earmark.Core.Audio;
 using Earmark.Core.Models;
 using Earmark.Core.Services;
@@ -15,13 +15,22 @@ public partial class RuleEditorViewModel : ObservableObject
     private readonly IRulesService _rules;
     private readonly IAudioEndpointService _endpoints;
     private readonly IAudioSessionService _sessions;
-    private RoutingRule _model;
+    private readonly IDispatcherQueueProvider _dispatcher;
 
-    public RuleEditorViewModel(IRulesService rules, IAudioEndpointService endpoints, IAudioSessionService sessions)
+    private RoutingRule _model;
+    private List<AudioEndpoint> _endpointSnapshot = new();
+    private List<AudioSession> _sessionSnapshot = new();
+
+    public RuleEditorViewModel(
+        IRulesService rules,
+        IAudioEndpointService endpoints,
+        IAudioSessionService sessions,
+        IDispatcherQueueProvider dispatcher)
     {
         _rules = rules ?? throw new ArgumentNullException(nameof(rules));
         _endpoints = endpoints ?? throw new ArgumentNullException(nameof(endpoints));
         _sessions = sessions ?? throw new ArgumentNullException(nameof(sessions));
+        _dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
         _model = new RoutingRule();
         AppMatchTargets = Enum.GetValues<AppMatchTarget>().ToArray();
         Roles = Enum.GetValues<RoleScope>().ToArray();
@@ -52,11 +61,11 @@ public partial class RuleEditorViewModel : ObservableObject
     public partial int Priority { get; set; }
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsAppValid))]
+    [NotifyPropertyChangedFor(nameof(IsAppValid), nameof(CanSave))]
     public partial string AppPattern { get; set; }
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsDeviceValid))]
+    [NotifyPropertyChangedFor(nameof(IsDeviceValid), nameof(CanSave))]
     public partial string DevicePattern { get; set; }
 
     [ObservableProperty]
@@ -69,9 +78,11 @@ public partial class RuleEditorViewModel : ObservableObject
     public partial EndpointFlow Flow { get; set; }
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsAppValid), nameof(CanSave))]
     public partial string? AppPatternError { get; set; }
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsDeviceValid), nameof(CanSave))]
     public partial string? DevicePatternError { get; set; }
 
     public bool IsAppValid => string.IsNullOrEmpty(AppPatternError);
@@ -102,6 +113,9 @@ public partial class RuleEditorViewModel : ObservableObject
                 Flow = rule.Flow,
             };
 
+        _sessionSnapshot = new();
+        _endpointSnapshot = new();
+
         Name = _model.Name;
         Enabled = _model.Enabled;
         Priority = _model.Priority;
@@ -110,7 +124,27 @@ public partial class RuleEditorViewModel : ObservableObject
         AppTarget = _model.AppMatchTarget;
         Role = _model.Role;
         Flow = _model.Flow;
-        RefreshPreviews();
+
+        _ = LoadSnapshotsAsync(_model.Flow);
+    }
+
+    private async Task LoadSnapshotsAsync(EndpointFlow flow)
+    {
+        var (sessions, endpoints) = await Task.Run(() =>
+        {
+            var s = _sessions.GetSessions().ToList();
+            var e = _endpoints.GetEndpoints(flow)
+                .Where(x => x.State == EndpointState.Active)
+                .ToList();
+            return (s, e);
+        }).ConfigureAwait(false);
+
+        _dispatcher.Enqueue(() =>
+        {
+            _sessionSnapshot = sessions;
+            _endpointSnapshot = endpoints;
+            RefreshPreviews();
+        });
     }
 
     public RoutingRule ToRule() =>
@@ -127,12 +161,7 @@ public partial class RuleEditorViewModel : ObservableObject
             Flow = Flow,
         };
 
-    [RelayCommand(CanExecute = nameof(CanSave))]
-    private async Task SaveAsync()
-    {
-        var rule = ToRule();
-        await _rules.UpsertAsync(rule);
-    }
+    public Task SaveAsync() => _rules.UpsertAsync(ToRule());
 
     partial void OnAppPatternChanged(string value)
     {
@@ -148,7 +177,20 @@ public partial class RuleEditorViewModel : ObservableObject
 
     partial void OnAppTargetChanged(AppMatchTarget value) => RefreshAppMatches();
 
-    partial void OnFlowChanged(EndpointFlow value) => RefreshDeviceMatches();
+    partial void OnFlowChanged(EndpointFlow value) => _ = ReloadEndpointsAsync(value);
+
+    private async Task ReloadEndpointsAsync(EndpointFlow flow)
+    {
+        var endpoints = await Task.Run(() =>
+            _endpoints.GetEndpoints(flow).Where(e => e.State == EndpointState.Active).ToList())
+            .ConfigureAwait(false);
+
+        _dispatcher.Enqueue(() =>
+        {
+            _endpointSnapshot = endpoints;
+            RefreshDeviceMatches();
+        });
+    }
 
     private static string? ValidateRegex(string pattern)
     {
@@ -192,10 +234,17 @@ public partial class RuleEditorViewModel : ObservableObject
             return;
         }
 
-        foreach (var session in _sessions.GetSessions())
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var session in _sessionSnapshot)
         {
             var input = AppTarget == AppMatchTarget.ExecutablePath ? session.ExecutablePath : session.ProcessName;
-            if (!string.IsNullOrEmpty(input) && regex.IsMatch(input))
+            if (string.IsNullOrEmpty(input) || !regex.IsMatch(input))
+            {
+                continue;
+            }
+
+            var key = $"{input}\0{session.DisplayName}";
+            if (seen.Add(key))
             {
                 AppMatches.Add(new MatchPreviewItem(input, session.DisplayName));
             }
@@ -220,12 +269,17 @@ public partial class RuleEditorViewModel : ObservableObject
             return;
         }
 
-        foreach (var endpoint in _endpoints.GetEndpoints(Flow))
+        var groups = _endpointSnapshot
+            .Where(e => regex.IsMatch(e.FriendlyName) || regex.IsMatch(e.DisplayName))
+            .GroupBy(e => $"{e.FriendlyName}\0{e.DeviceDescription}", StringComparer.OrdinalIgnoreCase);
+
+        foreach (var group in groups)
         {
-            if (regex.IsMatch(endpoint.FriendlyName) || regex.IsMatch(endpoint.DisplayName))
-            {
-                DeviceMatches.Add(new MatchPreviewItem(endpoint.FriendlyName, endpoint.DisplayName));
-            }
+            var first = group.First();
+            var count = group.Count();
+            var description = string.IsNullOrEmpty(first.DeviceDescription) ? "endpoint" : first.DeviceDescription;
+            var secondary = count > 1 ? $"{description} ({count} endpoints match)" : description;
+            DeviceMatches.Add(new MatchPreviewItem(first.FriendlyName, secondary));
         }
     }
 }

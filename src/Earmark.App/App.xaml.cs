@@ -17,6 +17,7 @@ public partial class App : Application
 {
     private IHost? _host;
     private MainWindow? _window;
+    private ILogger<App>? _logger;
 
     public App()
     {
@@ -35,12 +36,27 @@ public partial class App : Application
             .ConfigureEarmark()
             .Build();
 
-        await _host.Services.GetRequiredService<IRulesService>().LoadAsync();
-        _host.Services.GetRequiredService<IRoutingApplier>().Start();
+        _logger = _host.Services.GetRequiredService<ILogger<App>>();
+        _logger.LogInformation("Earmark starting; log file: {LogPath}", HostBuilderExtensions.CurrentLogPath);
 
-        _window = _host.Services.GetRequiredService<MainWindow>();
-        _window.Closed += async (_, _) => await DisposeHostAsync();
-        _window.Activate();
+        try
+        {
+            await _host.Services.GetRequiredService<IRulesService>().LoadAsync();
+            _logger.LogInformation("Rules loaded");
+
+            _host.Services.GetRequiredService<IRoutingApplier>().Start();
+            _logger.LogInformation("Routing applier started");
+
+            _window = _host.Services.GetRequiredService<MainWindow>();
+            _window.Closed += async (_, _) => await DisposeHostAsync();
+            _window.Activate();
+            _logger.LogInformation("Main window activated");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogCritical(ex, "Startup failed");
+            throw;
+        }
     }
 
     private async Task DisposeHostAsync()
@@ -49,6 +65,8 @@ public partial class App : Application
         {
             return;
         }
+
+        _logger?.LogInformation("Shutting down host");
 
         try
         {
@@ -65,8 +83,7 @@ public partial class App : Application
 
     private void OnUnhandledException(object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs e)
     {
-        var logger = _host?.Services.GetService<ILogger<App>>();
-        logger?.LogCritical(e.Exception, "Unhandled exception");
+        _logger?.LogCritical(e.Exception, "Unhandled exception");
         System.Diagnostics.Debug.WriteLine($"[Earmark] Unhandled: {e.Exception}");
 
         if (_window?.Content?.XamlRoot is { } root)

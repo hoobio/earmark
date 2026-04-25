@@ -23,6 +23,9 @@ public sealed class AudioPolicyService : IAudioPolicyService
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _isWin11 = Environment.OSVersion.Version.Build >= 22000;
+        _logger.LogInformation(
+            "AudioPolicyService init: OS build {Build}, using {Layout} interface",
+            Environment.OSVersion.Version.Build, _isWin11 ? "Win11" : "Win10");
     }
 
     public void SetDefaultEndpointForApp(string sessionIdentifier, string endpointId, RoleScope role, EndpointFlow flow)
@@ -34,25 +37,54 @@ public sealed class AudioPolicyService : IAudioPolicyService
         var dataFlow = ToDataFlow(flow);
         var persistedId = BuildPersistedId(endpointId, dataFlow);
 
+        _logger.LogInformation(
+            "SetDefault entry: pid={Pid} flow={Flow} role={Role} endpointId={EndpointId} persistedId='{PersistedId}'",
+            processId, flow, role, endpointId, persistedId);
+
         ApplyToRoles(role, eRole =>
         {
             try
             {
                 Invoke((win11, win10) =>
                 {
-                    var hr = win11 is not null
-                        ? win11.SetPersistedDefaultAudioEndpoint(processId, dataFlow, eRole, persistedId)
-                        : win10!.SetPersistedDefaultAudioEndpoint(processId, dataFlow, eRole, persistedId);
-
-                    if (hr < 0)
+                    var hstring = HString.Create(persistedId);
+                    try
                     {
-                        Marshal.ThrowExceptionForHR(hr);
+                        var hr = win11 is not null
+                            ? win11.SetPersistedDefaultAudioEndpoint(processId, dataFlow, eRole, hstring)
+                            : win10!.SetPersistedDefaultAudioEndpoint(processId, dataFlow, eRole, hstring);
+
+                        _logger.LogInformation(
+                            "SetPersistedDefaultAudioEndpoint(pid={Pid}, flow={Flow}, role={Role}) HR=0x{HR:X8}",
+                            processId, dataFlow, eRole, (uint)hr);
+
+                        if (hr < 0)
+                        {
+                            Marshal.ThrowExceptionForHR(hr);
+                        }
+                    }
+                    finally
+                    {
+                        HString.Delete(hstring);
+                    }
+
+                    IntPtr readback = IntPtr.Zero;
+                    try
+                    {
+                        var verifyHr = win11 is not null
+                            ? win11.GetPersistedDefaultAudioEndpoint(processId, dataFlow, eRole, out readback)
+                            : win10!.GetPersistedDefaultAudioEndpoint(processId, dataFlow, eRole, out readback);
+
+                        var readbackValue = HString.Read(readback);
+                        _logger.LogInformation(
+                            "Verify GetPersistedDefaultAudioEndpoint(pid={Pid}, flow={Flow}, role={Role}) HR=0x{HR:X8} value='{Value}'",
+                            processId, dataFlow, eRole, (uint)verifyHr, readbackValue);
+                    }
+                    finally
+                    {
+                        HString.Delete(readback);
                     }
                 });
-
-                _logger.LogInformation(
-                    "Set default {Flow}/{Role} endpoint for pid {Pid} -> {EndpointId}",
-                    flow, eRole, processId, endpointId);
             }
             catch (Exception ex)
             {
@@ -75,44 +107,102 @@ public sealed class AudioPolicyService : IAudioPolicyService
         {
             Invoke((win11, win10) =>
             {
-                var hr = win11 is not null
-                    ? win11.SetPersistedDefaultAudioEndpoint(processId, dataFlow, eRole, string.Empty)
-                    : win10!.SetPersistedDefaultAudioEndpoint(processId, dataFlow, eRole, string.Empty);
-
-                if (hr < 0)
+                var empty = HString.Create(string.Empty);
+                try
                 {
-                    Marshal.ThrowExceptionForHR(hr);
+                    var hr = win11 is not null
+                        ? win11.SetPersistedDefaultAudioEndpoint(processId, dataFlow, eRole, empty)
+                        : win10!.SetPersistedDefaultAudioEndpoint(processId, dataFlow, eRole, empty);
+
+                    if (hr < 0)
+                    {
+                        Marshal.ThrowExceptionForHR(hr);
+                    }
+                }
+                finally
+                {
+                    HString.Delete(empty);
                 }
             });
         });
     }
 
+    private static readonly string[] CandidateClassNames =
+    {
+        "Windows.Media.Internal.AudioPolicyConfig",
+        "Windows.Media.AudioPolicyConfig",
+    };
+
+    private static readonly Guid IID_AudioPolicyConfigFactoryWin11 = new("ab3d4648-e242-459f-b02f-541c70306324");
+    private static readonly Guid IID_AudioPolicyConfigFactoryWin10 = new("2a59116d-6c4f-45e0-a74f-707e3fef9258");
+
     private void Invoke(Action<IAudioPolicyConfigFactoryWin11?, IAudioPolicyConfigFactoryWin10?> action)
     {
-        var instance = Activator.CreateInstance(Type.GetTypeFromCLSID(typeof(CPolicyConfigClient).GUID)!);
-        try
+        Exception? lastError = null;
+        foreach (var className in CandidateClassNames)
         {
-            if (_isWin11 && instance is IAudioPolicyConfigFactoryWin11 win11)
+            if (_isWin11)
             {
-                action(win11, null);
-                return;
+                try
+                {
+                    var iid = IID_AudioPolicyConfigFactoryWin11;
+                    var factory = WinRtFactory.GetFactory(className, iid);
+                    if (factory is IAudioPolicyConfigFactoryWin11 win11)
+                    {
+                        _logger.LogInformation("Activated factory '{Class}' as Win11 layout", className);
+                        try
+                        {
+                            action(win11, null);
+                            return;
+                        }
+                        finally
+                        {
+                            if (Marshal.IsComObject(win11))
+                            {
+                                Marshal.ReleaseComObject(win11);
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Win11 factory activation failed for class '{Class}'", className);
+                    lastError = ex;
+                }
             }
 
-            if (instance is IAudioPolicyConfigFactoryWin10 win10)
+            try
             {
-                action(null, win10);
-                return;
+                var iid = IID_AudioPolicyConfigFactoryWin10;
+                var factory = WinRtFactory.GetFactory(className, iid);
+                if (factory is IAudioPolicyConfigFactoryWin10 win10)
+                {
+                    _logger.LogInformation("Activated factory '{Class}' as Win10 layout", className);
+                    try
+                    {
+                        action(null, win10);
+                        return;
+                    }
+                    finally
+                    {
+                        if (Marshal.IsComObject(win10))
+                        {
+                            Marshal.ReleaseComObject(win10);
+                        }
+                    }
+                }
             }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Win10 factory activation failed for class '{Class}'", className);
+                lastError = ex;
+            }
+        }
 
-            throw new InvalidOperationException("IAudioPolicyConfigFactory is not available on this OS.");
-        }
-        finally
-        {
-            if (instance is not null && Marshal.IsComObject(instance))
-            {
-                Marshal.ReleaseComObject(instance);
-            }
-        }
+        throw new InvalidOperationException(
+            "IAudioPolicyConfigFactory is not available on this OS (tried " +
+            string.Join(", ", CandidateClassNames) + ")",
+            lastError);
     }
 
     private static void ApplyToRoles(RoleScope scope, Action<ERole> action)

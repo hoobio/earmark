@@ -1,3 +1,4 @@
+using Earmark.App.Logging;
 using Earmark.App.Services;
 using Earmark.App.ViewModels;
 using Earmark.App.Views;
@@ -12,13 +13,23 @@ namespace Earmark.App.Hosting;
 
 internal static class HostBuilderExtensions
 {
+    public static string LogDirectory { get; } = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "Earmark",
+        "logs");
+
+    public static string CurrentLogPath { get; } = Path.Combine(
+        LogDirectory,
+        $"earmark-{DateTime.Now:yyyyMMdd-HHmmss}.log");
+
     public static HostApplicationBuilder ConfigureEarmark(this HostApplicationBuilder builder)
     {
         ArgumentNullException.ThrowIfNull(builder);
 
         builder.Logging.ClearProviders();
         builder.Logging.AddDebug();
-        builder.Logging.SetMinimumLevel(LogLevel.Information);
+        builder.Logging.AddProvider(new FileLoggerProvider(CurrentLogPath));
+        builder.Logging.SetMinimumLevel(LogLevel.Debug);
 
         builder.Services.AddEarmarkCore();
         builder.Services.AddEarmarkInterop();

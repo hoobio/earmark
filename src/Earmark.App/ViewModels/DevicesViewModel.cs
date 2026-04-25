@@ -23,7 +23,6 @@ public partial class DevicesViewModel : ObservableObject, IDisposable
     }
 
     public ObservableCollection<AudioEndpoint> Render { get; } = new();
-    public ObservableCollection<AudioEndpoint> Capture { get; } = new();
 
     [RelayCommand]
     private void Refresh()
@@ -32,12 +31,6 @@ public partial class DevicesViewModel : ObservableObject, IDisposable
         foreach (var endpoint in _endpoints.GetEndpoints(EndpointFlow.Render))
         {
             Render.Add(endpoint);
-        }
-
-        Capture.Clear();
-        foreach (var endpoint in _endpoints.GetEndpoints(EndpointFlow.Capture))
-        {
-            Capture.Add(endpoint);
         }
     }
 

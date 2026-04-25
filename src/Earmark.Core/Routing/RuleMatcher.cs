@@ -73,7 +73,7 @@ public sealed class RuleMatcher : IRuleMatcher
 
         return endpoints
             .Where(e => e.Flow == rule.Flow && e.State == EndpointState.Active)
-            .FirstOrDefault(e =>
+            .Where(e =>
             {
                 try
                 {
@@ -83,6 +83,11 @@ public sealed class RuleMatcher : IRuleMatcher
                 {
                     return false;
                 }
-            });
+            })
+            .OrderByDescending(e => e.IsDefault)
+            .ThenByDescending(e => e.IsDefaultCommunications)
+            .ThenBy(e => e.FriendlyName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(e => e.Id, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault();
     }
 }
