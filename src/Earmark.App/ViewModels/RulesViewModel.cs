@@ -7,6 +7,7 @@ using CommunityToolkit.Mvvm.Input;
 using Earmark.App.Services;
 using Earmark.Core.Audio;
 using Earmark.Core.Models;
+using Earmark.Core.Routing;
 using Earmark.Core.Services;
 
 namespace Earmark.App.ViewModels;
@@ -19,6 +20,7 @@ public partial class RulesViewModel : ObservableObject, IDisposable
     private readonly IRoutingApplier _applier;
     private readonly IAudioSessionService _sessions;
     private readonly IAudioEndpointService _endpoints;
+    private readonly IRuleEvaluator _evaluator;
     private readonly IDispatcherQueueProvider _dispatcher;
     private readonly Lock _gate = new();
 
@@ -30,16 +32,23 @@ public partial class RulesViewModel : ObservableObject, IDisposable
         IRoutingApplier applier,
         IAudioSessionService sessions,
         IAudioEndpointService endpoints,
+        IRuleEvaluator evaluator,
         IDispatcherQueueProvider dispatcher)
     {
         _rules = rules ?? throw new ArgumentNullException(nameof(rules));
         _applier = applier ?? throw new ArgumentNullException(nameof(applier));
         _sessions = sessions ?? throw new ArgumentNullException(nameof(sessions));
         _endpoints = endpoints ?? throw new ArgumentNullException(nameof(endpoints));
+        _evaluator = evaluator ?? throw new ArgumentNullException(nameof(evaluator));
         _dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
 
         Items = new ObservableCollection<RuleRow>(_rules.Rules.Select(BuildRow));
         Items.CollectionChanged += OnItemsCollectionChanged;
+        Items.CollectionChanged += (_, _) =>
+        {
+            OnPropertyChanged(nameof(IsEmpty));
+            OnPropertyChanged(nameof(HasItems));
+        };
         _rules.RulesChanged += OnRulesChanged;
         _sessions.SessionsChanged += OnSessionsOrEndpointsChanged;
         _endpoints.EndpointsChanged += OnSessionsOrEndpointsChanged;
@@ -47,6 +56,9 @@ public partial class RulesViewModel : ObservableObject, IDisposable
     }
 
     public ObservableCollection<RuleRow> Items { get; }
+
+    public bool HasItems => Items.Count > 0;
+    public bool IsEmpty => Items.Count == 0;
 
     [ObservableProperty]
     public partial RuleRow? Selected { get; set; }
@@ -59,13 +71,12 @@ public partial class RulesViewModel : ObservableObject, IDisposable
         var rule = new RoutingRule
         {
             Name = "New rule",
-            Type = RuleType.ApplicationOutput,
             Enabled = true,
+            Actions = { new RuleAction { Type = ActionType.SetApplicationOutput } },
         };
 
         await _rules.UpsertAsync(rule);
 
-        // Find the newly added row and expand it.
         var row = Items.FirstOrDefault(r => r.Id == rule.Id);
         if (row is not null)
         {
@@ -187,9 +198,13 @@ public partial class RulesViewModel : ObservableObject, IDisposable
 
         _dispatcher.Enqueue(() =>
         {
+            var liveRules = Items.Select(r => r.ToRule()).ToList();
             foreach (var row in Items)
             {
                 row.Recompute(sessions, endpoints);
+                var rule = liveRules.First(r => r.Id == row.Id);
+                var evaluation = _evaluator.Evaluate(rule, liveRules, sessions, endpoints);
+                row.ApplyEvaluation(evaluation);
             }
         });
     }

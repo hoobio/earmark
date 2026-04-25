@@ -24,7 +24,7 @@
             Title="Earmark"
             Subtitle="Per-app audio routing">
             <TitleBar.IconSource>
-                <ImageIconSource ImageSource="Assets/AppIcon.ico" />
+                <ImageIconSource ImageSource="ms-appx:///Assets/logo.png" />
             </TitleBar.IconSource>
         </TitleBar>
 
@@ -33,8 +33,10 @@
             Grid.Row="1"
             IsBackButtonVisible="Collapsed"
             IsSettingsVisible="False"
-            PaneDisplayMode="LeftCompact"
-            OpenPaneLength="240"
+            PaneDisplayMode="Auto"
+            OpenPaneLength="220"
+            CompactModeThresholdWidth="640"
+            ExpandedModeThresholdWidth="1024"
             SelectionChanged="NavView_SelectionChanged">
 
             <NavigationView.MenuItems>

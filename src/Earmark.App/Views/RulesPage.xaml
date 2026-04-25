@@ -10,122 +10,334 @@
     mc:Ignorable="d"
     Background="Transparent">
 
-    <Grid Padding="{StaticResource PagePadding}">
+    <Grid Padding="{StaticResource PagePadding}" RowSpacing="16">
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <StackPanel Orientation="Horizontal" Spacing="12" Margin="0,12,0,16">
-            <TextBlock Text="Rules" Style="{StaticResource PageHeaderTextStyle}" />
-            <Button Content="Add rule" Command="{x:Bind ViewModel.AddCommand}" Style="{StaticResource AccentButtonStyle}" VerticalAlignment="Center" />
-            <Button Content="Reapply now" Command="{x:Bind ViewModel.ReapplyCommand}" VerticalAlignment="Center" />
-        </StackPanel>
+        <!-- Page header -->
+        <Grid Grid.Row="0" ColumnSpacing="12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
 
-        <TextBlock Grid.Row="1"
-                   Text="Drag rules to reorder. Topmost matching rule wins. Click a rule to edit it inline."
-                   Style="{StaticResource CaptionTextBlockStyle}"
-                   Opacity="0.6"
-                   Margin="0,0,0,16" />
+            <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
+                <TextBlock Text="Rules" Style="{StaticResource PageHeaderTextStyle}" />
+                <TextBlock Style="{StaticResource PageSubheaderTextStyle}"
+                           Text="Drag to reorder. Topmost matching rule wins. Click to edit. Dimmed rules are off, shadowed, or have unmet conditions." />
+            </StackPanel>
 
-        <ListView Grid.Row="2"
+            <Button Grid.Column="1"
+                    Style="{StaticResource AccentButtonStyle}"
+                    Command="{x:Bind ViewModel.AddCommand}"
+                    VerticalAlignment="Center">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <FontIcon Glyph="&#xE710;" FontSize="14" />
+                    <TextBlock Text="Add rule" />
+                </StackPanel>
+            </Button>
+
+            <Button Grid.Column="2"
+                    Command="{x:Bind ViewModel.ReapplyCommand}"
+                    VerticalAlignment="Center"
+                    ToolTipService.ToolTip="Force re-apply of all rules">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <FontIcon Glyph="&#xE72C;" FontSize="14" />
+                    <TextBlock Text="Reapply" />
+                </StackPanel>
+            </Button>
+        </Grid>
+
+        <!-- Empty state -->
+        <Border Grid.Row="1"
+                Style="{StaticResource SectionCardStyle}"
+                Padding="32"
+                Visibility="{x:Bind ViewModel.IsEmpty, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
+            <StackPanel Spacing="12" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="420">
+                <FontIcon Glyph="&#xE8FD;" FontSize="40"
+                          Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                          HorizontalAlignment="Center" />
+                <TextBlock Text="No rules yet"
+                           Style="{StaticResource SubtitleTextBlockStyle}"
+                           HorizontalAlignment="Center" />
+                <TextBlock Style="{StaticResource MutedCaptionTextStyle}"
+                           HorizontalAlignment="Center"
+                           TextAlignment="Center"
+                           Text="Create a rule to route an application to a specific output or input device, or to pin the system default device." />
+                <Button Style="{StaticResource AccentButtonStyle}"
+                        Command="{x:Bind ViewModel.AddCommand}"
+                        HorizontalAlignment="Center"
+                        Margin="0,4,0,0">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon Glyph="&#xE710;" FontSize="14" />
+                        <TextBlock Text="Add your first rule" />
+                    </StackPanel>
+                </Button>
+            </StackPanel>
+        </Border>
+
+        <ListView Grid.Row="1"
                   x:Name="RulesList"
                   ItemsSource="{x:Bind ViewModel.Items}"
                   SelectionMode="None"
                   CanReorderItems="True"
                   CanDragItems="True"
-                  AllowDrop="True">
+                  AllowDrop="True"
+                  Visibility="{x:Bind ViewModel.HasItems, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
             <ListView.ItemContainerStyle>
                 <Style TargetType="ListViewItem">
                     <Setter Property="HorizontalContentAlignment" Value="Stretch" />
                     <Setter Property="Padding" Value="0" />
+                    <Setter Property="Margin" Value="0,4" />
                 </Style>
             </ListView.ItemContainerStyle>
             <ListView.ItemTemplate>
                 <DataTemplate x:DataType="vm:RuleRow">
-                    <Border Style="{StaticResource SectionCardStyle}" Margin="0,4">
-                        <StackPanel Spacing="12">
+                    <Border Style="{StaticResource SectionCardStyle}"
+                            Opacity="{x:Bind CardOpacity, Mode=OneWay}">
+                        <StackPanel Spacing="14">
 
-                            <!-- Header (always visible) -->
-                            <Grid ColumnSpacing="10" Tapped="OnHeaderTapped">
+                            <!-- Header -->
+                            <Grid ColumnSpacing="12"
+                                  Background="Transparent"
+                                  Tapped="OnHeaderTapped">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
 
-                                <FontIcon Grid.Column="0" Glyph="&#xE700;" FontSize="14" Opacity="0.4" VerticalAlignment="Center" />
+                                <FontIcon Grid.Column="0"
+                                          Glyph="&#xE700;" FontSize="14"
+                                          Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                          VerticalAlignment="Center" />
                                 <ToggleSwitch Grid.Column="1"
                                               IsOn="{x:Bind Enabled, Mode=TwoWay}"
                                               OffContent="" OnContent=""
                                               MinWidth="0" Width="44"
                                               VerticalAlignment="Center" />
                                 <StackPanel Grid.Column="2" Spacing="2">
-                                    <TextBlock Text="{x:Bind DisplayName, Mode=OneWay}" Style="{StaticResource BodyStrongTextBlockStyle}" />
-                                    <StackPanel Orientation="Horizontal" Spacing="6">
-                                        <TextBlock Text="{x:Bind DeviceMatchSummary, Mode=OneWay}"
-                                                   Style="{StaticResource CaptionTextBlockStyle}" Opacity="0.65"
-                                                   Visibility="{x:Bind HasDeviceMatch, Mode=OneWay}" />
-                                        <Border Background="{ThemeResource SubtleFillColorSecondaryBrush}" CornerRadius="10" Padding="8,2"
-                                                ToolTipService.ToolTip="{x:Bind AppMatchNames, Mode=OneWay}"
-                                                Visibility="{x:Bind HasAppMatches, Mode=OneWay}"
-                                                VerticalAlignment="Center">
-                                            <StackPanel Orientation="Horizontal" Spacing="6">
-                                                <FontIcon Glyph="&#xE946;" FontSize="11" Opacity="0.7" VerticalAlignment="Center" />
-                                                <TextBlock Text="{x:Bind AppMatchSummary, Mode=OneWay}" Style="{StaticResource CaptionTextBlockStyle}" VerticalAlignment="Center" />
-                                            </StackPanel>
-                                        </Border>
+                                    <TextBlock Text="{x:Bind DisplayName, Mode=OneWay}"
+                                               Style="{StaticResource BodyStrongTextBlockStyle}" />
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <TextBlock Text="{x:Bind StatusMessage, Mode=OneWay}"
+                                                   Style="{StaticResource CaptionTextBlockStyle}"
+                                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                   Visibility="{x:Bind HasStatusMessage, Mode=OneWay}" />
+                                        <TextBlock Text="{x:Bind MatchSummary, Mode=OneWay}"
+                                                   Style="{StaticResource CaptionTextBlockStyle}"
+                                                   Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                   Visibility="{x:Bind HasMatchSummary, Mode=OneWay}" />
                                     </StackPanel>
                                 </StackPanel>
-                                <Border Grid.Column="3" Background="{ThemeResource SubtleFillColorSecondaryBrush}" CornerRadius="4" Padding="8,3" VerticalAlignment="Center">
-                                    <TextBlock Text="{x:Bind TypeLabel, Mode=OneWay}" Style="{StaticResource CaptionTextBlockStyle}" />
-                                </Border>
-                                <FontIcon Grid.Column="4" Glyph="&#xE70D;" FontSize="12" Opacity="0.6" VerticalAlignment="Center" />
+                                <FontIcon Grid.Column="3"
+                                          Glyph="&#xE70D;" FontSize="12"
+                                          Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                          VerticalAlignment="Center" />
                             </Grid>
 
                             <!-- Inline editor -->
-                            <StackPanel Spacing="10" Visibility="{x:Bind IsExpanded, Mode=OneWay}">
-                                <Grid ColumnSpacing="10">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBox Grid.Column="0" Header="Name" Text="{x:Bind Name, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
-                                    <ComboBox Grid.Column="1" Header="Rule type"
-                                              ItemsSource="{x:Bind AvailableTypeOptions}"
-                                              SelectedItem="{x:Bind SelectedTypeOption, Mode=OneWay}"
-                                              SelectionChanged="OnTypeChanged"
-                                              MinWidth="220" />
-                                </Grid>
+                            <StackPanel Spacing="16" Visibility="{x:Bind IsExpanded, Mode=OneWay}">
 
-                                <TextBox Header="App pattern (regex)"
-                                         PlaceholderText=".*steamapps.*"
-                                         Text="{x:Bind AppPattern, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                         Visibility="{x:Bind RequiresAppPattern, Mode=OneWay}" />
+                                <TextBox Header="Name"
+                                         Text="{x:Bind Name, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
 
-                                <TextBox Header="Device pattern (regex)"
-                                         PlaceholderText=".*Headphones.*"
-                                         Text="{x:Bind DevicePattern, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+                                <!-- Conditions -->
+                                <StackPanel Spacing="8">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0" Spacing="2">
+                                            <TextBlock Text="Conditions" Style="{StaticResource SectionTitleTextStyle}" />
+                                            <TextBlock Style="{StaticResource MutedCaptionTextStyle}"
+                                                       Text="All conditions must be true for the rule to take effect. Leave empty to always run." />
+                                        </StackPanel>
+                                        <Button Grid.Column="1"
+                                                Command="{x:Bind AddConditionCommand}"
+                                                VerticalAlignment="Top">
+                                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                                <FontIcon Glyph="&#xE710;" FontSize="12" />
+                                                <TextBlock Text="Add condition" />
+                                            </StackPanel>
+                                        </Button>
+                                    </Grid>
 
-                                <StackPanel Orientation="Horizontal" Spacing="24"
-                                            Visibility="{x:Bind IsDefaultRule, Mode=OneWay}">
-                                    <ToggleSwitch Header="Default device"
-                                                  OffContent="Off" OnContent="On"
-                                                  IsOn="{x:Bind SetsDefault, Mode=TwoWay}" />
-                                    <ToggleSwitch Header="Communications device"
-                                                  OffContent="Off" OnContent="On"
-                                                  IsOn="{x:Bind SetsCommunications, Mode=TwoWay}" />
+                                    <ItemsControl ItemsSource="{x:Bind Conditions}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate x:DataType="vm:ConditionRow">
+                                                <Border Style="{StaticResource SubtleCardStyle}" Margin="0,4,0,0">
+                                                    <Grid ColumnSpacing="10">
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="Auto" />
+                                                            <ColumnDefinition Width="170" />
+                                                            <ColumnDefinition Width="120" />
+                                                            <ColumnDefinition Width="*" />
+                                                            <ColumnDefinition Width="Auto" />
+                                                        </Grid.ColumnDefinitions>
+
+                                                        <FontIcon Grid.Column="0"
+                                                                  Glyph="{x:Bind IsSatisfied, Mode=OneWay, Converter={StaticResource SatisfiedGlyphConverter}}"
+                                                                  Foreground="{x:Bind IsSatisfied, Mode=OneWay, Converter={StaticResource SatisfiedBrushConverter}}"
+                                                                  FontSize="14"
+                                                                  VerticalAlignment="Center"
+                                                                  ToolTipService.ToolTip="{x:Bind IsSatisfied, Mode=OneWay, Converter={StaticResource SatisfiedTooltipConverter}}" />
+
+                                                        <ComboBox Grid.Column="1"
+                                                                  ItemsSource="{x:Bind AvailableTypeOptions}"
+                                                                  SelectedItem="{x:Bind SelectedTypeOption, Mode=OneWay}"
+                                                                  SelectionChanged="OnConditionTypeChanged"
+                                                                  HorizontalAlignment="Stretch" />
+
+                                                        <ComboBox Grid.Column="2"
+                                                                  ItemsSource="{x:Bind AvailableFlowOptions}"
+                                                                  SelectedItem="{x:Bind SelectedFlowOption, Mode=OneWay}"
+                                                                  SelectionChanged="OnConditionFlowChanged"
+                                                                  HorizontalAlignment="Stretch" />
+
+                                                        <TextBox Grid.Column="3"
+                                                                 PlaceholderText=".*Headphones.*"
+                                                                 Text="{x:Bind DevicePattern, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
+                                                        <Button Grid.Column="4"
+                                                                Style="{StaticResource GhostIconButtonStyle}"
+                                                                Click="OnRemoveConditionClicked"
+                                                                Tag="{x:Bind}"
+                                                                ToolTipService.ToolTip="Remove condition">
+                                                            <FontIcon Glyph="&#xE74D;" FontSize="12" />
+                                                        </Button>
+                                                    </Grid>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
                                 </StackPanel>
 
+                                <!-- Actions -->
+                                <StackPanel Spacing="8">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0" Spacing="2">
+                                            <TextBlock Text="Actions" Style="{StaticResource SectionTitleTextStyle}" />
+                                            <TextBlock Style="{StaticResource MutedCaptionTextStyle}"
+                                                       Text="Each action runs in order. Topmost wins for the same target." />
+                                        </StackPanel>
+                                        <Button Grid.Column="1"
+                                                Style="{StaticResource AccentButtonStyle}"
+                                                Command="{x:Bind AddActionCommand}"
+                                                VerticalAlignment="Top">
+                                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                                <FontIcon Glyph="&#xE710;" FontSize="12" />
+                                                <TextBlock Text="Add action" />
+                                            </StackPanel>
+                                        </Button>
+                                    </Grid>
+
+                                    <ItemsControl ItemsSource="{x:Bind Actions}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate x:DataType="vm:ActionRow">
+                                                <Border Style="{StaticResource EmphasizedSubtleCardStyle}" Margin="0,4,0,0">
+                                                    <StackPanel Spacing="10">
+                                                        <Grid ColumnSpacing="10">
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="240" />
+                                                                <ColumnDefinition Width="*" />
+                                                                <ColumnDefinition Width="Auto" />
+                                                            </Grid.ColumnDefinitions>
+
+                                                            <ComboBox Grid.Column="0"
+                                                                      Header="Action"
+                                                                      ItemsSource="{x:Bind AvailableTypeOptions}"
+                                                                      SelectedItem="{x:Bind SelectedTypeOption, Mode=OneWay}"
+                                                                      SelectionChanged="OnActionTypeChanged"
+                                                                      HorizontalAlignment="Stretch" />
+
+                                                            <Button Grid.Column="2"
+                                                                    Style="{StaticResource GhostIconButtonStyle}"
+                                                                    Click="OnRemoveActionClicked"
+                                                                    Tag="{x:Bind}"
+                                                                    VerticalAlignment="Bottom"
+                                                                    ToolTipService.ToolTip="Remove action">
+                                                                <FontIcon Glyph="&#xE74D;" FontSize="12" />
+                                                            </Button>
+                                                        </Grid>
+
+                                                        <TextBox PlaceholderText=".*chrome.*"
+                                                                 Text="{x:Bind AppPattern, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                                 Visibility="{x:Bind RequiresAppPattern, Mode=OneWay}">
+                                                            <TextBox.Header>
+                                                                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                                                    <TextBlock Text="App pattern (regex)" VerticalAlignment="Center" />
+                                                                    <Border Style="{StaticResource ChipBorderStyle}"
+                                                                            Visibility="{x:Bind HasAppMatches, Mode=OneWay}"
+                                                                            ToolTipService.ToolTip="{x:Bind AppMatchNames, Mode=OneWay}">
+                                                                        <StackPanel Orientation="Horizontal" Spacing="6">
+                                                                            <FontIcon Glyph="&#xE946;" FontSize="11"
+                                                                                      Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                                                      VerticalAlignment="Center" />
+                                                                            <TextBlock Text="{x:Bind AppMatchSummary, Mode=OneWay}"
+                                                                                       Style="{StaticResource CaptionTextBlockStyle}"
+                                                                                       VerticalAlignment="Center" />
+                                                                        </StackPanel>
+                                                                    </Border>
+                                                                </StackPanel>
+                                                            </TextBox.Header>
+                                                        </TextBox>
+
+                                                        <TextBox PlaceholderText=".*Headphones.*"
+                                                                 Text="{x:Bind DevicePattern, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}">
+                                                            <TextBox.Header>
+                                                                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                                                    <TextBlock Text="Device pattern (regex)" VerticalAlignment="Center" />
+                                                                    <Border Style="{StaticResource ChipBorderStyle}"
+                                                                            Visibility="{x:Bind HasDeviceMatch, Mode=OneWay}">
+                                                                        <StackPanel Orientation="Horizontal" Spacing="6">
+                                                                            <FontIcon Glyph="&#xE7F5;" FontSize="11"
+                                                                                      Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                                                      VerticalAlignment="Center" />
+                                                                            <TextBlock Text="{x:Bind DeviceMatchSummary, Mode=OneWay}"
+                                                                                       Style="{StaticResource CaptionTextBlockStyle}"
+                                                                                       VerticalAlignment="Center" />
+                                                                        </StackPanel>
+                                                                    </Border>
+                                                                </StackPanel>
+                                                            </TextBox.Header>
+                                                        </TextBox>
+
+                                                        <StackPanel Orientation="Horizontal" Spacing="24"
+                                                                    Visibility="{x:Bind IsDefaultAction, Mode=OneWay}">
+                                                            <ToggleSwitch Header="Default device"
+                                                                          OffContent="Off" OnContent="On"
+                                                                          IsOn="{x:Bind SetsDefault, Mode=TwoWay}" />
+                                                            <ToggleSwitch Header="Communications device"
+                                                                          OffContent="Off" OnContent="On"
+                                                                          IsOn="{x:Bind SetsCommunications, Mode=TwoWay}" />
+                                                        </StackPanel>
+                                                    </StackPanel>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </StackPanel>
+
+                                <!-- Footer -->
                                 <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
-                                    <Button Content="Delete"
-                                            Background="Transparent"
-                                            Foreground="{ThemeResource SystemFillColorCriticalBrush}"
-                                            Click="OnDeleteClicked"
-                                            Tag="{x:Bind}" />
+                                    <Button Style="{StaticResource DangerButtonStyle}"
+                                            Click="OnDeleteRuleClicked"
+                                            Tag="{x:Bind}">
+                                        <StackPanel Orientation="Horizontal" Spacing="6">
+                                            <FontIcon Glyph="&#xE74D;" FontSize="12" />
+                                            <TextBlock Text="Delete rule" />
+                                        </StackPanel>
+                                    </Button>
                                 </StackPanel>
                             </StackPanel>
                         </StackPanel>

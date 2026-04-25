@@ -212,15 +212,23 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
     {
         var hasOutputDefault = false;
         var hasInputDefault = false;
-        foreach (var r in _rules.Rules)
+        foreach (var rule in _rules.Rules)
         {
-            if (!r.Enabled || !r.IsValid)
+            if (!rule.Enabled)
             {
                 continue;
             }
 
-            if (r.Type == RuleType.DefaultOutput) hasOutputDefault = true;
-            if (r.Type == RuleType.DefaultInput) hasInputDefault = true;
+            foreach (var action in rule.Actions)
+            {
+                if (!action.IsValid)
+                {
+                    continue;
+                }
+
+                if (action.Type == ActionType.SetDefaultOutput) hasOutputDefault = true;
+                if (action.Type == ActionType.SetDefaultInput) hasInputDefault = true;
+            }
         }
 
         if (hasOutputDefault)

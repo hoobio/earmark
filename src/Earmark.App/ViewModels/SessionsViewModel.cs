@@ -41,7 +41,10 @@ public partial class SessionsViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     public partial bool IsLoading { get; set; }
 
+    partial void OnIsLoadingChanged(bool value) => OnPropertyChanged(nameof(IsEmpty));
+
     public bool HasItems => Items.Count > 0;
+    public bool IsEmpty => !IsLoading && Items.Count == 0;
 
     [RelayCommand]
     private void Refresh() => QueueRefresh();
@@ -80,6 +83,7 @@ public partial class SessionsViewModel : ObservableObject, IDisposable
             IsLoading = true;
             Items.Clear();
             OnPropertyChanged(nameof(HasItems));
+            OnPropertyChanged(nameof(IsEmpty));
         });
 
         await Task.Run(() =>
@@ -103,6 +107,7 @@ public partial class SessionsViewModel : ObservableObject, IDisposable
                     {
                         Items.Add(row);
                         OnPropertyChanged(nameof(HasItems));
+            OnPropertyChanged(nameof(IsEmpty));
                     }
                 });
             }

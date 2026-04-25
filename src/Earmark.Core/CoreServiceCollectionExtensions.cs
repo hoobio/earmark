@@ -15,6 +15,7 @@ public static class CoreServiceCollectionExtensions
         services.AddSingleton<IRuleStore>(_ => new JsonRuleStore(rulesPath ?? JsonRuleStore.DefaultPath));
         services.AddSingleton<IRulesService, RulesService>();
         services.AddSingleton<IRuleMatcher, RuleMatcher>();
+        services.AddSingleton<IRuleEvaluator, RuleEvaluator>();
         return services;
     }
 }

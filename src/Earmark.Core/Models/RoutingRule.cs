@@ -12,12 +12,78 @@ public enum RoleScope
     Default,
 }
 
-public enum RuleType
+public enum ConditionType
 {
-    ApplicationOutput,
-    ApplicationInput,
-    DefaultOutput,
-    DefaultInput,
+    DevicePresent,
+    DeviceMissing,
+}
+
+public enum ConditionFlow
+{
+    Any,
+    Render,
+    Capture,
+}
+
+public enum ActionType
+{
+    SetApplicationOutput,
+    SetApplicationInput,
+    SetDefaultOutput,
+    SetDefaultInput,
+}
+
+public sealed class RuleCondition
+{
+    public ConditionType Type { get; set; } = ConditionType.DevicePresent;
+
+    public ConditionFlow Flow { get; set; } = ConditionFlow.Any;
+
+    /// <summary>Device regex evaluated against the current set of endpoints.</summary>
+    public string DevicePattern { get; set; } = string.Empty;
+
+    [JsonIgnore]
+    public bool IsValid => !string.IsNullOrWhiteSpace(DevicePattern);
+}
+
+public sealed class RuleAction
+{
+    public ActionType Type { get; set; } = ActionType.SetApplicationOutput;
+
+    /// <summary>Required for SetApplication* actions; ignored for SetDefault*.</summary>
+    public string AppPattern { get; set; } = string.Empty;
+
+    public string DevicePattern { get; set; } = string.Empty;
+
+    /// <summary>SetDefault* only: claim the device for the system "default" (Console + Multimedia) role.</summary>
+    public bool SetsDefault { get; set; } = true;
+
+    /// <summary>SetDefault* only: claim the device for the system "communications" role.</summary>
+    public bool SetsCommunications { get; set; } = true;
+
+    [JsonIgnore]
+    public bool IsApplicationAction => Type is ActionType.SetApplicationOutput or ActionType.SetApplicationInput;
+
+    [JsonIgnore]
+    public bool IsDefaultAction => Type is ActionType.SetDefaultOutput or ActionType.SetDefaultInput;
+
+    [JsonIgnore]
+    public EndpointFlow EffectiveFlow => Type switch
+    {
+        ActionType.SetApplicationOutput or ActionType.SetDefaultOutput => EndpointFlow.Render,
+        ActionType.SetApplicationInput or ActionType.SetDefaultInput => EndpointFlow.Capture,
+        _ => EndpointFlow.Render,
+    };
+
+    [JsonIgnore]
+    public bool IsValid => Type switch
+    {
+        ActionType.SetApplicationOutput or ActionType.SetApplicationInput =>
+            !string.IsNullOrWhiteSpace(AppPattern) && !string.IsNullOrWhiteSpace(DevicePattern),
+        ActionType.SetDefaultOutput or ActionType.SetDefaultInput =>
+            !string.IsNullOrWhiteSpace(DevicePattern) && (SetsDefault || SetsCommunications),
+        _ => false,
+    };
 }
 
 public sealed class RoutingRule
@@ -28,41 +94,10 @@ public sealed class RoutingRule
 
     public bool Enabled { get; set; } = true;
 
-    public RuleType Type { get; set; } = RuleType.ApplicationOutput;
+    public List<RuleCondition> Conditions { get; set; } = new();
 
-    /// <summary>App regex (Application* rule types only). Tested against both process name and full executable path.</summary>
-    public string AppPattern { get; set; } = string.Empty;
-
-    /// <summary>Device regex. For Application* types this is the destination device for that flow; for Default* types it picks the new system default.</summary>
-    public string DevicePattern { get; set; } = string.Empty;
-
-    /// <summary>For Default* rules: set this device as the system "default" (Console + Multimedia roles).</summary>
-    public bool SetsDefault { get; set; } = true;
-
-    /// <summary>For Default* rules: set this device as the system "default communications" (Communications role).</summary>
-    public bool SetsCommunications { get; set; } = true;
+    public List<RuleAction> Actions { get; set; } = new();
 
     [JsonIgnore]
-    public bool IsApplicationRule => Type is RuleType.ApplicationOutput or RuleType.ApplicationInput;
-
-    [JsonIgnore]
-    public bool IsDefaultRule => Type is RuleType.DefaultOutput or RuleType.DefaultInput;
-
-    [JsonIgnore]
-    public EndpointFlow EffectiveFlow => Type switch
-    {
-        RuleType.ApplicationOutput or RuleType.DefaultOutput => EndpointFlow.Render,
-        RuleType.ApplicationInput or RuleType.DefaultInput => EndpointFlow.Capture,
-        _ => EndpointFlow.Render,
-    };
-
-    [JsonIgnore]
-    public bool IsValid => Type switch
-    {
-        RuleType.ApplicationOutput or RuleType.ApplicationInput =>
-            !string.IsNullOrWhiteSpace(AppPattern) && !string.IsNullOrWhiteSpace(DevicePattern),
-        RuleType.DefaultOutput or RuleType.DefaultInput =>
-            !string.IsNullOrWhiteSpace(DevicePattern) && (SetsDefault || SetsCommunications),
-        _ => false,
-    };
+    public bool HasValidActions => Actions.Any(a => a.IsValid);
 }
