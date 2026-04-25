@@ -4,13 +4,13 @@ using Microsoft.UI.Xaml.Controls;
 
 namespace Earmark.App.Views;
 
-public sealed partial class DevicesPage : Page
+public sealed partial class SettingsPage : Page
 {
-    public DevicesPage(DevicesViewModel viewModel)
+    public SettingsPage(SettingsViewModel viewModel)
     {
         ViewModel = viewModel;
         InitializeComponent();
     }
 
-    public DevicesViewModel ViewModel { get; }
+    public SettingsViewModel ViewModel { get; }
 }

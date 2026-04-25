@@ -30,10 +30,10 @@ public sealed partial class RulesPage : Page
 
     private async void OnRuleClicked(object sender, ItemClickEventArgs e)
     {
-        if (e.ClickedItem is RoutingRule rule)
+        if (e.ClickedItem is RuleRow row)
         {
-            _logger?.LogInformation("Rule clicked: {Id}", rule.Id);
-            await OpenEditorAsync(rule);
+            _logger?.LogInformation("Rule clicked: {Id}", row.Id);
+            await OpenEditorAsync(row.Rule);
         }
     }
 

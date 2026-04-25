@@ -11,10 +11,15 @@ namespace Earmark.App.ViewModels;
 
 public partial class SessionsViewModel : ObservableObject, IDisposable
 {
+    private static readonly TimeSpan DebounceWindow = TimeSpan.FromMilliseconds(250);
+
     private readonly IAudioSessionService _sessions;
     private readonly IAudioEndpointService _endpoints;
     private readonly IRoutingApplier _applier;
     private readonly IDispatcherQueueProvider _dispatcher;
+    private readonly Lock _gate = new();
+
+    private CancellationTokenSource? _refreshCts;
 
     public SessionsViewModel(
         IAudioSessionService sessions,
@@ -28,32 +33,93 @@ public partial class SessionsViewModel : ObservableObject, IDisposable
         _dispatcher = dispatcher;
 
         _sessions.SessionsChanged += OnSessionsChanged;
-        Refresh();
+        QueueRefresh();
     }
 
     public ObservableCollection<SessionRow> Items { get; } = new();
 
-    [RelayCommand]
-    private void Refresh()
-    {
-        var endpoints = _endpoints.GetEndpoints();
-        var endpointById = endpoints.ToDictionary(e => e.Id, StringComparer.OrdinalIgnoreCase);
+    [ObservableProperty]
+    public partial bool IsLoading { get; set; }
 
-        Items.Clear();
-        foreach (var session in _sessions.GetSessions())
+    public bool HasItems => Items.Count > 0;
+
+    [RelayCommand]
+    private void Refresh() => QueueRefresh();
+
+    [RelayCommand]
+    private async Task ReapplyAllAsync() => await _applier.ApplyAllAsync(force: true);
+
+    private void OnSessionsChanged(object? sender, EventArgs e) => QueueRefresh();
+
+    private void QueueRefresh()
+    {
+        CancellationToken token;
+        lock (_gate)
         {
-            endpointById.TryGetValue(session.CurrentEndpointId, out var endpoint);
-            Items.Add(new SessionRow(session, endpoint));
+            _refreshCts?.Cancel();
+            _refreshCts = new CancellationTokenSource();
+            token = _refreshCts.Token;
         }
+
+        _ = RefreshAsync(token);
     }
 
-    [RelayCommand]
-    private async Task ReapplyAllAsync() => await _applier.ApplyAllAsync();
+    private async Task RefreshAsync(CancellationToken ct)
+    {
+        try
+        {
+            await Task.Delay(DebounceWindow, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
 
-    private void OnSessionsChanged(object? sender, EventArgs e) =>
-        _dispatcher.Enqueue(Refresh);
+        _dispatcher.Enqueue(() =>
+        {
+            IsLoading = true;
+            Items.Clear();
+            OnPropertyChanged(nameof(HasItems));
+        });
 
-    public void Dispose() => _sessions.SessionsChanged -= OnSessionsChanged;
+        await Task.Run(() =>
+        {
+            var endpointById = _endpoints.GetEndpoints()
+                .GroupBy(e => e.Id, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+            foreach (var session in _sessions.GetSessions())
+            {
+                if (ct.IsCancellationRequested)
+                {
+                    return;
+                }
+
+                endpointById.TryGetValue(session.CurrentEndpointId, out var endpoint);
+                var row = new SessionRow(session, endpoint);
+                _dispatcher.Enqueue(() =>
+                {
+                    if (!ct.IsCancellationRequested)
+                    {
+                        Items.Add(row);
+                        OnPropertyChanged(nameof(HasItems));
+                    }
+                });
+            }
+        }, ct).ConfigureAwait(false);
+
+        _dispatcher.Enqueue(() =>
+        {
+            IsLoading = false;
+        });
+    }
+
+    public void Dispose()
+    {
+        _sessions.SessionsChanged -= OnSessionsChanged;
+        _refreshCts?.Cancel();
+        _refreshCts?.Dispose();
+    }
 }
 
 public sealed record SessionRow(AudioSession Session, AudioEndpoint? CurrentEndpoint)

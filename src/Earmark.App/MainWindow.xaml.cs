@@ -52,7 +52,7 @@ public sealed partial class MainWindow : Window
         {
             "Rules" => typeof(RulesPage),
             "Sessions" => typeof(SessionsPage),
-            "Devices" => typeof(DevicesPage),
+            "Settings" => typeof(SettingsPage),
             _ => null,
         };
 

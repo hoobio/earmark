@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Page
+    x:Class="Earmark.App.Views.SettingsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:vm="using:Earmark.App.ViewModels"
+    xmlns:ctrl="using:CommunityToolkit.WinUI.Controls"
+    Background="Transparent">
+
+    <Grid Padding="{StaticResource PagePadding}">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <TextBlock Text="Settings" Style="{StaticResource PageHeaderTextStyle}" Margin="0,12,0,16" />
+
+        <ScrollViewer Grid.Row="1" Padding="0,0,16,0">
+            <StackPanel Spacing="6" MaxWidth="720" HorizontalAlignment="Stretch">
+
+                <ctrl:SettingsCard Header="Launch on startup" Description="Start Earmark automatically when you sign in to Windows.">
+                    <ToggleSwitch IsOn="{x:Bind ViewModel.LaunchOnStartup, Mode=TwoWay}" />
+                </ctrl:SettingsCard>
+
+                <ctrl:SettingsCard Header="Show tray icon" Description="Display the Earmark icon in the Windows notification area.">
+                    <ToggleSwitch IsOn="{x:Bind ViewModel.ShowTrayIcon, Mode=TwoWay}" />
+                </ctrl:SettingsCard>
+
+                <ctrl:SettingsCard Header="Minimize to tray" Description="Minimizing the window hides it to the tray instead of the taskbar.">
+                    <ToggleSwitch IsOn="{x:Bind ViewModel.MinimizeToTray, Mode=TwoWay}" />
+                </ctrl:SettingsCard>
+
+                <ctrl:SettingsCard Header="Close to tray" Description="Closing the window keeps Earmark running in the tray. Use the tray menu to quit.">
+                    <ToggleSwitch IsOn="{x:Bind ViewModel.CloseToTray, Mode=TwoWay}" />
+                </ctrl:SettingsCard>
+
+                <ctrl:SettingsCard Header="Launch to tray" Description="Skip showing the window on startup and run silently in the tray.">
+                    <ToggleSwitch IsOn="{x:Bind ViewModel.LaunchToTray, Mode=TwoWay}" />
+                </ctrl:SettingsCard>
+
+            </StackPanel>
+        </ScrollViewer>
+    </Grid>
+</Page>

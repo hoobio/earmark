@@ -19,7 +19,7 @@ public sealed class RuleMatcher : IRuleMatcher
         ArgumentNullException.ThrowIfNull(rules);
         ArgumentNullException.ThrowIfNull(endpoints);
 
-        foreach (var rule in rules.Where(r => r.Enabled && r.IsValid).OrderByDescending(r => r.Priority))
+        foreach (var rule in rules.Where(r => r.Enabled && r.IsValid))
         {
             if (!MatchesApp(rule, session))
             {

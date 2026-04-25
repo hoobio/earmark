@@ -48,12 +48,15 @@
                         <FontIcon Glyph="&#xE7F4;" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
-                <NavigationViewItem Content="Devices" Tag="Devices">
+            </NavigationView.MenuItems>
+
+            <NavigationView.FooterMenuItems>
+                <NavigationViewItem Content="Settings" Tag="Settings">
                     <NavigationViewItem.Icon>
-                        <FontIcon Glyph="&#xE7F6;" />
+                        <FontIcon Glyph="&#xE713;" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
-            </NavigationView.MenuItems>
+            </NavigationView.FooterMenuItems>
 
             <Frame x:Name="ContentFrame" />
         </NavigationView>

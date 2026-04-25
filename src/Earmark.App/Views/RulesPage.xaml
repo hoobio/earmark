@@ -23,18 +23,27 @@
             <Button Content="Reapply now" Command="{x:Bind ViewModel.ReapplyCommand}" VerticalAlignment="Center" />
         </StackPanel>
 
-        <TextBlock Grid.Row="1"
-                   Text="Match a process by regex (process name or full path) and route it to a device whose name matches another regex."
-                   Style="{StaticResource CaptionTextBlockStyle}"
-                   Margin="0,0,0,16"
-                   Opacity="0.75" />
+        <StackPanel Grid.Row="1" Spacing="4" Margin="0,0,0,16">
+            <TextBlock
+                Text="Match a process by regex (process name or full path) and route it to a device whose name matches another regex."
+                Style="{StaticResource CaptionTextBlockStyle}"
+                Opacity="0.75" />
+            <TextBlock
+                Text="Drag rules to reorder. The topmost matching rule wins."
+                Style="{StaticResource CaptionTextBlockStyle}"
+                Opacity="0.6" />
+        </StackPanel>
 
         <ListView Grid.Row="2"
+                  x:Name="RulesList"
                   ItemsSource="{x:Bind ViewModel.Items}"
                   SelectionMode="Single"
                   SelectedItem="{x:Bind ViewModel.Selected, Mode=TwoWay}"
                   IsItemClickEnabled="True"
-                  ItemClick="OnRuleClicked">
+                  ItemClick="OnRuleClicked"
+                  CanReorderItems="True"
+                  CanDragItems="True"
+                  AllowDrop="True">
             <ListView.ItemContainerStyle>
                 <Style TargetType="ListViewItem">
                     <Setter Property="HorizontalContentAlignment" Value="Stretch" />
@@ -42,26 +51,60 @@
                 </Style>
             </ListView.ItemContainerStyle>
             <ListView.ItemTemplate>
-                <DataTemplate x:DataType="models:RoutingRule">
+                <DataTemplate x:DataType="vm:RuleRow">
                     <Border Style="{StaticResource SectionCardStyle}" Margin="0,4">
-                        <Grid ColumnSpacing="14">
+                        <Grid ColumnSpacing="10">
                             <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="Auto" />
                                 <ColumnDefinition Width="*" />
                                 <ColumnDefinition Width="Auto" />
                             </Grid.ColumnDefinitions>
-                            <ToggleSwitch IsOn="{x:Bind Enabled, Mode=TwoWay}" OffContent="" OnContent="" VerticalAlignment="Center" />
-                            <StackPanel Grid.Column="1" Spacing="4">
-                                <TextBlock Text="{x:Bind Name}" Style="{StaticResource BodyStrongTextBlockStyle}" />
-                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <FontIcon Glyph="&#xE71B;" FontSize="12" Opacity="0.6" />
-                                    <TextBlock Text="{x:Bind AppPattern}" Style="{StaticResource CaptionTextBlockStyle}" Opacity="0.85" />
-                                    <FontIcon Glyph="&#xE72A;" FontSize="12" Opacity="0.6" />
-                                    <TextBlock Text="{x:Bind DevicePattern}" Style="{StaticResource CaptionTextBlockStyle}" Opacity="0.85" />
+                            <FontIcon Grid.Column="0" Glyph="&#xE700;" FontSize="14" Opacity="0.4" VerticalAlignment="Center" />
+                            <ToggleSwitch Grid.Column="1"
+                                          IsOn="{x:Bind Rule.Enabled, Mode=TwoWay}"
+                                          OffContent="" OnContent=""
+                                          MinWidth="0" Width="44"
+                                          VerticalAlignment="Center" />
+                            <StackPanel Grid.Column="2" Spacing="4">
+                                <TextBlock Text="{x:Bind Rule.Name}" Style="{StaticResource BodyStrongTextBlockStyle}" />
+
+                                <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                    <FontIcon Glyph="&#xE71B;" FontSize="12" Opacity="0.6" VerticalAlignment="Center" />
+                                    <TextBlock Text="{x:Bind Rule.AppPattern}" Style="{StaticResource CaptionTextBlockStyle}" Opacity="0.85" VerticalAlignment="Center" />
+                                    <Border Background="{ThemeResource SubtleFillColorSecondaryBrush}" CornerRadius="10" Padding="8,2"
+                                            ToolTipService.ToolTip="{x:Bind AppMatchNames, Mode=OneWay}"
+                                            Visibility="{x:Bind HasAppMatches, Mode=OneWay}"
+                                            VerticalAlignment="Center">
+                                        <StackPanel Orientation="Horizontal" Spacing="6">
+                                            <FontIcon Glyph="&#xE946;" FontSize="11" Opacity="0.7" VerticalAlignment="Center" />
+                                            <TextBlock Text="{x:Bind AppMatchSummary, Mode=OneWay}" Style="{StaticResource CaptionTextBlockStyle}" VerticalAlignment="Center" />
+                                        </StackPanel>
+                                    </Border>
+                                    <TextBlock Text="0 matching applications"
+                                               Style="{StaticResource CaptionTextBlockStyle}" Opacity="0.45"
+                                               VerticalAlignment="Center"
+                                               Visibility="{x:Bind HasAppMatches, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}, ConverterParameter=True}" />
+                                </StackPanel>
+
+                                <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                    <FontIcon Glyph="&#xE72A;" FontSize="12" Opacity="0.6" VerticalAlignment="Center" />
+                                    <TextBlock Text="{x:Bind Rule.DevicePattern}" Style="{StaticResource CaptionTextBlockStyle}" Opacity="0.85" VerticalAlignment="Center" />
+                                    <TextBlock Text="{x:Bind DeviceMatchSummary, Mode=OneWay}"
+                                               Style="{StaticResource CaptionTextBlockStyle}"
+                                               Opacity="0.5"
+                                               Visibility="{x:Bind HasDeviceMatch, Mode=OneWay}"
+                                               VerticalAlignment="Center" />
+                                    <TextBlock Text="(no device matches)"
+                                               Style="{StaticResource CaptionTextBlockStyle}"
+                                               Opacity="0.5"
+                                               Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+                                               VerticalAlignment="Center"
+                                               Visibility="{x:Bind HasDeviceMatch, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}, ConverterParameter=True}" />
                                 </StackPanel>
                             </StackPanel>
-                            <Border Grid.Column="2" Background="{ThemeResource SubtleFillColorSecondaryBrush}" CornerRadius="4" Padding="8,3" VerticalAlignment="Center">
-                                <TextBlock Text="{x:Bind AppMatchTarget}" Style="{StaticResource CaptionTextBlockStyle}" />
+                            <Border Grid.Column="3" Background="{ThemeResource SubtleFillColorSecondaryBrush}" CornerRadius="4" Padding="8,3" VerticalAlignment="Center">
+                                <TextBlock Text="{x:Bind Rule.AppMatchTarget}" Style="{StaticResource CaptionTextBlockStyle}" />
                             </Border>
                         </Grid>
                     </Border>

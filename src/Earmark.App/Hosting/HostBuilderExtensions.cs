@@ -1,5 +1,6 @@
 using Earmark.App.Logging;
 using Earmark.App.Services;
+using Earmark.App.Settings;
 using Earmark.App.ViewModels;
 using Earmark.App.Views;
 using Earmark.Audio;
@@ -34,20 +35,23 @@ internal static class HostBuilderExtensions
         builder.Services.AddEarmarkCore();
         builder.Services.AddEarmarkInterop();
 
+        builder.Services.AddSingleton<ISettingsService, SettingsService>();
         builder.Services.AddSingleton<IRoutingApplier, RoutingApplier>();
         builder.Services.AddSingleton<IDispatcherQueueProvider, DispatcherQueueProvider>();
         builder.Services.AddSingleton<INavigationService, NavigationService>();
+        builder.Services.AddSingleton<IWindowChromeManager, WindowChromeManager>();
+        builder.Services.AddSingleton<StartupSettingsApplier>();
 
         builder.Services.AddSingleton<MainWindow>();
         builder.Services.AddSingleton<ShellViewModel>();
         builder.Services.AddTransient<RulesViewModel>();
         builder.Services.AddTransient<SessionsViewModel>();
-        builder.Services.AddTransient<DevicesViewModel>();
+        builder.Services.AddTransient<SettingsViewModel>();
         builder.Services.AddTransient<RuleEditorViewModel>();
 
         builder.Services.AddTransient<RulesPage>();
         builder.Services.AddTransient<SessionsPage>();
-        builder.Services.AddTransient<DevicesPage>();
+        builder.Services.AddTransient<SettingsPage>();
 
         return builder;
     }

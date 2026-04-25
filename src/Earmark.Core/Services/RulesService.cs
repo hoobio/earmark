@@ -26,7 +26,7 @@ public sealed class RulesService : IRulesService, IDisposable
         await _gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            _rules = loaded.OrderByDescending(r => r.Priority).ToList();
+            _rules = loaded.ToList();
         }
         finally
         {
@@ -53,7 +53,6 @@ public sealed class RulesService : IRulesService, IDisposable
                 _rules.Add(rule);
             }
 
-            _rules = _rules.OrderByDescending(r => r.Priority).ToList();
             await _store.SaveAsync(_rules, ct).ConfigureAwait(false);
         }
         finally
@@ -88,16 +87,19 @@ public sealed class RulesService : IRulesService, IDisposable
         try
         {
             var map = _rules.ToDictionary(r => r.Id);
-            var top = orderedIds.Count;
-            for (var i = 0; i < orderedIds.Count; i++)
+            var ordered = new List<RoutingRule>(orderedIds.Count);
+            foreach (var id in orderedIds)
             {
-                if (map.TryGetValue(orderedIds[i], out var rule))
+                if (map.TryGetValue(id, out var rule))
                 {
-                    rule.Priority = top - i;
+                    ordered.Add(rule);
+                    map.Remove(id);
                 }
             }
 
-            _rules = _rules.OrderByDescending(r => r.Priority).ToList();
+            // Append any rules not in orderedIds (defensive).
+            ordered.AddRange(map.Values);
+            _rules = ordered;
             await _store.SaveAsync(_rules, ct).ConfigureAwait(false);
         }
         finally

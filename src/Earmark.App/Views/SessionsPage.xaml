@@ -16,38 +16,47 @@
             <TextBlock Text="Sessions" Style="{StaticResource PageHeaderTextStyle}" />
             <Button Content="Refresh" Command="{x:Bind ViewModel.RefreshCommand}" VerticalAlignment="Center" />
             <Button Content="Reapply rules" Command="{x:Bind ViewModel.ReapplyAllCommand}" VerticalAlignment="Center" />
+            <ProgressRing IsActive="{x:Bind ViewModel.IsLoading, Mode=OneWay}" Width="20" Height="20" VerticalAlignment="Center" />
         </StackPanel>
 
-        <ScrollViewer Grid.Row="1">
-            <ItemsRepeater ItemsSource="{x:Bind ViewModel.Items}">
-                <ItemsRepeater.Layout>
-                    <StackLayout Spacing="8" />
-                </ItemsRepeater.Layout>
-                <ItemsRepeater.ItemTemplate>
-                    <DataTemplate x:DataType="vm:SessionRow">
-                        <Border Style="{StaticResource SectionCardStyle}">
-                            <Grid ColumnSpacing="14">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-                                <Ellipse Width="10" Height="10" VerticalAlignment="Center"
-                                         Fill="{ThemeResource SystemFillColorSuccessBrush}"
-                                         Visibility="{x:Bind IsActive}" />
-                                <StackPanel Grid.Column="1" Spacing="2">
-                                    <TextBlock Text="{x:Bind Title}" Style="{StaticResource BodyStrongTextBlockStyle}" />
-                                    <TextBlock Text="{x:Bind Subtitle}" Style="{StaticResource CaptionTextBlockStyle}" Opacity="0.7" />
-                                </StackPanel>
-                                <StackPanel Grid.Column="2" HorizontalAlignment="Right" Spacing="2">
-                                    <TextBlock Text="Routed to" Style="{StaticResource CaptionTextBlockStyle}" Opacity="0.6" HorizontalAlignment="Right" />
-                                    <TextBlock Text="{x:Bind CurrentEndpointName}" Style="{StaticResource BodyTextBlockStyle}" HorizontalAlignment="Right" />
-                                </StackPanel>
-                            </Grid>
-                        </Border>
-                    </DataTemplate>
-                </ItemsRepeater.ItemTemplate>
-            </ItemsRepeater>
-        </ScrollViewer>
+        <Grid Grid.Row="1">
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="12"
+                        Visibility="{x:Bind ViewModel.IsLoading, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
+                <ProgressRing IsActive="True" Width="36" Height="36" />
+                <TextBlock Text="Discovering audio sessions..." Style="{StaticResource CaptionTextBlockStyle}" Opacity="0.7" HorizontalAlignment="Center" />
+            </StackPanel>
+
+            <ScrollViewer Visibility="{x:Bind ViewModel.HasItems, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
+                <ItemsRepeater ItemsSource="{x:Bind ViewModel.Items}">
+                    <ItemsRepeater.Layout>
+                        <StackLayout Spacing="8" />
+                    </ItemsRepeater.Layout>
+                    <ItemsRepeater.ItemTemplate>
+                        <DataTemplate x:DataType="vm:SessionRow">
+                            <Border Style="{StaticResource SectionCardStyle}">
+                                <Grid ColumnSpacing="14">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <Ellipse Width="10" Height="10" VerticalAlignment="Center"
+                                             Fill="{ThemeResource SystemFillColorSuccessBrush}"
+                                             Visibility="{x:Bind IsActive}" />
+                                    <StackPanel Grid.Column="1" Spacing="2">
+                                        <TextBlock Text="{x:Bind Title}" Style="{StaticResource BodyStrongTextBlockStyle}" />
+                                        <TextBlock Text="{x:Bind Subtitle}" Style="{StaticResource CaptionTextBlockStyle}" Opacity="0.7" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2" HorizontalAlignment="Right" Spacing="2">
+                                        <TextBlock Text="Routed to" Style="{StaticResource CaptionTextBlockStyle}" Opacity="0.6" HorizontalAlignment="Right" />
+                                        <TextBlock Text="{x:Bind CurrentEndpointName}" Style="{StaticResource BodyTextBlockStyle}" HorizontalAlignment="Right" />
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsRepeater.ItemTemplate>
+                </ItemsRepeater>
+            </ScrollViewer>
+        </Grid>
     </Grid>
 </Page>

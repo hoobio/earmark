@@ -16,7 +16,7 @@
     PrimaryButtonClick="OnSaveClicked"
     CloseButtonClick="OnCancelClicked">
 
-    <ScrollViewer MaxHeight="560" Padding="0,8,0,0">
+    <ScrollViewer MaxHeight="560" Padding="0,8,16,0" VerticalScrollBarVisibility="Auto" HorizontalScrollMode="Disabled">
         <StackPanel Spacing="12" Width="540">
 
             <TextBox Header="Name (optional)" Text="{x:Bind Editor.Name, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
@@ -78,8 +78,6 @@
                     </ItemsRepeater.ItemTemplate>
                 </ItemsRepeater>
             </Expander>
-
-            <NumberBox Header="Priority" Value="{x:Bind Editor.Priority, Mode=TwoWay}" Minimum="-1000" Maximum="1000" SpinButtonPlacementMode="Inline" HorizontalAlignment="Left" MinWidth="160" />
 
             <ToggleSwitch Header="Enabled" IsOn="{x:Bind Editor.Enabled, Mode=TwoWay}" />
 

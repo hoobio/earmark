@@ -10,7 +10,7 @@ namespace Earmark.App.Services;
 public interface IRoutingApplier
 {
     void Start();
-    Task ApplyAllAsync();
+    Task ApplyAllAsync(bool force = false);
     Task<AppliedRoute?> ApplyAsync(AudioSession session);
     event EventHandler<AppliedRoute>? RouteApplied;
 }
@@ -27,7 +27,7 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
     private readonly ILogger<RoutingApplier> _logger;
     private readonly HashSet<string> _appliedSessionKeys = new(StringComparer.OrdinalIgnoreCase);
     private readonly Lock _appliedGate = new();
-    private int _applyAllInFlight;
+    private readonly SemaphoreSlim _applyGate = new(1, 1);
 
     private bool _started;
     private Timer? _timer;
@@ -80,20 +80,39 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
         _logger.LogInformation("Routing applier started; periodic interval = {Interval}", PeriodicInterval);
     }
 
-    public async Task ApplyAllAsync()
+    public Task ApplyAllAsync(bool force = false) =>
+        ApplyAllInternalAsync(force, skipIfBusy: false);
+
+    private async Task ApplyAllInternalAsync(bool force, bool skipIfBusy)
     {
         if (_rules.Rules.Count == 0)
         {
             return;
         }
 
-        if (Interlocked.CompareExchange(ref _applyAllInFlight, 1, 0) != 0)
+        if (skipIfBusy)
         {
-            return;
+            if (!await _applyGate.WaitAsync(0).ConfigureAwait(false))
+            {
+                return;
+            }
+        }
+        else
+        {
+            await _applyGate.WaitAsync().ConfigureAwait(false);
         }
 
         try
         {
+            if (force)
+            {
+                lock (_appliedGate)
+                {
+                    _appliedSessionKeys.Clear();
+                }
+                _logger.LogInformation("ApplyAll: forced re-apply, cache cleared");
+            }
+
             await Task.Run(async () =>
             {
                 var sessions = _sessions.GetSessions();
@@ -108,7 +127,7 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
         }
         finally
         {
-            Interlocked.Exchange(ref _applyAllInFlight, 0);
+            _applyGate.Release();
         }
     }
 
@@ -193,12 +212,7 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
     {
         try
         {
-            lock (_appliedGate)
-            {
-                _appliedSessionKeys.Clear();
-            }
-
-            await ApplyAllAsync().ConfigureAwait(false);
+            await ApplyAllInternalAsync(force: true, skipIfBusy: false).ConfigureAwait(false);
             _logger.LogInformation("Reapplied all rules after rule change");
         }
         catch (Exception ex)
@@ -216,7 +230,7 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
 
         try
         {
-            await ApplyAllAsync().ConfigureAwait(false);
+            await ApplyAllInternalAsync(force: false, skipIfBusy: true).ConfigureAwait(false);
         }
         catch (Exception ex)
         {

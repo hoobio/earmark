@@ -19,6 +19,7 @@
     <ApplicationIcon>Assets\AppIcon.ico</ApplicationIcon>
     <DefaultLanguage>en-US</DefaultLanguage>
     <NoWarn>$(NoWarn);CsWinRT1028;CsWinRT1030;NU1903</NoWarn>
+    <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>
@@ -47,6 +48,7 @@
     <PackageReference Include="CommunityToolkit.WinUI.Controls.SettingsControls" />
     <PackageReference Include="CommunityToolkit.WinUI.Behaviors" />
     <PackageReference Include="CommunityToolkit.WinUI.Animations" />
+    <PackageReference Include="H.NotifyIcon.WinUI" />
     <PackageReference Include="Microsoft.Extensions.Hosting" />
     <PackageReference Include="Microsoft.Extensions.Logging.Debug" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Json" />
