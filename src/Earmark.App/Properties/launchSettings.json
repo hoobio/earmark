@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "Earmark.App (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "Earmark.App (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}
