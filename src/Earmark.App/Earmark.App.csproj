@@ -29,7 +29,13 @@
     <Content Include="Assets\Square44x44Logo.scale-200.png" />
     <Content Include="Assets\Square44x44Logo.targetsize-24_altform-unplated.png" />
     <Content Include="Assets\StoreLogo.png" />
-    <Content Include="Assets\AppIcon.ico" />
+    <!--
+      AppIcon.ico is loaded at runtime from AppContext.BaseDirectory by the tray
+      icon code. WinUI defaults Content to publish-but-not-build, and the unpackaged
+      publish output (used by the MSI) doesn't carry it across, so be explicit
+      about both copies. Other PNG assets only matter for MSIX so leave them alone.
+    -->
+    <Content Include="Assets\AppIcon.ico" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="Assets\logo.png" />
     <Content Include="Assets\Wide310x150Logo.scale-200.png" />
   </ItemGroup>
