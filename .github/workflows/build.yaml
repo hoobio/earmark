@@ -150,7 +150,7 @@ jobs:
           report-path: wack-report-${{ matrix.platform }}.xml
           exclusions-path: .github/wack-exclusions.json
           platform: ${{ matrix.platform }}
-          fail-on-error: ${{ github.event_name != 'pull_request' }}
+          fail-on-error: 'true'
 
       - name: Upload WACK report
         if: always()
