@@ -35,7 +35,7 @@ jobs:
       tag_name: ${{ steps.rp.outputs.tag_name }}
     steps:
       - id: rp
-        uses: hoobio/pipeline-tools/pipeline/github/step/release-please@v1.3.0
+        uses: hoobio/pipeline-tools/pipeline/github/step/release-please@549437dcf6f20cd8d064eedc5780687ead9ac8a7
         with:
           app-id: ${{ vars.RELEASE_PLEASE_APP_ID }}
           app-private-key: ${{ secrets.RELEASE_PLEASE_APP_PRIVATE_KEY }}
