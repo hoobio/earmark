@@ -47,7 +47,14 @@
 
     <Media Id="1" Cabinet="Earmark.cab" EmbedCab="yes" CompressionLevel="high" />
 
-    <Icon Id="EarmarkIcon" SourceFile="$(var.PayloadDir)\Assets\AppIcon.ico" />
+    <!--
+      Resolved relative to this .wxs file (installer\), so the icon comes from
+      the source tree rather than the published payload. The unpackaged WinUI
+      publish output doesn't include the Content asset folder, but the icon is
+      only needed at install time for the ARP entry and shortcut, not at
+      runtime, so referencing the source path is correct.
+    -->
+    <Icon Id="EarmarkIcon" SourceFile="$(sys.SOURCEFILEDIR)..\src\Earmark.App\Assets\AppIcon.ico" />
     <Property Id="ARPPRODUCTICON" Value="EarmarkIcon" />
     <Property Id="ARPHELPLINK" Value="https://github.com/hoobio/earmark" />
     <Property Id="ARPURLINFOABOUT" Value="https://github.com/hoobio/earmark" />
