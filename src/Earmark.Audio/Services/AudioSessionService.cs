@@ -19,17 +19,15 @@ namespace Earmark.Audio.Services;
 [SupportedOSPlatform("windows10.0.19041.0")]
 public sealed class AudioSessionService : IAudioSessionService, IDisposable
 {
-    private static readonly TimeSpan SafetyRefreshInterval = TimeSpan.FromMinutes(1);
-
     private readonly ILogger<AudioSessionService> _logger;
     private readonly IAudioEndpointService _endpoints;
     private readonly MMDeviceEnumerator _enumerator;
     private readonly Lock _gate = new();
     private readonly Lock _cacheGate = new();
     private readonly Dictionary<string, SessionWatcher> _watchers = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Timer _safetyTimer;
 
     private IReadOnlyList<AudioSession> _snapshot = Array.Empty<AudioSession>();
+    private HashSet<uint> _knownPids = new();
     private volatile bool _dirty = true;
     private bool _disposed;
 
@@ -40,17 +38,17 @@ public sealed class AudioSessionService : IAudioSessionService, IDisposable
         _enumerator = new MMDeviceEnumerator();
         _endpoints.EndpointsChanged += OnEndpointsChanged;
         AttachAll();
-        _safetyTimer = new Timer(_ => MarkDirty(), null, SafetyRefreshInterval, SafetyRefreshInterval);
     }
 
     public event EventHandler<AudioSessionEvent>? SessionAdded;
+    public event EventHandler<AudioSessionRemovedEvent>? SessionRemoved;
     public event EventHandler? SessionsChanged;
 
     public IReadOnlyList<AudioSession> GetSessions()
     {
         // Lazy rebuild: re-enumerate only if the cache has been marked dirty since the
-        // last build. Bursts of session events (volume changes, state flips) collapse
-        // into one rebuild on the next read.
+        // last build. Bursts of session events collapse into one rebuild on the next read.
+        List<uint>? removedPids = null;
         while (_dirty)
         {
             lock (_cacheGate)
@@ -63,13 +61,38 @@ public sealed class AudioSessionService : IAudioSessionService, IDisposable
                 _dirty = false;
                 try
                 {
-                    Volatile.Write(ref _snapshot, BuildSnapshot());
+                    var fresh = BuildSnapshot();
+                    var freshPids = new HashSet<uint>();
+                    foreach (var session in fresh)
+                    {
+                        freshPids.Add(session.ProcessId);
+                    }
+
+                    foreach (var oldPid in _knownPids)
+                    {
+                        if (!freshPids.Contains(oldPid))
+                        {
+                            (removedPids ??= new List<uint>()).Add(oldPid);
+                        }
+                    }
+
+                    _knownPids = freshPids;
+                    Volatile.Write(ref _snapshot, fresh);
                 }
                 catch (Exception ex)
                 {
                     _logger.LogWarning(ex, "Session cache rebuild failed; serving previous snapshot");
                     break;
                 }
+            }
+        }
+
+        if (removedPids is not null)
+        {
+            foreach (var pid in removedPids)
+            {
+                ProcessInfoCache.TryRemove(pid, out _);
+                SessionRemoved?.Invoke(this, new AudioSessionRemovedEvent(pid));
             }
         }
 
@@ -222,7 +245,6 @@ public sealed class AudioSessionService : IAudioSessionService, IDisposable
         }
 
         _disposed = true;
-        _safetyTimer.Dispose();
         _endpoints.EndpointsChanged -= OnEndpointsChanged;
         lock (_gate)
         {
@@ -276,9 +298,11 @@ public sealed class AudioSessionService : IAudioSessionService, IDisposable
             }
         }
 
-        public void OnVolumeChanged(float volume, bool isMuted) => _owner.RaiseChanged();
-        public void OnDisplayNameChanged(string displayName) => _owner.RaiseChanged();
-        public void OnIconPathChanged(string iconPath) => _owner.RaiseChanged();
+        // Volume / icon / display-name fire frequently and don't change routing-relevant
+        // state. Ignoring them keeps the snapshot stable and avoids waking the UI/applier.
+        public void OnVolumeChanged(float volume, bool isMuted) { }
+        public void OnDisplayNameChanged(string displayName) { }
+        public void OnIconPathChanged(string iconPath) { }
         public void OnChannelVolumeChanged(uint channelCount, IntPtr newVolumes, uint channelIndex) { }
         public void OnGroupingParamChanged(ref Guid groupingId) { }
         public void OnStateChanged(AudioSessionState state) => _owner.RaiseChanged();

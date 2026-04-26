@@ -27,10 +27,13 @@ internal static class HostBuilderExtensions
     {
         ArgumentNullException.ThrowIfNull(builder);
 
+        var fileLoggerProvider = new FileLoggerProvider(CurrentLogPath);
         builder.Logging.ClearProviders();
         builder.Logging.AddDebug();
-        builder.Logging.AddProvider(new FileLoggerProvider(CurrentLogPath));
-        builder.Logging.SetMinimumLevel(LogLevel.Debug);
+        builder.Logging.AddProvider(fileLoggerProvider);
+        builder.Logging.SetMinimumLevel(LogLevel.Trace);
+
+        builder.Services.AddSingleton(fileLoggerProvider);
 
         builder.Services.AddEarmarkCore();
         builder.Services.AddEarmarkInterop();

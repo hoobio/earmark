@@ -17,7 +17,9 @@ public interface IRoutingApplier
 
 internal sealed class RoutingApplier : IRoutingApplier, IDisposable
 {
-    private static readonly TimeSpan PeriodicInterval = TimeSpan.FromSeconds(10);
+    // Drift-guard only. The real triggers are SessionAdded / SessionRemoved /
+    // RulesChanged / DefaultsChanged. Keep this slow enough to not show up on idle CPU.
+    private static readonly TimeSpan PeriodicInterval = TimeSpan.FromMinutes(5);
 
     private readonly IRulesService _rules;
     private readonly IAudioSessionService _sessions;
@@ -61,6 +63,7 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
         _started = true;
         _cts = new CancellationTokenSource();
         _sessions.SessionAdded += OnSessionAdded;
+        _sessions.SessionRemoved += OnSessionRemoved;
         _rules.RulesChanged += OnRulesChanged;
         _endpoints.DefaultsChanged += OnDefaultsChanged;
 
@@ -149,13 +152,10 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
         var renderEndpoints = _endpoints.GetEndpoints(EndpointFlow.Render);
         var captureEndpoints = _endpoints.GetEndpoints(EndpointFlow.Capture);
 
-        _logger.LogInformation("ApplyAll: {Count} sessions, {RuleCount} rules", sessions.Count, _rules.Rules.Count);
+        _logger.LogDebug("ApplyAll: {Count} sessions, {RuleCount} rules", sessions.Count, _rules.Rules.Count);
 
         foreach (var session in sessions)
         {
-            _logger.LogDebug("Session: pid={Pid} name='{Name}' path='{Path}' state={State}",
-                session.ProcessId, session.ProcessName, session.ExecutablePath, session.State);
-
             ApplyAppForFlow(session, EndpointFlow.Render, renderEndpoints);
             ApplyAppForFlow(session, EndpointFlow.Capture, captureEndpoints);
         }
@@ -292,6 +292,29 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
         }
     }
 
+    private void OnSessionRemoved(object? sender, AudioSessionRemovedEvent e)
+    {
+        var prefix = $"app|{e.ProcessId}|";
+        var removed = 0;
+        lock (_appliedGate)
+        {
+            _appliedSessionKeys.RemoveWhere(k =>
+            {
+                if (k.StartsWith(prefix, StringComparison.Ordinal))
+                {
+                    removed++;
+                    return true;
+                }
+                return false;
+            });
+        }
+
+        if (removed > 0)
+        {
+            _logger.LogDebug("Session removed: pid {Pid} - evicted {Count} dedupe entries", e.ProcessId, removed);
+        }
+    }
+
     private async void OnRulesChanged(object? sender, EventArgs e)
     {
         try
@@ -348,6 +371,7 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
         _timer?.Dispose();
         _timer = null;
         _sessions.SessionAdded -= OnSessionAdded;
+        _sessions.SessionRemoved -= OnSessionRemoved;
         _rules.RulesChanged -= OnRulesChanged;
         _endpoints.DefaultsChanged -= OnDefaultsChanged;
         _cts?.Dispose();

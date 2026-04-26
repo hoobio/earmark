@@ -1,3 +1,4 @@
+using Earmark.App.Logging;
 using Earmark.App.Settings;
 
 using Microsoft.Extensions.Logging;
@@ -7,12 +8,17 @@ namespace Earmark.App.Services;
 internal sealed class StartupSettingsApplier : IDisposable
 {
     private readonly ISettingsService _settings;
+    private readonly FileLoggerProvider _fileLogger;
     private readonly ILogger<StartupSettingsApplier> _logger;
     private bool _started;
 
-    public StartupSettingsApplier(ISettingsService settings, ILogger<StartupSettingsApplier> logger)
+    public StartupSettingsApplier(
+        ISettingsService settings,
+        FileLoggerProvider fileLogger,
+        ILogger<StartupSettingsApplier> logger)
     {
         _settings = settings;
+        _fileLogger = fileLogger;
         _logger = logger;
     }
 
@@ -42,6 +48,13 @@ internal sealed class StartupSettingsApplier : IDisposable
             else
             {
                 StartupRegistration.Unregister();
+            }
+
+            var desired = s.VerboseLogging ? LogLevel.Debug : LogLevel.Information;
+            if (_fileLogger.MinimumLevel != desired)
+            {
+                _fileLogger.SetMinimumLevel(desired);
+                _logger.LogInformation("File log level set to {Level}", desired);
             }
         }
         catch (Exception ex)

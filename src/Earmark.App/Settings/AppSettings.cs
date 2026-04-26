@@ -11,4 +11,6 @@ public sealed class AppSettings
     public bool CloseToTray { get; set; }
 
     public bool LaunchToTray { get; set; }
+
+    public bool VerboseLogging { get; set; }
 }
