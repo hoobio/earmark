@@ -114,8 +114,7 @@
     <CustomAction Id="LaunchApplication"
                   BinaryRef="Wix4UtilCA_X86"
                   DllEntry="WixShellExec"
-                  Impersonate="yes"
-                  Return="asyncNoWait" />
+                  Impersonate="yes" />
 
     <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
     <WixVariable Id="WixUILicenseRtf" Value="$(sys.SOURCEFILEDIR)License.rtf" />
@@ -141,7 +140,7 @@
               Source="$(var.PayloadDir)\Earmark.App.exe"
               KeyPath="yes" />
       </Component>
-      <Files Include="$(var.PayloadDir)\**" Subdirectory=".">
+      <Files Include="$(var.PayloadDir)\**">
         <Exclude Files="$(var.PayloadDir)\Earmark.App.exe" />
       </Files>
     </ComponentGroup>
