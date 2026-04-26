@@ -249,14 +249,21 @@ jobs:
         with:
           subject-path: "release/msix-*/**/*.msix"
 
-      - name: Attach assets to draft release
+      - name: Attach SBOM to draft release
+        uses: hoobio/pipeline-tools/pipeline/github/step/upload-to-github-release@v1.1.0
+        with:
+          tag: ${{ needs.release-please.outputs.tag_name }}
+          file-path: release/sbom/${{ env.BOM_FILE }}
+          github-token: ${{ github.token }}
+
+      - name: Attach MSIX packages to draft release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.release-please.outputs.tag_name }}
         run: |
           set -euo pipefail
           mapfile -t MSIX_FILES < <(find release/msix-x64 release/msix-ARM64 -type f -name '*.msix')
-          gh release upload "$TAG" "${MSIX_FILES[@]}" "release/sbom/${{ env.BOM_FILE }}" --clobber --repo "${{ github.repository }}"
+          gh release upload "$TAG" "${MSIX_FILES[@]}" --clobber --repo "${{ github.repository }}"
 
       - name: Publish draft release
         uses: hoobio/pipeline-tools/pipeline/github/step/publish-github-release@v1.1.0
