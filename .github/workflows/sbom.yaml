@@ -93,17 +93,22 @@ jobs:
             exit 0
           fi
           if [ "$STATUS" != "404" ]; then
-            echo "::warning::Unexpected lookup status $STATUS for parent; attempting create anyway"
+            echo "::warning::Unexpected lookup status $STATUS for parent; attempting bootstrap anyway"
           fi
-          CREATE_STATUS=$(curl -sS -o /dev/null -w "%{http_code}" -X PUT "https://${DT_HOST}/api/v1/project" \
+          # Bootstrap via /api/v1/bom (POST multipart, autoCreate=true, no parent).
+          # The plain project create endpoint requires PORTFOLIO_MANAGEMENT, while the BOM
+          # upload endpoint accepts PROJECT_CREATION_UPLOAD which is the lower-privilege
+          # permission that this workflow's API key is expected to hold.
+          CREATE_STATUS=$(curl -sS -o /dev/null -w "%{http_code}" -X POST "https://${DT_HOST}/api/v1/bom" \
             -H "X-Api-Key: ${DT_API_KEY}" \
-            -H "Content-Type: application/json" \
-            -d "{\"name\":\"${PARENT_NAME}\",\"version\":\"${PARENT_VERSION}\"}")
-          # 201 created, 409 if it raced with another run (already exists by the time we PUT).
-          if [ "$CREATE_STATUS" = "201" ] || [ "$CREATE_STATUS" = "409" ]; then
-            echo "Parent ${PARENT_NAME}@${PARENT_VERSION} ready (HTTP $CREATE_STATUS)"
+            -F "autoCreate=true" \
+            -F "projectName=${PARENT_NAME}" \
+            -F "projectVersion=${PARENT_VERSION}" \
+            -F "bom=@${BOM_FILE}")
+          if [[ "$CREATE_STATUS" =~ ^20 ]]; then
+            echo "Parent ${PARENT_NAME}@${PARENT_VERSION} bootstrapped (HTTP $CREATE_STATUS)"
           else
-            echo "::error::Failed to create parent project ${PARENT_NAME}@${PARENT_VERSION} (HTTP $CREATE_STATUS)"
+            echo "::error::Failed to bootstrap parent project ${PARENT_NAME}@${PARENT_VERSION} (HTTP $CREATE_STATUS)"
             exit 1
           fi
 
