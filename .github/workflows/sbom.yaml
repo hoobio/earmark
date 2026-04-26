@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write  # required by `gh release upload` on release events
 
 env:
   # 5.1.0+ supports .slnx solution files; pinned to current stable.
@@ -21,10 +21,18 @@ env:
   BOM_FILE: sbom.cdx.json
 
 jobs:
-  branch:
-    name: Branch SBOM
-    if: github.event_name != 'release'
+  sbom:
+    name: SBOM
     runs-on: windows-latest
+    env:
+      DT_HOST: ${{ secrets.DT_HOST }}
+      DT_API_KEY: ${{ secrets.DT_API_KEY }}
+      IS_RELEASE: ${{ github.event_name == 'release' }}
+      REF_TAG_PREFIX: ${{ github.event_name == 'release' && 'tag' || 'branch' }}
+      # Child project (one row per build): release uses tag (v1.0.0), push uses commit SHA.
+      # Parent project (umbrella): release groups under "release", push under "main".
+      PROJECT_VERSION: ${{ github.event_name == 'release' && github.ref_name || github.sha }}
+      PARENT_VERSION: ${{ github.event_name == 'release' && 'release' || 'main' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -60,137 +68,118 @@ jobs:
           path: ${{ env.BOM_FILE }}
           if-no-files-found: error
 
-      - name: Upload SBOM to Dependency-Track
-        shell: bash
-        env:
-          DT_HOST: ${{ secrets.DT_HOST }}
-          DT_API_KEY: ${{ secrets.DT_API_KEY }}
-          PROJECT_NAME: ${{ github.event.repository.name }}/${{ github.event.repository.name }}
-          PROJECT_VERSION: ${{ github.ref_name }}
-          IS_LATEST: "true"
-        run: |
-          set -euo pipefail
-
-          if [ -z "${DT_HOST:-}" ] || [ -z "${DT_API_KEY:-}" ]; then
-            echo "::warning::DT_HOST or DT_API_KEY secret not set; skipping Dependency-Track upload."
-            exit 0
-          fi
-
-          if [ ! -f "$BOM_FILE" ]; then
-            echo "::error::BOM file not found: $BOM_FILE"
-            exit 1
-          fi
-
-          echo "Uploading $BOM_FILE to Dependency-Track as ${PROJECT_NAME}@${PROJECT_VERSION} (isLatest=${IS_LATEST})"
-
-          HTTP_STATUS=$(curl -sS \
-            -o dt_response.json \
-            -w "%{http_code}" \
-            -X POST "https://${DT_HOST}/api/v1/bom" \
-            -H "X-Api-Key: ${DT_API_KEY}" \
-            -F "autoCreate=true" \
-            -F "projectName=${PROJECT_NAME}" \
-            -F "projectVersion=${PROJECT_VERSION}" \
-            -F "isLatest=${IS_LATEST}" \
-            -F "bom=@${BOM_FILE}")
-
-          if [ "$HTTP_STATUS" -ge 200 ] && [ "$HTTP_STATUS" -lt 300 ]; then
-            echo "Upload accepted (HTTP $HTTP_STATUS)"
-            cat dt_response.json || true
-          else
-            echo "::error::Dependency-Track upload failed with HTTP $HTTP_STATUS"
-            cat dt_response.json || true
-            exit 1
-          fi
-
-  release:
-    name: Release SBOM
-    if: github.event_name == 'release'
-    runs-on: windows-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Checkout release tag
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.release.tag_name }}
-
-      - name: Setup .NET SDK ${{ env.DOTNET_SDK_VERSION }}
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: ${{ env.DOTNET_SDK_VERSION }}
-
-      - name: Install CycloneDX .NET tool
-        shell: pwsh
-        run: |
-          $version = $env:CYCLONEDX_DOTNET_VERSION
-          dotnet tool update --global CycloneDX --version $version
-          if ($LASTEXITCODE -ne 0) {
-            dotnet tool install --global CycloneDX --version $version
-          }
-
-      - name: Generate CycloneDX SBOM
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Path .sbom-out -Force | Out-Null
-          dotnet CycloneDX $env:SOLUTION_PATH --spec-version $env:CYCLONEDX_SPEC_VERSION --json --output .sbom-out --filename $env:BOM_FILE
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Move-Item -Path ".sbom-out/$env:BOM_FILE" -Destination $env:BOM_FILE -Force
-          Remove-Item .sbom-out -Recurse -Force
-          Get-Item $env:BOM_FILE
-
-      - name: Upload SBOM as workflow artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: sbom-cyclonedx-${{ github.event.release.tag_name }}
-          path: ${{ env.BOM_FILE }}
-          if-no-files-found: error
-
       - name: Attach SBOM to GitHub Release
+        if: env.IS_RELEASE == 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "${{ github.event.release.tag_name }}" "${{ env.BOM_FILE }}" --clobber --repo "${{ github.repository }}"
 
-      - name: Upload SBOM to Dependency-Track
+      - name: Ensure Dependency-Track parent project exists
+        if: env.DT_HOST != '' && env.DT_API_KEY != ''
         shell: bash
         env:
-          DT_HOST: ${{ secrets.DT_HOST }}
-          DT_API_KEY: ${{ secrets.DT_API_KEY }}
-          PROJECT_NAME: ${{ github.event.repository.name }}/releases/${{ github.event.repository.name }}
-          PROJECT_VERSION: ${{ github.event.release.tag_name }}
-          IS_LATEST: "true"
+          PARENT_NAME: ${{ github.event.repository.name }}
         run: |
           set -euo pipefail
-
-          if [ -z "${DT_HOST:-}" ] || [ -z "${DT_API_KEY:-}" ]; then
-            echo "::warning::DT_HOST or DT_API_KEY secret not set; skipping Dependency-Track upload."
+          STATUS=$(curl -sS -o /dev/null -w "%{http_code}" -G "https://${DT_HOST}/api/v1/project/lookup" \
+            --data-urlencode "name=${PARENT_NAME}" \
+            --data-urlencode "version=${PARENT_VERSION}" \
+            -H "X-Api-Key: ${DT_API_KEY}")
+          if [ "$STATUS" = "200" ]; then
+            echo "Parent ${PARENT_NAME}@${PARENT_VERSION} already exists"
             exit 0
           fi
-
-          if [ ! -f "$BOM_FILE" ]; then
-            echo "::error::BOM file not found: $BOM_FILE"
-            exit 1
+          if [ "$STATUS" != "404" ]; then
+            echo "::warning::Unexpected lookup status $STATUS for parent; attempting create anyway"
           fi
-
-          echo "Uploading $BOM_FILE to Dependency-Track as ${PROJECT_NAME}@${PROJECT_VERSION} (isLatest=${IS_LATEST})"
-
-          HTTP_STATUS=$(curl -sS \
-            -o dt_response.json \
-            -w "%{http_code}" \
-            -X POST "https://${DT_HOST}/api/v1/bom" \
+          CREATE_STATUS=$(curl -sS -o /dev/null -w "%{http_code}" -X PUT "https://${DT_HOST}/api/v1/project" \
             -H "X-Api-Key: ${DT_API_KEY}" \
-            -F "autoCreate=true" \
-            -F "projectName=${PROJECT_NAME}" \
-            -F "projectVersion=${PROJECT_VERSION}" \
-            -F "isLatest=${IS_LATEST}" \
-            -F "bom=@${BOM_FILE}")
-
-          if [ "$HTTP_STATUS" -ge 200 ] && [ "$HTTP_STATUS" -lt 300 ]; then
-            echo "Upload accepted (HTTP $HTTP_STATUS)"
-            cat dt_response.json || true
+            -H "Content-Type: application/json" \
+            -d "{\"name\":\"${PARENT_NAME}\",\"version\":\"${PARENT_VERSION}\"}")
+          # 201 created, 409 if it raced with another run (already exists by the time we PUT).
+          if [ "$CREATE_STATUS" = "201" ] || [ "$CREATE_STATUS" = "409" ]; then
+            echo "Parent ${PARENT_NAME}@${PARENT_VERSION} ready (HTTP $CREATE_STATUS)"
           else
-            echo "::error::Dependency-Track upload failed with HTTP $HTTP_STATUS"
-            cat dt_response.json || true
+            echo "::error::Failed to create parent project ${PARENT_NAME}@${PARENT_VERSION} (HTTP $CREATE_STATUS)"
             exit 1
           fi
+
+      - name: Upload SBOM to Dependency-Track
+        if: env.DT_HOST != '' && env.DT_API_KEY != ''
+        uses: DependencyTrack/gh-upload-sbom@v3.1.0
+        with:
+          serverhostname: ${{ env.DT_HOST }}
+          apikey: ${{ env.DT_API_KEY }}
+          projectname: ${{ github.event.repository.name }}
+          projectversion: ${{ env.PROJECT_VERSION }}
+          autocreate: true
+          bomfilename: ${{ env.BOM_FILE }}
+          projecttags: ${{ env.REF_TAG_PREFIX }}=${{ github.ref_name }},repo=${{ github.repository }},commit=${{ github.sha }},run_url=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          parentname: ${{ github.event.repository.name }}
+          parentversion: ${{ env.PARENT_VERSION }}
+
+      - name: Mark Dependency-Track project as latest
+        if: env.IS_RELEASE == 'true' && env.DT_HOST != '' && env.DT_API_KEY != ''
+        shell: bash
+        env:
+          PROJECT_NAME: ${{ github.event.repository.name }}
+        run: |
+          set -euo pipefail
+          UUID=$(curl -fsS -G "https://${DT_HOST}/api/v1/project/lookup" \
+            --data-urlencode "name=${PROJECT_NAME}" \
+            --data-urlencode "version=${PROJECT_VERSION}" \
+            -H "X-Api-Key: ${DT_API_KEY}" | jq -r '.uuid // ""')
+          if [ -z "$UUID" ]; then
+            echo "::warning::Could not resolve project UUID for ${PROJECT_NAME}@${PROJECT_VERSION}; skipping isLatest update"
+            exit 0
+          fi
+          curl -fsS -X PATCH "https://${DT_HOST}/api/v1/project/${UUID}" \
+            -H "X-Api-Key: ${DT_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d '{"isLatest": true}' >/dev/null
+          echo "Marked ${PROJECT_NAME}@${PROJECT_VERSION} as latest"
+
+      - name: Prune old commit children under main parent
+        if: env.IS_RELEASE != 'true' && env.DT_HOST != '' && env.DT_API_KEY != ''
+        shell: bash
+        env:
+          PARENT_NAME: ${{ github.event.repository.name }}
+          # Manual dispatches prune harder so you can test the prune logic without
+          # waiting for 11+ pushes to accumulate.
+          KEEP: ${{ github.event_name == 'workflow_dispatch' && '1' || '10' }}
+        run: |
+          set -euo pipefail
+          PARENT_UUID=$(curl -fsS -G "https://${DT_HOST}/api/v1/project/lookup" \
+            --data-urlencode "name=${PARENT_NAME}" \
+            --data-urlencode "version=${PARENT_VERSION}" \
+            -H "X-Api-Key: ${DT_API_KEY}" | jq -r '.uuid // ""')
+          if [ -z "$PARENT_UUID" ]; then
+            echo "::warning::Parent ${PARENT_NAME}@${PARENT_VERSION} not found; skipping prune"
+            exit 0
+          fi
+          # Children sorted newest-first by lastBomImport. Skip the most recent KEEP, delete the rest.
+          OLD_UUIDS=$(curl -fsS -G "https://${DT_HOST}/api/v1/project/${PARENT_UUID}/children" \
+            --data-urlencode "sortName=lastBomImport" \
+            --data-urlencode "sortOrder=desc" \
+            --data-urlencode "pageNumber=1" \
+            --data-urlencode "pageSize=1000" \
+            -H "X-Api-Key: ${DT_API_KEY}" \
+            | jq -r --argjson keep "${KEEP}" '.[$keep:] | .[].uuid')
+          DELETED=0
+          while IFS= read -r uuid; do
+            [ -z "$uuid" ] && continue
+            STATUS=$(curl -sS -o /dev/null -w "%{http_code}" -X DELETE "https://${DT_HOST}/api/v1/project/${uuid}" \
+              -H "X-Api-Key: ${DT_API_KEY}")
+            if [[ "$STATUS" =~ ^20[0-4]$ ]]; then
+              DELETED=$((DELETED+1))
+            else
+              echo "::warning::Delete failed for ${uuid} (HTTP ${STATUS})"
+            fi
+          done <<< "${OLD_UUIDS}"
+          echo "Pruned ${DELETED} old commit project(s); kept the ${KEEP} most recent under ${PARENT_NAME}@${PARENT_VERSION}"
+
+      - name: Skip notice if Dependency-Track secrets not configured
+        if: env.DT_HOST == '' || env.DT_API_KEY == ''
+        shell: bash
+        run: echo "::warning::DT_HOST or DT_API_KEY secret not set; skipping Dependency-Track upload."
