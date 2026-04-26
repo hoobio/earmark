@@ -152,14 +152,21 @@ internal sealed class WindowChromeManager : IWindowChromeManager, IDisposable
 
         icon.LeftClickCommand = new RelayCommandSimple(_ => RestoreWindow());
 
+        // H.NotifyIcon's default ContextMenuMode (PopupMenu, native Win32) wires
+        // native item clicks to MenuFlyoutItem.Command only - Click events are
+        // never raised. Bind Command, not Click.
         var menu = new Microsoft.UI.Xaml.Controls.MenuFlyout();
-        var showItem = new Microsoft.UI.Xaml.Controls.MenuFlyoutItem { Text = "Open Earmark" };
-        showItem.Click += (_, _) => RestoreWindow();
-        menu.Items.Add(showItem);
+        menu.Items.Add(new Microsoft.UI.Xaml.Controls.MenuFlyoutItem
+        {
+            Text = "Open Earmark",
+            Command = new RelayCommandSimple(_ => RestoreWindow()),
+        });
         menu.Items.Add(new Microsoft.UI.Xaml.Controls.MenuFlyoutSeparator());
-        var exitItem = new Microsoft.UI.Xaml.Controls.MenuFlyoutItem { Text = "Quit" };
-        exitItem.Click += (_, _) => RequestExit();
-        menu.Items.Add(exitItem);
+        menu.Items.Add(new Microsoft.UI.Xaml.Controls.MenuFlyoutItem
+        {
+            Text = "Quit",
+            Command = new RelayCommandSimple(_ => RequestExit()),
+        });
         icon.ContextFlyout = menu;
 
         icon.ForceCreate();
