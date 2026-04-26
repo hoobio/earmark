@@ -18,10 +18,13 @@ env:
   SOLUTION_PATH: Earmark.slnx
   PROJECT_PATH: src/Earmark.App/Earmark.App.csproj
   APPXMANIFEST_PATH: src/Earmark.App/Package.appxmanifest
+  WIX_SOURCE_PATH: installer/Earmark.wxs
   BOM_FILE: sbom.cdx.json
   # NOTE: GitHub Actions does not allow expressions in `uses:` refs, so the
   # pipeline-tools pin is repeated in each `uses:` line below. Bump in lockstep.
-  # Current pin: hoobio/pipeline-tools @ v1.2.0 (immutable release).
+  # Current pin: hoobio/pipeline-tools @ feat/wix-msi-helpers HEAD
+  # (d48c7263c2bc532fd2ddf3e3a8a20e6f1f38e77b). Bump to a tagged release
+  # before merge.
 
 jobs:
   release-please:
@@ -123,6 +126,90 @@ jobs:
           path: ${{ github.workspace }}\AppPackages\**\*.msix
           if-no-files-found: error
 
+  build-msi:
+    name: Build MSI (${{ matrix.platform }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [x64, ARM64]
+    env:
+      HAS_SIGNING_CERT: ${{ secrets.SIGNING_CERTIFICATE != '' && vars.SIGNING_CERT_THUMBPRINT != '' }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ env.DOTNET_SDK_VERSION }}
+
+      - name: Read version
+        id: version
+        shell: pwsh
+        run: |
+          $ver = (Get-Content version.txt -Raw).Trim()
+          "version=$ver" | Out-File -Append $env:GITHUB_OUTPUT
+          "APP_VERSION=$ver" | Out-File -Append $env:GITHUB_ENV
+
+      - name: Resolve runtime identifier
+        id: rid
+        shell: pwsh
+        run: |
+          $rid = if ($env:PLATFORM -eq 'ARM64') { 'win-arm64' } else { 'win-x64' }
+          "rid=$rid" | Out-File -Append $env:GITHUB_OUTPUT
+        env:
+          PLATFORM: ${{ matrix.platform }}
+
+      - name: Publish unpackaged self-contained build
+        shell: pwsh
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          RID: ${{ steps.rid.outputs.rid }}
+          PUBLISH_DIR: ${{ github.workspace }}\publish\${{ matrix.platform }}
+        run: |
+          New-Item -ItemType Directory -Path $env:PUBLISH_DIR -Force | Out-Null
+          dotnet publish $env:PROJECT_PATH `
+            -c Release `
+            -p:Platform=$env:PLATFORM `
+            -p:RuntimeIdentifier=$env:RID `
+            -p:WindowsPackageType=None `
+            -p:WindowsAppSDKSelfContained=true `
+            -p:SelfContained=true `
+            -o $env:PUBLISH_DIR
+          if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed (exit $LASTEXITCODE)" }
+          if (-not (Test-Path "$env:PUBLISH_DIR\Earmark.App.exe")) {
+            throw "Expected Earmark.App.exe in publish output"
+          }
+
+      - name: Build MSI
+        uses: hoobio/pipeline-tools/pipeline/github/step/build-msi-wix@d48c7263c2bc532fd2ddf3e3a8a20e6f1f38e77b
+        with:
+          wix-source-path: ${{ env.WIX_SOURCE_PATH }}
+          version: ${{ steps.version.outputs.version }}
+          platform: ${{ matrix.platform }}
+          payload-dir: ${{ github.workspace }}\publish\${{ matrix.platform }}
+          output-dir: ${{ github.workspace }}\MsiPackages\${{ matrix.platform }}
+
+      - name: Sign MSI
+        if: env.HAS_SIGNING_CERT == 'true'
+        uses: hoobio/pipeline-tools/pipeline/github/step/sign-msi@d48c7263c2bc532fd2ddf3e3a8a20e6f1f38e77b
+        with:
+          pfx-base64: ${{ secrets.SIGNING_CERTIFICATE }}
+          pfx-password: ${{ secrets.SIGNING_CERTIFICATE_PASSWORD }}
+          thumbprint: ${{ vars.SIGNING_CERT_THUMBPRINT }}
+          packages-path: ${{ github.workspace }}\MsiPackages\${{ matrix.platform }}
+
+      - name: Skip-sign notice
+        if: env.HAS_SIGNING_CERT != 'true'
+        shell: bash
+        run: echo "::warning::SIGNING_CERTIFICATE / SIGNING_CERT_THUMBPRINT not set; MSI produced unsigned."
+
+      - name: Upload MSI artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: msi-${{ matrix.platform }}
+          path: ${{ github.workspace }}\MsiPackages\${{ matrix.platform }}\*.msi
+          if-no-files-found: error
+
   wack:
     name: WACK (${{ matrix.platform }})
     needs: [build-msix]
@@ -214,12 +301,13 @@ jobs:
 
   release:
     name: Publish Release
-    needs: [release-please, lint-and-test, build-msix, wack, sbom]
+    needs: [release-please, lint-and-test, build-msix, build-msi, wack, sbom]
     if: >-
       always()
       && needs.release-please.outputs.release_created == 'true'
       && needs.lint-and-test.result == 'success'
       && needs.build-msix.result == 'success'
+      && needs.build-msi.result == 'success'
       && needs.wack.result == 'success'
       && needs.sbom.result == 'success'
     runs-on: ubuntu-latest
@@ -238,6 +326,16 @@ jobs:
         with:
           name: msix-ARM64
           path: release/msix-ARM64
+      - name: Download MSI (x64)
+        uses: actions/download-artifact@v8
+        with:
+          name: msi-x64
+          path: release/msi-x64
+      - name: Download MSI (ARM64)
+        uses: actions/download-artifact@v8
+        with:
+          name: msi-ARM64
+          path: release/msi-ARM64
       - name: Download SBOM
         uses: actions/download-artifact@v8
         with:
@@ -249,6 +347,11 @@ jobs:
         with:
           subject-path: "release/msix-*/**/*.msix"
 
+      - name: Attest MSI provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: "release/msi-*/**/*.msi"
+
       - name: Attach SBOM to draft release
         uses: hoobio/pipeline-tools/pipeline/github/step/upload-to-github-release@v1.2.0
         with:
@@ -256,14 +359,14 @@ jobs:
           file-path: release/sbom/${{ env.BOM_FILE }}
           github-token: ${{ github.token }}
 
-      - name: Attach MSIX packages to draft release
+      - name: Attach packages to draft release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.release-please.outputs.tag_name }}
         run: |
           set -euo pipefail
-          mapfile -t MSIX_FILES < <(find release/msix-x64 release/msix-ARM64 -type f -name '*.msix')
-          gh release upload "$TAG" "${MSIX_FILES[@]}" --clobber --repo "${{ github.repository }}"
+          mapfile -t PACKAGE_FILES < <(find release/msix-x64 release/msix-ARM64 release/msi-x64 release/msi-ARM64 -type f \( -name '*.msix' -o -name '*.msi' \))
+          gh release upload "$TAG" "${PACKAGE_FILES[@]}" --clobber --repo "${{ github.repository }}"
 
       - name: Publish draft release
         uses: hoobio/pipeline-tools/pipeline/github/step/publish-github-release@v1.2.0

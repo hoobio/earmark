@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Earmark MSI installer (WiX 5).
+
+  Per-user install: no UAC prompt, no Program Files writes. Earmark is a tray app
+  that lives entirely in the user session, so requiring elevation just to drop a
+  self-contained payload into LocalAppData adds friction without security value.
+
+  Preprocessor variables supplied by the build pipeline:
+    Version    - four-part version (X.Y.Z.W). Sourced from version.txt.
+    Platform   - "x64" or "ARM64". Used only for the Manufacturer arch suffix in
+                 ARP and the file payload root name; the wix `-arch` flag drives
+                 the actual MSI Template summary attribute.
+    PayloadDir - root of the published self-contained build to wrap.
+
+  UpgradeCode is stable across versions and architectures so an x64-installed
+  Earmark is correctly upgraded by a newer x64 MSI. ARM64 ships under a separate
+  UpgradeCode because Windows blocks cross-arch upgrades on per-user MSIs.
+  ProductCode is regenerated per build (default `*`).
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+
+  <?if $(var.Platform) = "ARM64" ?>
+    <?define UpgradeCodeGuid = "9F3A1E8B-2C7D-4A41-B6E5-1D8F0C9A7B22" ?>
+    <?define ShortcutGuid = "C13B7AE6-4F2E-4B0A-A4D7-7E8C1A5B9D31" ?>
+    <?define PlatformLabel = "ARM64" ?>
+  <?else?>
+    <?define UpgradeCodeGuid = "755F033C-94B7-466F-B5FA-2BFAEADADDA0" ?>
+    <?define ShortcutGuid = "2E5E5C30-4A8E-4B1E-8E13-9D9B1B5C6F70" ?>
+    <?define PlatformLabel = "x64" ?>
+  <?endif?>
+
+  <Package
+      Name="Earmark"
+      Manufacturer="hoobio"
+      Version="$(var.Version)"
+      UpgradeCode="$(var.UpgradeCodeGuid)"
+      Scope="perUser"
+      Compressed="yes"
+      InstallerVersion="500">
+
+    <SummaryInformation Description="Earmark $(var.PlatformLabel) installer" />
+
+    <MajorUpgrade
+        DowngradeErrorMessage="A newer version of Earmark is already installed."
+        Schedule="afterInstallInitialize" />
+
+    <Media Id="1" Cabinet="Earmark.cab" EmbedCab="yes" CompressionLevel="high" />
+
+    <Icon Id="EarmarkIcon" SourceFile="$(var.PayloadDir)\Assets\AppIcon.ico" />
+    <Property Id="ARPPRODUCTICON" Value="EarmarkIcon" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/hoobio/earmark" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/hoobio/earmark" />
+    <Property Id="ARPNOREPAIR" Value="1" />
+    <Property Id="ARPNOMODIFY" Value="1" />
+
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="INSTALLFOLDER" Name="Earmark" />
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Component Id="StartMenuShortcut" Guid="$(var.ShortcutGuid)">
+        <Shortcut Id="EarmarkShortcut"
+                  Name="Earmark"
+                  Description="Per-app audio routing"
+                  Target="[INSTALLFOLDER]Earmark.App.exe"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="EarmarkIcon"
+                  IconIndex="0" />
+        <RegistryValue Root="HKCU"
+                       Key="Software\hoobio\Earmark"
+                       Name="StartMenuShortcut"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+
+    <Feature Id="Main" Title="Earmark" Level="1" AllowAdvertise="no" Display="expand" ConfigurableDirectory="INSTALLFOLDER">
+      <ComponentGroupRef Id="EarmarkPayload" />
+      <ComponentRef Id="StartMenuShortcut" />
+    </Feature>
+
+  </Package>
+
+  <Fragment>
+    <ComponentGroup Id="EarmarkPayload" Directory="INSTALLFOLDER">
+      <Files Include="$(var.PayloadDir)\**" />
+    </ComponentGroup>
+  </Fragment>
+
+</Wix>
