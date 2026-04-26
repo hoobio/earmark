@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.2](https://github.com/hoobio/earmark/compare/v0.1.1...v0.1.2) (2026-04-26)
+
+
+### Bug Fixes
+
+* **installer:** copy AppIcon.ico to publish output for the MSI ([48ee6c1](https://github.com/hoobio/earmark/commit/48ee6c186aefa9e0b0ca60b67b03e8fb86e0e118))
+* **ui:** tray context menu and installer icon publish ([#13](https://github.com/hoobio/earmark/issues/13)) ([48ee6c1](https://github.com/hoobio/earmark/commit/48ee6c186aefa9e0b0ca60b67b03e8fb86e0e118))
+
+
+### Continuous Integration
+
+* pin release-please to v1.3.1 ([48ee6c1](https://github.com/hoobio/earmark/commit/48ee6c186aefa9e0b0ca60b67b03e8fb86e0e118))
+
 ## [0.1.1](https://github.com/hoobio/earmark/compare/v0.1.0...v0.1.1) (2026-04-26)
 
 
