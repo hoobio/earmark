@@ -144,13 +144,13 @@ jobs:
           path: msix
 
       - name: Run WACK
-        uses: hoobio/pipeline-tools/pipeline/github/step/run-wack@v1.1.0
+        uses: hoobio/pipeline-tools/pipeline/github/step/run-wack@8704a6276998a90569ba75c5b793e4e68288bea5
         with:
           msix-path: msix
           report-path: wack-report-${{ matrix.platform }}.xml
           exclusions-path: .github/wack-exclusions.json
           platform: ${{ matrix.platform }}
-          fail-on-real-failure: ${{ github.event_name != 'pull_request' }}
+          fail-on-error: ${{ github.event_name != 'pull_request' }}
 
       - name: Upload WACK report
         if: always()
