@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Earmark MSI installer (WiX 5).
+
+  Per-user install: no UAC prompt, no Program Files writes. Earmark is a tray app
+  that lives entirely in the user session, so requiring elevation just to drop a
+  self-contained payload into LocalAppData adds friction without security value.
+
+  UI flow uses WixUI_InstallDir (Welcome -> License -> InstallDir -> Verify ->
+  Progress -> Finish) so the user gets visible feedback during install, can
+  customise the install location, and can opt to launch Earmark when the
+  installer finishes.
+
+  Preprocessor variables supplied by the build pipeline:
+    Version    - four-part version (X.Y.Z.W). Sourced from version.txt.
+    Platform   - "x64" or "ARM64". Used to namespace the per-arch UpgradeCode and
+                 Component GUIDs. The wix `-arch` flag drives the actual MSI
+                 Template summary attribute.
+    PayloadDir - root of the published self-contained build to wrap.
+
+  UpgradeCode is stable per-architecture so a newer x64 MSI correctly upgrades an
+  installed x64 Earmark. ARM64 ships under a separate UpgradeCode because Windows
+  blocks cross-arch upgrades on per-user MSIs. ProductCode is regenerated per
+  build (default `*`).
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+
+  <?if $(var.Platform) = "ARM64" ?>
+    <?define UpgradeCodeGuid = "9F3A1E8B-2C7D-4A41-B6E5-1D8F0C9A7B22" ?>
+    <?define ShortcutGuid = "C13B7AE6-4F2E-4B0A-A4D7-7E8C1A5B9D31" ?>
+    <?define PlatformLabel = "ARM64" ?>
+  <?else?>
+    <?define UpgradeCodeGuid = "755F033C-94B7-466F-B5FA-2BFAEADADDA0" ?>
+    <?define ShortcutGuid = "2E5E5C30-4A8E-4B1E-8E13-9D9B1B5C6F70" ?>
+    <?define PlatformLabel = "x64" ?>
+  <?endif?>
+
+  <Package
+      Name="Earmark"
+      Manufacturer="hoobio"
+      Version="$(var.Version)"
+      UpgradeCode="$(var.UpgradeCodeGuid)"
+      Scope="perUser"
+      Compressed="yes"
+      InstallerVersion="500">
+
+    <SummaryInformation Description="Earmark $(var.PlatformLabel) installer" />
+
+    <MajorUpgrade
+        DowngradeErrorMessage="A newer version of Earmark is already installed."
+        Schedule="afterInstallInitialize" />
+
+    <Media Id="1" Cabinet="Earmark.cab" EmbedCab="yes" CompressionLevel="high" />
+
+    <!--
+      Resolved relative to this .wxs file (installer\), so the icon comes from
+      the source tree rather than the published payload. The unpackaged WinUI
+      publish output doesn't include the Content asset folder, but the icon is
+      only needed at install time for the ARP entry and shortcut, not at
+      runtime, so referencing the source path is correct.
+    -->
+    <Icon Id="EarmarkIcon" SourceFile="$(sys.SOURCEFILEDIR)..\src\Earmark.App\Assets\AppIcon.ico" />
+    <Property Id="ARPPRODUCTICON" Value="EarmarkIcon" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/hoobio/earmark" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/hoobio/earmark" />
+    <Property Id="ARPNOREPAIR" Value="1" />
+    <!--
+      ARPNOMODIFY is set automatically by the WixUI_InstallDir dialog set, so
+      declaring it here would be a duplicate-symbol error.
+    -->
+
+
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="INSTALLFOLDER" Name="Earmark" />
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Component Id="StartMenuShortcut" Guid="$(var.ShortcutGuid)">
+        <Shortcut Id="EarmarkShortcut"
+                  Name="Earmark"
+                  Description="Per-app audio routing"
+                  Target="[INSTALLFOLDER]Earmark.App.exe"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="EarmarkIcon"
+                  IconIndex="0" />
+        <RegistryValue Root="HKCU"
+                       Key="Software\hoobio\Earmark"
+                       Name="StartMenuShortcut"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+
+    <Feature Id="Main" Title="Earmark" Level="1" AllowAdvertise="no" Display="expand" ConfigurableDirectory="INSTALLFOLDER">
+      <ComponentGroupRef Id="EarmarkPayload" />
+      <ComponentRef Id="StartMenuShortcut" />
+    </Feature>
+
+    <!--
+      WixUI_InstallDir provides the configurable install path dialog. The Finish
+      dialog gets a "Launch Earmark" optional checkbox bound to a WixShellExec
+      custom action so the user can start the app from the installer.
+
+      WIXUI_INSTALLDIR points the InstallDir dialog at our INSTALLFOLDER property
+      so the Browse button writes back to the right place. The Publish element
+      wires the Finish button's checkbox state to the launch custom action; the
+      `NOT Installed` condition restricts it to first-time installs (not repair
+      / uninstall flows).
+    -->
+    <!--
+      WIXUI_INSTALLDIR is set automatically by `<ui:WixUI ... InstallDirectory="INSTALLFOLDER" />`,
+      so a manual <Property> declaration here would conflict with the value the
+      extension's dialog set already publishes.
+    -->
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Launch Earmark" />
+    <Property Id="WixShellExecTarget" Value="[#EarmarkAppExe]" />
+
+    <CustomAction Id="LaunchApplication"
+                  BinaryRef="Wix4UtilCA_X86"
+                  DllEntry="WixShellExec"
+                  Impersonate="yes" />
+
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+    <WixVariable Id="WixUILicenseRtf" Value="$(sys.SOURCEFILEDIR)License.rtf" />
+
+    <UI>
+      <Publish Dialog="ExitDialog"
+               Control="Finish"
+               Event="DoAction"
+               Value="LaunchApplication"
+               Condition="WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 and NOT Installed" />
+    </UI>
+
+  </Package>
+
+  <!--
+    Payload harvest. Earmark.App.exe gets an explicit File Id so WixShellExec can
+    target it via [#EarmarkAppExe]; everything else is auto-harvested by <Files>.
+  -->
+  <Fragment>
+    <ComponentGroup Id="EarmarkPayload" Directory="INSTALLFOLDER">
+      <Component Id="EarmarkAppExeComponent" Guid="0E9B8C61-9F47-4D1F-94E6-7A2C3D5F4B82">
+        <File Id="EarmarkAppExe"
+              Source="$(var.PayloadDir)\Earmark.App.exe"
+              KeyPath="yes" />
+      </Component>
+      <Files Include="$(var.PayloadDir)\**">
+        <Exclude Files="$(var.PayloadDir)\Earmark.App.exe" />
+      </Files>
+    </ComponentGroup>
+  </Fragment>
+
+</Wix>
