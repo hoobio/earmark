@@ -66,7 +66,11 @@
     <Property Id="ARPHELPLINK" Value="https://github.com/hoobio/earmark" />
     <Property Id="ARPURLINFOABOUT" Value="https://github.com/hoobio/earmark" />
     <Property Id="ARPNOREPAIR" Value="1" />
-    <Property Id="ARPNOMODIFY" Value="1" />
+    <!--
+      ARPNOMODIFY is set automatically by the WixUI_InstallDir dialog set, so
+      declaring it here would be a duplicate-symbol error.
+    -->
+
 
     <StandardDirectory Id="LocalAppDataFolder">
       <Directory Id="INSTALLFOLDER" Name="Earmark" />
@@ -106,7 +110,11 @@
       `NOT Installed` condition restricts it to first-time installs (not repair
       / uninstall flows).
     -->
-    <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
+    <!--
+      WIXUI_INSTALLDIR is set automatically by `<ui:WixUI ... InstallDirectory="INSTALLFOLDER" />`,
+      so a manual <Property> declaration here would conflict with the value the
+      extension's dialog set already publishes.
+    -->
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Launch Earmark" />
     <Property Id="WixShellExecTarget" Value="[#EarmarkAppExe]" />
