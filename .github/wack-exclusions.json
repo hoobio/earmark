@@ -1,0 +1,6 @@
+[
+  {
+    "test": "Blocked executables",
+    "reason": ".NET runtime / WinAppSDK compatibility shims (coreclr.dll, System.Windows.Forms.Primitives.dll) carry static references to ShellExecuteW and CreateProcess. The references are present in every .NET-based MSIX but are not invoked from the MSIX-sandboxed code paths Earmark exercises. Documented false positive."
+  }
+]
