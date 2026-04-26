@@ -208,7 +208,10 @@ jobs:
           platform: ${{ matrix.platform }}
           payload-dir: ${{ github.workspace }}\publish\${{ matrix.platform }}
           output-dir: ${{ github.workspace }}\staging\msi-${{ matrix.platform }}
-          extensions: "WixToolset.UI.wixext,WixToolset.Util.wixext"
+          # Pin extensions to 5.x; the unversioned form pulls the latest (currently
+          # 7.0.0), which fails with "Could not find expected package root folder
+          # wixext5. Ensure WixToolset.UI.wixext/7.0.0 is compatible with WiX v5."
+          extensions: "WixToolset.UI.wixext/5.0.2,WixToolset.Util.wixext/5.0.2"
 
       - name: Sign MSI
         if: env.HAS_SIGNING_CERT == 'true'
