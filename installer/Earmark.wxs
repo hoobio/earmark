@@ -6,19 +6,26 @@
   that lives entirely in the user session, so requiring elevation just to drop a
   self-contained payload into LocalAppData adds friction without security value.
 
+  UI flow uses WixUI_InstallDir (Welcome -> License -> InstallDir -> Verify ->
+  Progress -> Finish) so the user gets visible feedback during install, can
+  customise the install location, and can opt to launch Earmark when the
+  installer finishes.
+
   Preprocessor variables supplied by the build pipeline:
     Version    - four-part version (X.Y.Z.W). Sourced from version.txt.
-    Platform   - "x64" or "ARM64". Used only for the Manufacturer arch suffix in
-                 ARP and the file payload root name; the wix `-arch` flag drives
-                 the actual MSI Template summary attribute.
+    Platform   - "x64" or "ARM64". Used to namespace the per-arch UpgradeCode and
+                 Component GUIDs. The wix `-arch` flag drives the actual MSI
+                 Template summary attribute.
     PayloadDir - root of the published self-contained build to wrap.
 
-  UpgradeCode is stable across versions and architectures so an x64-installed
-  Earmark is correctly upgraded by a newer x64 MSI. ARM64 ships under a separate
-  UpgradeCode because Windows blocks cross-arch upgrades on per-user MSIs.
-  ProductCode is regenerated per build (default `*`).
+  UpgradeCode is stable per-architecture so a newer x64 MSI correctly upgrades an
+  installed x64 Earmark. ARM64 ships under a separate UpgradeCode because Windows
+  blocks cross-arch upgrades on per-user MSIs. ProductCode is regenerated per
+  build (default `*`).
 -->
-<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
 
   <?if $(var.Platform) = "ARM64" ?>
     <?define UpgradeCodeGuid = "9F3A1E8B-2C7D-4A41-B6E5-1D8F0C9A7B22" ?>
@@ -88,11 +95,55 @@
       <ComponentRef Id="StartMenuShortcut" />
     </Feature>
 
+    <!--
+      WixUI_InstallDir provides the configurable install path dialog. The Finish
+      dialog gets a "Launch Earmark" optional checkbox bound to a WixShellExec
+      custom action so the user can start the app from the installer.
+
+      WIXUI_INSTALLDIR points the InstallDir dialog at our INSTALLFOLDER property
+      so the Browse button writes back to the right place. The Publish element
+      wires the Finish button's checkbox state to the launch custom action; the
+      `NOT Installed` condition restricts it to first-time installs (not repair
+      / uninstall flows).
+    -->
+    <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Launch Earmark" />
+    <Property Id="WixShellExecTarget" Value="[#EarmarkAppExe]" />
+
+    <CustomAction Id="LaunchApplication"
+                  BinaryRef="Wix4UtilCA_X86"
+                  DllEntry="WixShellExec"
+                  Impersonate="yes"
+                  Return="asyncNoWait" />
+
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+    <WixVariable Id="WixUILicenseRtf" Value="$(sys.SOURCEFILEDIR)License.rtf" />
+
+    <UI>
+      <Publish Dialog="ExitDialog"
+               Control="Finish"
+               Event="DoAction"
+               Value="LaunchApplication"
+               Condition="WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 and NOT Installed" />
+    </UI>
+
   </Package>
 
+  <!--
+    Payload harvest. Earmark.App.exe gets an explicit File Id so WixShellExec can
+    target it via [#EarmarkAppExe]; everything else is auto-harvested by <Files>.
+  -->
   <Fragment>
     <ComponentGroup Id="EarmarkPayload" Directory="INSTALLFOLDER">
-      <Files Include="$(var.PayloadDir)\**" />
+      <Component Id="EarmarkAppExeComponent" Guid="0E9B8C61-9F47-4D1F-94E6-7A2C3D5F4B82">
+        <File Id="EarmarkAppExe"
+              Source="$(var.PayloadDir)\Earmark.App.exe"
+              KeyPath="yes" />
+      </Component>
+      <Files Include="$(var.PayloadDir)\**" Subdirectory=".">
+        <Exclude Files="$(var.PayloadDir)\Earmark.App.exe" />
+      </Files>
     </ComponentGroup>
   </Fragment>
 
