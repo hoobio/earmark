@@ -21,7 +21,7 @@ env:
   BOM_FILE: sbom.cdx.json
   # NOTE: GitHub Actions does not allow expressions in `uses:` refs, so the
   # pipeline-tools pin is repeated in each `uses:` line below. Bump in lockstep.
-  # Current pin: feat/release-msix-helpers @ 98b3a64 (TEST PIN; replace with v1.x.x once released).
+  # Current pin: hoobio/pipeline-tools @ v1.1.0 (immutable release).
 
 jobs:
   release-please:
@@ -33,7 +33,7 @@ jobs:
       tag_name: ${{ steps.rp.outputs.tag_name }}
     steps:
       - id: rp
-        uses: hoobio/pipeline-tools/pipeline/github/step/release-please@98b3a6433fcff5a5181e1951a47a69288d7fb754
+        uses: hoobio/pipeline-tools/pipeline/github/step/release-please@v1.1.0
         with:
           app-id: ${{ vars.RELEASE_PLEASE_APP_ID }}
           app-private-key: ${{ secrets.RELEASE_PLEASE_APP_PRIVATE_KEY }}
@@ -90,13 +90,13 @@ jobs:
           "APP_VERSION=$ver" | Out-File -Append $env:GITHUB_ENV
 
       - name: Stamp Package.appxmanifest version
-        uses: hoobio/pipeline-tools/pipeline/github/step/stamp-msix-version@98b3a6433fcff5a5181e1951a47a69288d7fb754
+        uses: hoobio/pipeline-tools/pipeline/github/step/stamp-msix-version@v1.1.0
         with:
           manifest-path: ${{ env.APPXMANIFEST_PATH }}
           version: ${{ steps.version.outputs.version }}
 
       - name: Build MSIX
-        uses: hoobio/pipeline-tools/pipeline/github/step/build-msix-dotnet@98b3a6433fcff5a5181e1951a47a69288d7fb754
+        uses: hoobio/pipeline-tools/pipeline/github/step/build-msix-dotnet@v1.1.0
         with:
           project-path: ${{ env.PROJECT_PATH }}
           platform: ${{ matrix.platform }}
@@ -104,7 +104,7 @@ jobs:
 
       - name: Sign MSIX
         if: env.HAS_SIGNING_CERT == 'true'
-        uses: hoobio/pipeline-tools/pipeline/github/step/sign-msix@98b3a6433fcff5a5181e1951a47a69288d7fb754
+        uses: hoobio/pipeline-tools/pipeline/github/step/sign-msix@v1.1.0
         with:
           pfx-base64: ${{ secrets.SIGNING_CERTIFICATE }}
           pfx-password: ${{ secrets.SIGNING_CERTIFICATE_PASSWORD }}
@@ -144,7 +144,7 @@ jobs:
           path: msix
 
       - name: Run WACK
-        uses: hoobio/pipeline-tools/pipeline/github/step/run-wack@98b3a6433fcff5a5181e1951a47a69288d7fb754
+        uses: hoobio/pipeline-tools/pipeline/github/step/run-wack@v1.1.0
         with:
           msix-path: msix
           report-path: wack-report-${{ matrix.platform }}.xml
@@ -178,7 +178,7 @@ jobs:
           dotnet-version: ${{ env.DOTNET_SDK_VERSION }}
 
       - name: Generate CycloneDX SBOM
-        uses: hoobio/pipeline-tools/pipeline/github/step/cyclonedx-sbom-dotnet@98b3a6433fcff5a5181e1951a47a69288d7fb754
+        uses: hoobio/pipeline-tools/pipeline/github/step/cyclonedx-sbom-dotnet@v1.1.0
         with:
           solution-path: ${{ env.SOLUTION_PATH }}
           output-path: ${{ env.BOM_FILE }}
@@ -192,7 +192,7 @@ jobs:
 
       - name: Upload SBOM to Dependency-Track
         if: env.DT_HOST != '' && env.DT_API_KEY != ''
-        uses: hoobio/pipeline-tools/pipeline/github/job/upload-sbom-to-dependency-track@98b3a6433fcff5a5181e1951a47a69288d7fb754
+        uses: hoobio/pipeline-tools/pipeline/github/job/upload-sbom-to-dependency-track@v1.1.0
         with:
           bom-path: ${{ env.BOM_FILE }}
           upload-artifact: 'false'
@@ -259,7 +259,7 @@ jobs:
           gh release upload "$TAG" "${MSIX_FILES[@]}" "release/sbom/${{ env.BOM_FILE }}" --clobber --repo "${{ github.repository }}"
 
       - name: Publish draft release
-        uses: hoobio/pipeline-tools/pipeline/github/step/publish-github-release@98b3a6433fcff5a5181e1951a47a69288d7fb754
+        uses: hoobio/pipeline-tools/pipeline/github/step/publish-github-release@v1.1.0
         with:
           tag: ${{ needs.release-please.outputs.tag_name }}
           github-token: ${{ github.token }}
