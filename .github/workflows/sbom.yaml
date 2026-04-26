@@ -38,7 +38,7 @@ jobs:
           dotnet-version: ${{ env.DOTNET_SDK_VERSION }}
 
       - name: Generate CycloneDX SBOM
-        uses: hoobio/pipeline-tools/pipeline/github/step/cyclonedx-sbom-dotnet@v1.0.0
+        uses: hoobio/pipeline-tools/pipeline/github/step/cyclonedx-sbom-dotnet@v1.0.1
         with:
           solution-path: ${{ env.SOLUTION_PATH }}
           output-path: ${{ env.BOM_FILE }}
@@ -52,14 +52,15 @@ jobs:
 
       - name: Attach SBOM to GitHub Release
         if: env.IS_RELEASE == 'true'
-        uses: hoobio/pipeline-tools/pipeline/github/step/upload-to-github-release@v1.0.0
+        uses: hoobio/pipeline-tools/pipeline/github/step/upload-to-github-release@v1.0.1
         with:
           tag: ${{ github.event.release.tag_name }}
           file-path: ${{ env.BOM_FILE }}
+          github-token: ${{ github.token }}
 
       - name: Upload SBOM to Dependency-Track
         if: env.DT_HOST != '' && env.DT_API_KEY != ''
-        uses: hoobio/pipeline-tools/pipeline/github/job/upload-sbom-to-dependency-track@v1.0.0
+        uses: hoobio/pipeline-tools/pipeline/github/job/upload-sbom-to-dependency-track@v1.0.1
         with:
           bom-path: ${{ env.BOM_FILE }}
           upload-artifact: 'false'                          # already uploaded above
