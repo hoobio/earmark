@@ -64,7 +64,9 @@ jobs:
       - name: Upload SBOM as workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: sbom-cyclonedx-${{ github.ref_name }}
+          # github.ref_name can contain `/` (feature branches); artifact names forbid it.
+          # PROJECT_VERSION is sha on push/dispatch and tag on release - both safe.
+          name: sbom-cyclonedx-${{ env.PROJECT_VERSION }}
           path: ${{ env.BOM_FILE }}
           if-no-files-found: error
 
