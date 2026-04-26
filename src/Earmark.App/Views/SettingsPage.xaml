@@ -38,6 +38,10 @@
                     <ToggleSwitch IsOn="{x:Bind ViewModel.LaunchToTray, Mode=TwoWay}" />
                 </ctrl:SettingsCard>
 
+                <ctrl:SettingsCard Header="Verbose logging" Description="Write debug-level diagnostics to the log file. Leave off for normal use.">
+                    <ToggleSwitch IsOn="{x:Bind ViewModel.VerboseLogging, Mode=TwoWay}" />
+                </ctrl:SettingsCard>
+
             </StackPanel>
         </ScrollViewer>
     </Grid>

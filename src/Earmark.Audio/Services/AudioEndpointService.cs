@@ -13,7 +13,7 @@ namespace Earmark.Audio.Services;
 [SupportedOSPlatform("windows10.0.19041.0")]
 public sealed class AudioEndpointService : IAudioEndpointService, IMMNotificationClient, IDisposable
 {
-    private static readonly TimeSpan SafetyRefreshInterval = TimeSpan.FromMinutes(1);
+    private static readonly TimeSpan SafetyRefreshInterval = TimeSpan.FromMinutes(5);
 
     private readonly ILogger<AudioEndpointService> _logger;
     private readonly MMDeviceEnumerator _enumerator;

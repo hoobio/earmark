@@ -30,6 +30,9 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty]
     public partial bool LaunchToTray { get; set; }
 
+    [ObservableProperty]
+    public partial bool VerboseLogging { get; set; }
+
     public void SyncFromSettings()
     {
         _suppress = true;
@@ -40,6 +43,7 @@ public partial class SettingsViewModel : ObservableObject
             MinimizeToTray = _settings.Current.MinimizeToTray;
             CloseToTray = _settings.Current.CloseToTray;
             LaunchToTray = _settings.Current.LaunchToTray;
+            VerboseLogging = _settings.Current.VerboseLogging;
         }
         finally
         {
@@ -52,6 +56,7 @@ public partial class SettingsViewModel : ObservableObject
     partial void OnMinimizeToTrayChanged(bool value) => Persist(s => s.MinimizeToTray = value);
     partial void OnCloseToTrayChanged(bool value) => Persist(s => s.CloseToTray = value);
     partial void OnLaunchToTrayChanged(bool value) => Persist(s => s.LaunchToTray = value);
+    partial void OnVerboseLoggingChanged(bool value) => Persist(s => s.VerboseLogging = value);
 
     private async void Persist(Action<AppSettings> mutate)
     {

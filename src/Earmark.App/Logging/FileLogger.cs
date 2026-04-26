@@ -9,6 +9,7 @@ internal sealed class FileLoggerProvider : ILoggerProvider
 {
     private readonly string _path;
     private readonly Lock _gate = new();
+    private LogLevel _minimumLevel = LogLevel.Information;
 
     public FileLoggerProvider(string path)
     {
@@ -18,6 +19,10 @@ internal sealed class FileLoggerProvider : ILoggerProvider
     }
 
     public string FilePath => _path;
+
+    public LogLevel MinimumLevel => _minimumLevel;
+
+    public void SetMinimumLevel(LogLevel level) => _minimumLevel = level;
 
     public ILogger CreateLogger(string categoryName) =>
         new FileLogger(categoryName, this);
@@ -55,7 +60,7 @@ internal sealed class FileLogger : ILogger
 
     public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
 
-    public bool IsEnabled(LogLevel logLevel) => logLevel >= LogLevel.Debug;
+    public bool IsEnabled(LogLevel logLevel) => logLevel >= _provider.MinimumLevel;
 
     public void Log<TState>(
         LogLevel logLevel,
