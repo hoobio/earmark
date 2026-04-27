@@ -3,15 +3,15 @@ using System.Text.Json.Serialization;
 
 namespace Earmark.App.Settings;
 
+[JsonSourceGenerationOptions(
+    WriteIndented = true,
+    PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
+    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
+[JsonSerializable(typeof(AppSettings))]
+internal sealed partial class SettingsJsonContext : JsonSerializerContext;
+
 internal sealed class SettingsService : ISettingsService, IDisposable
 {
-    private static readonly JsonSerializerOptions SerializerOptions = new()
-    {
-        WriteIndented = true,
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-    };
-
     private static readonly string DefaultPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
         "Hoobi",
@@ -37,7 +37,7 @@ internal sealed class SettingsService : ISettingsService, IDisposable
 
             await using var stream = File.OpenRead(DefaultPath);
             var loaded = await JsonSerializer
-                .DeserializeAsync<AppSettings>(stream, SerializerOptions, ct)
+                .DeserializeAsync(stream, SettingsJsonContext.Default.AppSettings, ct)
                 .ConfigureAwait(false);
             Current = loaded ?? new AppSettings();
         }
@@ -58,7 +58,7 @@ internal sealed class SettingsService : ISettingsService, IDisposable
 
             await using var buffer = new MemoryStream();
             await JsonSerializer
-                .SerializeAsync(buffer, Current, SerializerOptions, ct)
+                .SerializeAsync(buffer, Current, SettingsJsonContext.Default.AppSettings, ct)
                 .ConfigureAwait(false);
 
             var bytes = buffer.ToArray();

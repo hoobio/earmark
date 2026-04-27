@@ -9,7 +9,12 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="NAudio" />
+    <!--
+      NAudio.Wasapi (not the NAudio metapackage) so we don't drag in NAudio.WinForms,
+      which framework-references Microsoft.WindowsDesktop.App.WindowsForms and
+      bloats self-contained publish by ~24 MB of WinForms binaries.
+    -->
+    <PackageReference Include="NAudio.Wasapi" />
     <PackageReference Include="Microsoft.Extensions.Hosting" />
   </ItemGroup>
 
