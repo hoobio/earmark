@@ -3,6 +3,10 @@
 [Oo]bj/
 [Oo]ut/
 [Ll]og/
+publish/
+staging/
+*.msi
+*.wixpdb
 [Ll]ogs/
 [Dd]ebug/
 [Rr]elease/
