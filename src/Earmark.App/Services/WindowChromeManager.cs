@@ -86,7 +86,12 @@ internal sealed class WindowChromeManager : IWindowChromeManager, IDisposable
         _exitRequested = true;
         _trayIcon?.Dispose();
         _trayIcon = null;
+
+        // Window.Close() fires Window.Closed synchronously, which runs App.DisposeHost()
+        // and tears down COM. Belt-and-suspenders: also call DisposeHost directly in case
+        // the close path is ever changed to be async.
         _window?.Close();
+        (Microsoft.UI.Xaml.Application.Current as App)?.DisposeHost();
         Microsoft.UI.Xaml.Application.Current.Exit();
     }
 

@@ -19,6 +19,7 @@ public sealed class AudioEndpointService : IAudioEndpointService, IMMNotificatio
     private readonly MMDeviceEnumerator _enumerator;
     private readonly Lock _rebuildGate = new();
     private readonly Timer _safetyTimer;
+    private readonly CancellationTokenSource _shutdownCts = new();
 
     private Snapshot _snapshot = Snapshot.Empty;
     private bool _registered;
@@ -152,17 +153,43 @@ public sealed class AudioEndpointService : IAudioEndpointService, IMMNotificatio
 
     private void OnSafetyTick(object? state) => TryRebuild();
 
-    private void RaiseEndpointsChanged()
-    {
-        TryRebuild();
-        EndpointsChanged?.Invoke(this, EventArgs.Empty);
-    }
+    // IMMNotificationClient callbacks fire on a COM thread that the OS will block during
+    // UnregisterEndpointNotificationCallback if any handler is in flight. Doing the rebuild
+    // synchronously here (which itself enumerates COM endpoints and fans out to subscribers
+    // that re-enumerate again) opens a window where a hardware change racing with shutdown
+    // deadlocks the unregister call. Pushing the work onto the thread pool keeps the COM
+    // callback fast and avoids that race.
+    private void RaiseEndpointsChanged() => QueueRebuild(raiseDefaults: false);
 
-    private void RaiseDefaultsAndEndpointsChanged()
+    private void RaiseDefaultsAndEndpointsChanged() => QueueRebuild(raiseDefaults: true);
+
+    private void QueueRebuild(bool raiseDefaults)
     {
-        TryRebuild();
-        EndpointsChanged?.Invoke(this, EventArgs.Empty);
-        DefaultsChanged?.Invoke(this, EventArgs.Empty);
+        if (_disposed)
+        {
+            return;
+        }
+
+        var token = _shutdownCts.Token;
+        _ = Task.Run(() =>
+        {
+            if (token.IsCancellationRequested || _disposed)
+            {
+                return;
+            }
+
+            TryRebuild();
+            if (token.IsCancellationRequested)
+            {
+                return;
+            }
+
+            EndpointsChanged?.Invoke(this, EventArgs.Empty);
+            if (raiseDefaults)
+            {
+                DefaultsChanged?.Invoke(this, EventArgs.Empty);
+            }
+        }, token);
     }
 
     void IMMNotificationClient.OnDeviceStateChanged(string deviceId, DeviceState newState) => RaiseEndpointsChanged();
@@ -179,6 +206,18 @@ public sealed class AudioEndpointService : IAudioEndpointService, IMMNotificatio
         }
 
         _disposed = true;
+
+        // Cancel any queued rebuilds before unregistering so callbacks already on the
+        // thread pool short-circuit instead of touching disposed COM state.
+        try
+        {
+            _shutdownCts.Cancel();
+        }
+        catch
+        {
+            // Ignore.
+        }
+
         _safetyTimer.Dispose();
 
         if (_registered)
@@ -196,6 +235,7 @@ public sealed class AudioEndpointService : IAudioEndpointService, IMMNotificatio
         }
 
         _enumerator.Dispose();
+        _shutdownCts.Dispose();
     }
 
     private sealed record Snapshot(
