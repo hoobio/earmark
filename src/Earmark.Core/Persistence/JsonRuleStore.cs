@@ -5,17 +5,17 @@ using Earmark.Core.Models;
 
 namespace Earmark.Core.Persistence;
 
+[JsonSourceGenerationOptions(
+    WriteIndented = true,
+    PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
+    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+    UseStringEnumConverter = true)]
+[JsonSerializable(typeof(List<RoutingRule>))]
+internal sealed partial class RuleJsonContext : JsonSerializerContext;
+
 public sealed class JsonRuleStore : IRuleStore, IDisposable
 {
     public void Dispose() => _gate.Dispose();
-
-    private static readonly JsonSerializerOptions SerializerOptions = new()
-    {
-        WriteIndented = true,
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-        Converters = { new JsonStringEnumConverter() },
-    };
 
     private readonly string _path;
     private readonly SemaphoreSlim _gate = new(1, 1);
@@ -44,7 +44,7 @@ public sealed class JsonRuleStore : IRuleStore, IDisposable
 
             await using var stream = File.OpenRead(_path);
             var rules = await JsonSerializer
-                .DeserializeAsync<List<RoutingRule>>(stream, SerializerOptions, ct)
+                .DeserializeAsync(stream, RuleJsonContext.Default.ListRoutingRule, ct)
                 .ConfigureAwait(false);
 
             return rules ?? new List<RoutingRule>();
@@ -66,7 +66,7 @@ public sealed class JsonRuleStore : IRuleStore, IDisposable
 
             await using var buffer = new MemoryStream();
             await JsonSerializer
-                .SerializeAsync(buffer, rules.ToList(), SerializerOptions, ct)
+                .SerializeAsync(buffer, rules.ToList(), RuleJsonContext.Default.ListRoutingRule, ct)
                 .ConfigureAwait(false);
 
             var bytes = buffer.ToArray();

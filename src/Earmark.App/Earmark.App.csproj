@@ -73,7 +73,54 @@
   <PropertyGroup>
     <PublishReadyToRun Condition="'$(Configuration)' == 'Debug'">False</PublishReadyToRun>
     <PublishReadyToRun Condition="'$(Configuration)' != 'Debug'">True</PublishReadyToRun>
+    <!--
+      Trimming was attempted in this PR but disabled: the .NET 10 trimmer hard-strips
+      System.StubHelpers.InterfaceMarshaler (and friends) when classic-COM interop is
+      reachable, even with BuiltInComInteropSupport=true and an explicit
+      TrimmerRootDescriptor. The trimmer prints
+      "IL2026: Built-in COM support is not trim compatible" and the runtime then
+      throws TypeLoadException on the first MMDeviceEnumerator call. Earmark's
+      Core Audio path goes through NAudio.CoreAudioApi (classic [InterfaceType
+      (InterfaceIsIUnknown)]) plus our own IPolicyConfigVista interop, so trimming
+      requires a full migration to ComWrappers source-generators. Tracked as
+      future work; for now JsonSerializerContext usage already keeps the
+      serializer trim-safe and the COM interop remains classic.
+    -->
     <PublishTrimmed>False</PublishTrimmed>
   </PropertyGroup>
+
+  <!--
+    Earmark doesn't use Windows ML, but Microsoft.WindowsAppSDK 1.8 transitively pulls
+    in Microsoft.WindowsAppSDK.ML, which copies ~41 MB of native binaries
+    (onnxruntime.dll, DirectML.dll, Microsoft.Windows.AI.MachineLearning.dll, plus
+    the managed Microsoft.ML.OnnxRuntime.dll wrapper) into the build output via the
+    SDK's MSIX-style payload harvest. There is no supported opt-out yet
+    (microsoft/WindowsAppSDK#5969), so prune the payload at every stage that copies it:
+      1. Remove it from CopyLocal sets so it doesn't land in bin\.
+      2. Remove it from ResolvedFileToPublish so it doesn't land in the publish dir.
+    If WindowsAppSDK later wires a runtime probe to these files this exclusion will
+    need to come back out, but at runtime today the WindowsAppRuntime bootstrap does
+    not LoadLibrary onnxruntime/DirectML unless ML APIs are actually invoked.
+  -->
+  <PropertyGroup>
+    <_EarmarkMLFilenameRegex>^(onnxruntime|onnxruntime_providers_shared|DirectML|Microsoft\.Windows\.AI\.MachineLearning|Microsoft\.Windows\.AI\.MachineLearning\.Projection|Microsoft\.ML\.OnnxRuntime)\.(dll|winmd)$</_EarmarkMLFilenameRegex>
+  </PropertyGroup>
+
+  <Target Name="_EarmarkPruneMLFromCopyLocal" AfterTargets="ResolveAssemblyReferences;ResolveProjectReferences">
+    <ItemGroup>
+      <ReferenceCopyLocalPaths Remove="@(ReferenceCopyLocalPaths)"
+          Condition="$([System.Text.RegularExpressions.Regex]::IsMatch('%(FileName)%(Extension)', '$(_EarmarkMLFilenameRegex)'))" />
+      <None Remove="@(None)"
+          Condition="$([System.Text.RegularExpressions.Regex]::IsMatch('%(FileName)%(Extension)', '$(_EarmarkMLFilenameRegex)'))" />
+    </ItemGroup>
+  </Target>
+
+  <Target Name="_EarmarkPruneMLFromPublish" AfterTargets="ComputeFilesToPublish">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+          Condition="$([System.Text.RegularExpressions.Regex]::IsMatch('%(FileName)%(Extension)', '$(_EarmarkMLFilenameRegex)'))" />
+    </ItemGroup>
+    <Message Importance="high" Text="EarmarkPruneML: ResolvedFileToPublish count after prune = @(ResolvedFileToPublish-&gt;Count())" />
+  </Target>
 
 </Project>
