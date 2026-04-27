@@ -5,6 +5,7 @@ using Earmark.App.ViewModels;
 using Earmark.App.Views;
 using Earmark.Audio;
 using Earmark.Core;
+using Earmark.Core.Audio;
 using Earmark.Core.Services;
 
 using Microsoft.Extensions.DependencyInjection;
@@ -53,14 +54,31 @@ public partial class App : Application
             _host.Services.GetRequiredService<StartupSettingsApplier>().Start();
             _logger.LogInformation("Settings loaded");
 
-            await _host.Services.GetRequiredService<IRulesService>().LoadAsync();
-            _logger.LogInformation("Rules loaded");
+            // Heavy init (audio endpoint + session enumeration via COM, rules load, routing
+            // applier startup) runs on the thread pool so the UI thread can paint immediately.
+            // MainWindow.InitializationTask gates the first page navigation - RulesViewModel
+            // depends on the audio singletons, so navigating before this task completes would
+            // force their construction synchronously on the UI thread, which is what we just
+            // moved off it.
+            var initTask = Task.Run(async () =>
+            {
+                _ = _host.Services.GetRequiredService<IAudioSessionService>();
+                _logger.LogInformation("Audio services initialized");
 
-            _host.Services.GetRequiredService<IRoutingApplier>().Start();
-            _logger.LogInformation("Routing applier started");
+                await _host.Services.GetRequiredService<IRulesService>().LoadAsync();
+                _logger.LogInformation("Rules loaded");
+
+                _host.Services.GetRequiredService<IRoutingApplier>().Start();
+                _logger.LogInformation("Routing applier started");
+            });
 
             _window = _host.Services.GetRequiredService<MainWindow>();
-            _window.Closed += async (_, _) => await DisposeHostAsync();
+            _window.InitializationTask = initTask;
+            // Sync handler on purpose: WinUI stops pumping the dispatcher once the last
+            // window closes, so an `async void` continuation containing _host.Dispose()
+            // can be dropped on the floor and leak COM resources / the IMMNotificationClient
+            // registration, which manifests as the process hanging after close.
+            _window.Closed += (_, _) => DisposeHost();
 
             var chrome = _host.Services.GetRequiredService<IWindowChromeManager>();
             chrome.Attach(_window);
@@ -78,6 +96,10 @@ public partial class App : Application
                 _window.Activate();
                 _logger.LogInformation("Main window activated");
             }
+
+            _ = initTask.ContinueWith(
+                t => _logger.LogError(t.Exception, "Background startup failed"),
+                TaskContinuationOptions.OnlyOnFaulted);
         }
         catch (Exception ex)
         {
@@ -97,26 +119,35 @@ public partial class App : Application
         chrome?.RestoreWindow();
     }
 
-    private async Task DisposeHostAsync()
+    public void DisposeHost()
     {
         if (_host is null)
         {
             return;
         }
 
+        var host = _host;
+        _host = null;
+
         _logger?.LogInformation("Shutting down host");
 
         try
         {
-            await _host.StopAsync(TimeSpan.FromSeconds(2));
+            host.StopAsync(TimeSpan.FromSeconds(2)).GetAwaiter().GetResult();
         }
         catch
         {
             // Ignore shutdown failures.
         }
 
-        _host.Dispose();
-        _host = null;
+        try
+        {
+            host.Dispose();
+        }
+        catch
+        {
+            // Ignore disposal failures.
+        }
     }
 
     private void OnUnhandledException(object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs e)
