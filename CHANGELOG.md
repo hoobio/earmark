@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.3](https://github.com/hoobio/earmark/compare/v0.1.2...v0.1.3) (2026-04-27)
+
+
+### Bug Fixes
+
+* **shutdown:** prevent process hang and slow startup ([#15](https://github.com/hoobio/earmark/issues/15)) ([73565c2](https://github.com/hoobio/earmark/commit/73565c2a0f3f21248d55dd62309174b6bdae134d))
+
+
+### Performance Improvements
+
+* **startup:** defer audio init and rules load off the UI thread ([73565c2](https://github.com/hoobio/earmark/commit/73565c2a0f3f21248d55dd62309174b6bdae134d))
+
 ## [0.1.2](https://github.com/hoobio/earmark/compare/v0.1.1...v0.1.2) (2026-04-26)
 
 
