@@ -61,8 +61,16 @@
       only needed at install time for the ARP entry and shortcut, not at
       runtime, so referencing the source path is correct.
     -->
-    <Icon Id="EarmarkIcon" SourceFile="$(sys.SOURCEFILEDIR)..\src\Earmark.App\Assets\AppIcon.ico" />
-    <Property Id="ARPPRODUCTICON" Value="EarmarkIcon" />
+    <!--
+      WiX 5 dropped the Icon/@Name attribute, so the Id is used verbatim as
+      the Icon table key (and as the on-disk filename when extracted to
+      %LOCALAPPDATA%\Microsoft\Installer\<ProductCode>\). The .ico extension
+      is required for ARP and the Shell shortcut renderer to recognise the
+      stream as an icon resource - without it, ARP and the Start Menu
+      shortcut both fall back to the generic placeholder icon.
+    -->
+    <Icon Id="EarmarkIcon.ico" SourceFile="$(sys.SOURCEFILEDIR)..\src\Earmark.App\Assets\AppIcon.ico" />
+    <Property Id="ARPPRODUCTICON" Value="EarmarkIcon.ico" />
     <Property Id="ARPHELPLINK" Value="https://github.com/hoobio/earmark" />
     <Property Id="ARPURLINFOABOUT" Value="https://github.com/hoobio/earmark" />
     <Property Id="ARPNOREPAIR" Value="1" />
@@ -83,7 +91,7 @@
                   Description="Per-app audio routing"
                   Target="[INSTALLFOLDER]Earmark.App.exe"
                   WorkingDirectory="INSTALLFOLDER"
-                  Icon="EarmarkIcon"
+                  Icon="EarmarkIcon.ico"
                   IconIndex="0" />
         <RegistryValue Root="HKCU"
                        Key="Software\hoobio\Earmark"
@@ -126,6 +134,19 @@
 
     <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
     <WixVariable Id="WixUILicenseRtf" Value="$(sys.SOURCEFILEDIR)License.rtf" />
+    <!--
+      Override the default WiX UI chrome with Earmark branding:
+      - WixUIBannerBmp (493x58): horizontal banner shown on License /
+        InstallDir / Verify / Progress dialogs. Logo is right-aligned so it
+        does not overlap the dialog title text on the left.
+      - WixUIDialogBmp  (493x312): full background for the Welcome and Exit
+        dialogs; only the left ~164 px strip is visible (the rest is covered
+        by the dialog's text panel).
+      Both are generated from src\Earmark.App\Assets\logo.png and checked in
+      next to this .wxs.
+    -->
+    <WixVariable Id="WixUIBannerBmp" Value="$(sys.SOURCEFILEDIR)WixUIBannerBmp.bmp" />
+    <WixVariable Id="WixUIDialogBmp" Value="$(sys.SOURCEFILEDIR)WixUIDialogBmp.bmp" />
 
     <UI>
       <Publish Dialog="ExitDialog"
