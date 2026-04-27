@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.4](https://github.com/hoobio/earmark/compare/v0.1.3...v0.1.4) (2026-04-27)
+
+
+### Bug Fixes
+
+* **installer:** wire MSI icon and add branded installer chrome ([#17](https://github.com/hoobio/earmark/issues/17)) ([7881d1c](https://github.com/hoobio/earmark/commit/7881d1cbc8094617821b26ef735d2f00a0e5fbf1))
+
+
+### Performance Improvements
+
+* **installer:** shrink MSI size ([#19](https://github.com/hoobio/earmark/issues/19)) ([5666084](https://github.com/hoobio/earmark/commit/566608467e259ea1f80bc454a997578f0ec565d0))
+
 ## [0.1.3](https://github.com/hoobio/earmark/compare/v0.1.2...v0.1.3) (2026-04-27)
 
 
