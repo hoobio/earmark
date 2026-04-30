@@ -31,6 +31,12 @@ public enum ActionType
     SetApplicationInput,
     SetDefaultOutput,
     SetDefaultInput,
+    AddWaveLinkMixOutput,
+    RemoveWaveLinkMixOutput,
+    SetWaveLinkMixOutput,
+    SetDeviceVolume,
+    MuteDevice,
+    UnmuteDevice,
 }
 
 public sealed class RuleCondition
@@ -55,6 +61,12 @@ public sealed class RuleAction
 
     public string DevicePattern { get; set; } = string.Empty;
 
+    /// <summary>SetWaveLinkMixOutput only: regex against the Wave Link mix name.</summary>
+    public string MixPattern { get; set; } = string.Empty;
+
+    /// <summary>SetDeviceVolume only: target volume in [0, 1].</summary>
+    public float Volume { get; set; } = 0.5f;
+
     /// <summary>SetDefault* only: claim the device for the system "default" (Console + Multimedia) role.</summary>
     public bool SetsDefault { get; set; } = true;
 
@@ -68,10 +80,23 @@ public sealed class RuleAction
     public bool IsDefaultAction => Type is ActionType.SetDefaultOutput or ActionType.SetDefaultInput;
 
     [JsonIgnore]
+    public bool IsWaveLinkAction => Type is
+        ActionType.AddWaveLinkMixOutput or
+        ActionType.RemoveWaveLinkMixOutput or
+        ActionType.SetWaveLinkMixOutput;
+
+    [JsonIgnore]
+    public bool IsVolumeAction => Type is ActionType.SetDeviceVolume;
+
+    [JsonIgnore]
+    public bool IsMuteAction => Type is ActionType.MuteDevice or ActionType.UnmuteDevice;
+
+    [JsonIgnore]
     public EndpointFlow EffectiveFlow => Type switch
     {
         ActionType.SetApplicationOutput or ActionType.SetDefaultOutput => EndpointFlow.Render,
         ActionType.SetApplicationInput or ActionType.SetDefaultInput => EndpointFlow.Capture,
+        ActionType.AddWaveLinkMixOutput or ActionType.RemoveWaveLinkMixOutput or ActionType.SetWaveLinkMixOutput => EndpointFlow.Render,
         _ => EndpointFlow.Render,
     };
 
@@ -82,6 +107,12 @@ public sealed class RuleAction
             !string.IsNullOrWhiteSpace(AppPattern) && !string.IsNullOrWhiteSpace(DevicePattern),
         ActionType.SetDefaultOutput or ActionType.SetDefaultInput =>
             !string.IsNullOrWhiteSpace(DevicePattern) && (SetsDefault || SetsCommunications),
+        ActionType.AddWaveLinkMixOutput or ActionType.RemoveWaveLinkMixOutput or ActionType.SetWaveLinkMixOutput =>
+            !string.IsNullOrWhiteSpace(MixPattern) && !string.IsNullOrWhiteSpace(DevicePattern),
+        ActionType.SetDeviceVolume =>
+            !string.IsNullOrWhiteSpace(DevicePattern) && Volume is >= 0f and <= 1f,
+        ActionType.MuteDevice or ActionType.UnmuteDevice =>
+            !string.IsNullOrWhiteSpace(DevicePattern),
         _ => false,
     };
 }

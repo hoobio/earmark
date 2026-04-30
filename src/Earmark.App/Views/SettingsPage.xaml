@@ -42,6 +42,16 @@
                     <ToggleSwitch IsOn="{x:Bind ViewModel.VerboseLogging, Mode=TwoWay}" />
                 </ctrl:SettingsCard>
 
+                <ctrl:SettingsCard Header="Wave Link integration" Description="Route Wave Link mix outputs from rules. Earmark connects to Wave Link's local WebSocket while the integration is on.">
+                    <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+                        <Ellipse Width="10" Height="10"
+                                 Fill="{x:Bind ViewModel.WaveLinkState, Mode=OneWay, Converter={StaticResource WaveLinkStateBrushConverter}}"
+                                 VerticalAlignment="Center"
+                                 ToolTipService.ToolTip="{x:Bind ViewModel.WaveLinkStatusText, Mode=OneWay}" />
+                        <ToggleSwitch IsOn="{x:Bind ViewModel.EnableWaveLink, Mode=TwoWay}" />
+                    </StackPanel>
+                </ctrl:SettingsCard>
+
             </StackPanel>
         </ScrollViewer>
     </Grid>

@@ -1,5 +1,6 @@
 using Earmark.App.Logging;
 using Earmark.App.Settings;
+using Earmark.Core.WaveLink;
 
 using Microsoft.Extensions.Logging;
 
@@ -9,16 +10,19 @@ internal sealed class StartupSettingsApplier : IDisposable
 {
     private readonly ISettingsService _settings;
     private readonly FileLoggerProvider _fileLogger;
+    private readonly IWaveLinkService _waveLink;
     private readonly ILogger<StartupSettingsApplier> _logger;
     private bool _started;
 
     public StartupSettingsApplier(
         ISettingsService settings,
         FileLoggerProvider fileLogger,
+        IWaveLinkService waveLink,
         ILogger<StartupSettingsApplier> logger)
     {
         _settings = settings;
         _fileLogger = fileLogger;
+        _waveLink = waveLink;
         _logger = logger;
     }
 
@@ -55,6 +59,11 @@ internal sealed class StartupSettingsApplier : IDisposable
             {
                 _fileLogger.SetMinimumLevel(desired);
                 _logger.LogInformation("File log level set to {Level}", desired);
+            }
+
+            if (_waveLink.IsEnabled != s.EnableWaveLink)
+            {
+                _waveLink.IsEnabled = s.EnableWaveLink;
             }
         }
         catch (Exception ex)

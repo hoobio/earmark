@@ -29,6 +29,9 @@
             <converters:SatisfiedGlyphConverter x:Key="SatisfiedGlyphConverter" />
             <converters:SatisfiedBrushConverter x:Key="SatisfiedBrushConverter" />
             <converters:SatisfiedTooltipConverter x:Key="SatisfiedTooltipConverter" />
+            <converters:WaveLinkStateBrushConverter x:Key="WaveLinkStateBrushConverter" />
+            <converters:WaveLinkStateGlyphConverter x:Key="WaveLinkStateGlyphConverter" />
+            <converters:VolumeFloatToPercentConverter x:Key="VolumeFloatToPercentConverter" />
 
             <!-- Fluent 2 spacing scale (4px grid). -->
             <x:Double x:Key="SpacingXSmall">4</x:Double>

@@ -9,6 +9,7 @@ using Earmark.Core.Audio;
 using Earmark.Core.Models;
 using Earmark.Core.Routing;
 using Earmark.Core.Services;
+using Earmark.Core.WaveLink;
 
 namespace Earmark.App.ViewModels;
 
@@ -21,6 +22,7 @@ public partial class RulesViewModel : ObservableObject, IDisposable
     private readonly IAudioSessionService _sessions;
     private readonly IAudioEndpointService _endpoints;
     private readonly IRuleEvaluator _evaluator;
+    private readonly IWaveLinkService _waveLink;
     private readonly IDispatcherQueueProvider _dispatcher;
     private readonly Lock _gate = new();
 
@@ -33,6 +35,7 @@ public partial class RulesViewModel : ObservableObject, IDisposable
         IAudioSessionService sessions,
         IAudioEndpointService endpoints,
         IRuleEvaluator evaluator,
+        IWaveLinkService waveLink,
         IDispatcherQueueProvider dispatcher)
     {
         _rules = rules ?? throw new ArgumentNullException(nameof(rules));
@@ -40,6 +43,7 @@ public partial class RulesViewModel : ObservableObject, IDisposable
         _sessions = sessions ?? throw new ArgumentNullException(nameof(sessions));
         _endpoints = endpoints ?? throw new ArgumentNullException(nameof(endpoints));
         _evaluator = evaluator ?? throw new ArgumentNullException(nameof(evaluator));
+        _waveLink = waveLink ?? throw new ArgumentNullException(nameof(waveLink));
         _dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
 
         Items = new ObservableCollection<RuleRow>(_rules.Rules.Select(BuildRow));
@@ -52,8 +56,12 @@ public partial class RulesViewModel : ObservableObject, IDisposable
         _rules.RulesChanged += OnRulesChanged;
         _sessions.SessionsChanged += OnSessionsOrEndpointsChanged;
         _endpoints.EndpointsChanged += OnSessionsOrEndpointsChanged;
+        _waveLink.SnapshotChanged += OnWaveLinkChanged;
+        _waveLink.StateChanged += OnWaveLinkChanged;
         QueueMatchRefresh();
     }
+
+    private void OnWaveLinkChanged(object? sender, EventArgs e) => QueueMatchRefresh();
 
     public ObservableCollection<RuleRow> Items { get; }
 
@@ -196,12 +204,15 @@ public partial class RulesViewModel : ObservableObject, IDisposable
             return;
         }
 
+        var snapshot = _waveLink.LastSnapshot;
+        var waveLinkState = _waveLink.State;
+
         _dispatcher.Enqueue(() =>
         {
             var liveRules = Items.Select(r => r.ToRule()).ToList();
             foreach (var row in Items)
             {
-                row.Recompute(sessions, endpoints);
+                row.Recompute(sessions, endpoints, snapshot, waveLinkState);
                 var rule = liveRules.First(r => r.Id == row.Id);
                 var evaluation = _evaluator.Evaluate(rule, liveRules, sessions, endpoints);
                 row.ApplyEvaluation(evaluation);
@@ -232,6 +243,8 @@ public partial class RulesViewModel : ObservableObject, IDisposable
         _rules.RulesChanged -= OnRulesChanged;
         _sessions.SessionsChanged -= OnSessionsOrEndpointsChanged;
         _endpoints.EndpointsChanged -= OnSessionsOrEndpointsChanged;
+        _waveLink.SnapshotChanged -= OnWaveLinkChanged;
+        _waveLink.StateChanged -= OnWaveLinkChanged;
         Items.CollectionChanged -= OnItemsCollectionChanged;
         _matchCts?.Cancel();
         _matchCts?.Dispose();

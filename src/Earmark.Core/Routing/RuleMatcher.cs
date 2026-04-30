@@ -141,10 +141,7 @@ public sealed class RuleMatcher : IRuleMatcher
 
     private static bool AnyEndpointMatches(string pattern, ConditionFlow flow, IReadOnlyList<AudioEndpoint> endpoints)
     {
-        if (!RegexCache.TryGet(pattern, out var regex) || regex is null)
-        {
-            return false;
-        }
+        var regex = TryCompile(pattern);
 
         foreach (var endpoint in endpoints)
         {
@@ -162,7 +159,8 @@ public sealed class RuleMatcher : IRuleMatcher
                 continue;
             }
 
-            if (TryMatchEndpoint(regex, endpoint))
+            if (PatternMatcher.Matches(pattern, regex, endpoint.FriendlyName) ||
+                PatternMatcher.Matches(pattern, regex, endpoint.DisplayName))
             {
                 return true;
             }
@@ -171,69 +169,66 @@ public sealed class RuleMatcher : IRuleMatcher
         return false;
     }
 
-    private static bool TryMatchEndpoint(Regex regex, AudioEndpoint endpoint)
-    {
-        try
-        {
-            return regex.IsMatch(endpoint.FriendlyName) || regex.IsMatch(endpoint.DisplayName);
-        }
-        catch (RegexMatchTimeoutException)
-        {
-            return false;
-        }
-    }
-
     private static bool MatchesApp(string pattern, AudioSession session)
     {
-        if (!RegexCache.TryGet(pattern, out var regex) || regex is null)
-        {
-            return false;
-        }
-
-        return TryMatch(regex, session.ProcessName) || TryMatch(regex, session.ExecutablePath);
-    }
-
-    private static bool TryMatch(Regex regex, string input)
-    {
-        if (string.IsNullOrEmpty(input))
-        {
-            return false;
-        }
-
-        try
-        {
-            return regex.IsMatch(input);
-        }
-        catch (RegexMatchTimeoutException)
-        {
-            return false;
-        }
+        var regex = TryCompile(pattern);
+        return PatternMatcher.Matches(pattern, regex, session.ProcessName) ||
+               PatternMatcher.Matches(pattern, regex, session.ExecutablePath);
     }
 
     private static AudioEndpoint? MatchEndpoint(string pattern, EndpointFlow flow, IReadOnlyList<AudioEndpoint> endpoints)
     {
-        if (!RegexCache.TryGet(pattern, out var regex) || regex is null)
-        {
-            return null;
-        }
+        var regex = TryCompile(pattern);
 
         return endpoints
             .Where(e => e.Flow == flow && e.State == EndpointState.Active)
-            .Where(e =>
-            {
-                try
-                {
-                    return regex.IsMatch(e.FriendlyName) || regex.IsMatch(e.DisplayName);
-                }
-                catch (RegexMatchTimeoutException)
-                {
-                    return false;
-                }
-            })
+            .Where(e => PatternMatcher.Matches(pattern, regex, e.FriendlyName) ||
+                        PatternMatcher.Matches(pattern, regex, e.DisplayName))
             .OrderByDescending(e => e.IsDefault)
             .ThenByDescending(e => e.IsDefaultCommunications)
             .ThenBy(e => e.FriendlyName, StringComparer.OrdinalIgnoreCase)
             .ThenBy(e => e.Id, StringComparer.OrdinalIgnoreCase)
             .FirstOrDefault();
+    }
+
+    private static Regex? TryCompile(string pattern)
+    {
+        return RegexCache.TryGet(pattern, out var regex) ? regex : null;
+    }
+}
+
+/// <summary>
+/// Pattern-against-text matching with an exact-string shortcut. If the pattern verbatim equals
+/// the candidate text (case-insensitive), the match succeeds without compiling the regex; this
+/// lets the UI insert literal device names (which often contain regex metacharacters) without
+/// escaping them. Falls back to regex.IsMatch otherwise.
+/// </summary>
+public static class PatternMatcher
+{
+    public static bool Matches(string pattern, Regex? regex, string candidate)
+    {
+        if (string.IsNullOrEmpty(candidate))
+        {
+            return false;
+        }
+
+        if (string.Equals(pattern, candidate, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (regex is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            return regex.IsMatch(candidate);
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            return false;
+        }
     }
 }
