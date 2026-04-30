@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.5](https://github.com/hoobio/earmark/compare/v0.1.4...v0.1.5) (2026-04-30)
+
+
+### Features
+
+* **ci:** adopt Backstage hierarchy in DT SBOM upload ([#24](https://github.com/hoobio/earmark/issues/24)) ([b244c47](https://github.com/hoobio/earmark/commit/b244c47afb1ac576a3da013d90a17348b057d943))
+
 ## [0.1.4](https://github.com/hoobio/earmark/compare/v0.1.3...v0.1.4) (2026-04-27)
 
 
