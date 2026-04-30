@@ -7,7 +7,11 @@ public sealed class RulesService : IRulesService, IDisposable
 {
     private readonly IRuleStore _store;
     private readonly SemaphoreSlim _gate = new(1, 1);
-    private List<RoutingRule> _rules = new();
+
+    // Copy-on-write: mutators publish a brand-new list via this volatile reference. Readers
+    // see whichever list was current when they took the reference, and that list is never
+    // mutated again, so iteration is safe without locks even while mutators run.
+    private volatile List<RoutingRule> _rules = new();
 
     public void Dispose() => _gate.Dispose();
 
@@ -43,17 +47,19 @@ public sealed class RulesService : IRulesService, IDisposable
         await _gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            var idx = _rules.FindIndex(r => r.Id == rule.Id);
+            var copy = new List<RoutingRule>(_rules);
+            var idx = copy.FindIndex(r => r.Id == rule.Id);
             if (idx >= 0)
             {
-                _rules[idx] = rule;
+                copy[idx] = rule;
             }
             else
             {
-                _rules.Add(rule);
+                copy.Add(rule);
             }
 
-            await _store.SaveAsync(_rules, ct).ConfigureAwait(false);
+            _rules = copy;
+            await _store.SaveAsync(copy, ct).ConfigureAwait(false);
         }
         finally
         {
@@ -68,8 +74,10 @@ public sealed class RulesService : IRulesService, IDisposable
         await _gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            _rules.RemoveAll(r => r.Id == ruleId);
-            await _store.SaveAsync(_rules, ct).ConfigureAwait(false);
+            var copy = new List<RoutingRule>(_rules);
+            copy.RemoveAll(r => r.Id == ruleId);
+            _rules = copy;
+            await _store.SaveAsync(copy, ct).ConfigureAwait(false);
         }
         finally
         {
@@ -100,7 +108,7 @@ public sealed class RulesService : IRulesService, IDisposable
             // Append any rules not in orderedIds (defensive).
             ordered.AddRange(map.Values);
             _rules = ordered;
-            await _store.SaveAsync(_rules, ct).ConfigureAwait(false);
+            await _store.SaveAsync(ordered, ct).ConfigureAwait(false);
         }
         finally
         {
