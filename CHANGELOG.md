@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.6](https://github.com/hoobio/earmark/compare/v0.1.5...v0.1.6) (2026-04-30)
+
+
+### Features
+
+* add Wave Link integration plus volume/mute rule actions ([#26](https://github.com/hoobio/earmark/issues/26)) ([f526d7e](https://github.com/hoobio/earmark/commit/f526d7e910053e3799f68e1a84c3394f1d34a012))
+
+
+### Bug Fixes
+
+* **rules:** atomic copy-on-write store to prevent crash when deleting a ([f526d7e](https://github.com/hoobio/earmark/commit/f526d7e910053e3799f68e1a84c3394f1d34a012))
+
 ## [0.1.5](https://github.com/hoobio/earmark/compare/v0.1.4...v0.1.5) (2026-04-30)
 
 
