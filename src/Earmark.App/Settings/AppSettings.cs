@@ -13,4 +13,6 @@ public sealed class AppSettings
     public bool LaunchToTray { get; set; }
 
     public bool VerboseLogging { get; set; }
+
+    public bool EnableWaveLink { get; set; }
 }

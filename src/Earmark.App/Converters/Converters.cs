@@ -1,3 +1,5 @@
+using Earmark.Core.WaveLink;
+
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Data;
 using Microsoft.UI.Xaml.Media;
@@ -70,6 +72,54 @@ public sealed class SatisfiedTooltipConverter : IValueConverter
 
     public object ConvertBack(object value, Type targetType, object parameter, string language) =>
         throw new NotSupportedException();
+}
+
+public sealed class WaveLinkStateBrushConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, string language)
+    {
+        var key = value is WaveLinkConnectionState s ? s switch
+        {
+            WaveLinkConnectionState.Connected => "SystemFillColorSuccessBrush",
+            WaveLinkConnectionState.Unavailable => "SystemFillColorCriticalBrush",
+            _ => "TextFillColorTertiaryBrush",
+        } : "TextFillColorTertiaryBrush";
+
+        if (Application.Current.Resources.TryGetValue(key, out var brush) && brush is Brush b)
+        {
+            return b;
+        }
+
+        return new SolidColorBrush(Microsoft.UI.Colors.Gray);
+    }
+
+    public object ConvertBack(object value, Type targetType, object parameter, string language) =>
+        throw new NotSupportedException();
+}
+
+public sealed class WaveLinkStateGlyphConverter : IValueConverter
+{
+    // Segoe Fluent Icons: CheckMark E73E, Warning E7BA, StatusCircleBlock F140.
+    public object Convert(object value, Type targetType, object parameter, string language) =>
+        value is WaveLinkConnectionState s ? s switch
+        {
+            WaveLinkConnectionState.Connected => "",
+            WaveLinkConnectionState.Unavailable => "",
+            _ => "",
+        } : "";
+
+    public object ConvertBack(object value, Type targetType, object parameter, string language) =>
+        throw new NotSupportedException();
+}
+
+public sealed class VolumeFloatToPercentConverter : IValueConverter
+{
+    // Slider values are double; the rule action stores Volume as float in [0,1].
+    public object Convert(object value, Type targetType, object parameter, string language) =>
+        value is float f ? Math.Round(f * 100.0, 0) : 0.0;
+
+    public object ConvertBack(object value, Type targetType, object parameter, string language) =>
+        value is double d ? (float)Math.Clamp(d / 100.0, 0.0, 1.0) : 0f;
 }
 
 public sealed class EnumToStringConverter : IValueConverter

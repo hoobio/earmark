@@ -1,7 +1,10 @@
+using System.Text.RegularExpressions;
+
 using Earmark.Core.Audio;
 using Earmark.Core.Models;
 using Earmark.Core.Routing;
 using Earmark.Core.Services;
+using Earmark.Core.WaveLink;
 
 using Microsoft.Extensions.Logging;
 
@@ -26,6 +29,7 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
     private readonly IAudioEndpointService _endpoints;
     private readonly IAudioPolicyService _policy;
     private readonly IRuleMatcher _matcher;
+    private readonly IWaveLinkService _waveLink;
     private readonly ILogger<RoutingApplier> _logger;
     private readonly HashSet<string> _appliedSessionKeys = new(StringComparer.OrdinalIgnoreCase);
     private readonly Lock _appliedGate = new();
@@ -41,6 +45,7 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
         IAudioEndpointService endpoints,
         IAudioPolicyService policy,
         IRuleMatcher matcher,
+        IWaveLinkService waveLink,
         ILogger<RoutingApplier> logger)
     {
         _rules = rules;
@@ -48,6 +53,7 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
         _endpoints = endpoints;
         _policy = policy;
         _matcher = matcher;
+        _waveLink = waveLink;
         _logger = logger;
     }
 
@@ -121,7 +127,10 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
             {
                 ApplyDefaultDevices();
                 ApplyApplicationsToSessions();
+                ApplyVolumeAndMuteRules();
             }).ConfigureAwait(false);
+
+            await ApplyWaveLinkRulesAsync(_cts?.Token ?? CancellationToken.None).ConfigureAwait(false);
         }
         finally
         {
@@ -359,6 +368,253 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
             _logger.LogError(ex, "Periodic re-apply failed");
         }
     }
+
+    private void ApplyVolumeAndMuteRules()
+    {
+        // Per-device first-match-wins, symmetric with app/default-device rules. Volume and mute
+        // are independent dimensions, so each endpoint resolves them separately: we scan rules
+        // top-to-bottom and lock in the first matching SetDeviceVolume for the volume target and
+        // the first matching Mute/Unmute for the mute target.
+        var renderEndpoints = _endpoints.GetEndpoints(EndpointFlow.Render);
+        var captureEndpoints = _endpoints.GetEndpoints(EndpointFlow.Capture);
+        var allEndpoints = renderEndpoints
+            .Concat(captureEndpoints)
+            .Where(e => e.State == EndpointState.Active)
+            .ToList();
+        if (allEndpoints.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var endpoint in allEndpoints)
+        {
+            float? targetVolume = null;
+            string? volumeRuleName = null;
+            bool? targetMuted = null;
+            string? muteRuleName = null;
+
+            foreach (var rule in _rules.Rules)
+            {
+                if (targetVolume.HasValue && targetMuted.HasValue) break;
+                if (!rule.Enabled) continue;
+                if (!_matcher.ConditionsMet(rule, renderEndpoints)) continue;
+
+                var ruleLabel = string.IsNullOrEmpty(rule.Name) ? rule.Id.ToString() : rule.Name;
+
+                foreach (var action in rule.Actions)
+                {
+                    if (!action.IsValid) continue;
+                    if (action.Type is not (ActionType.SetDeviceVolume or ActionType.MuteDevice or ActionType.UnmuteDevice)) continue;
+
+                    var devRegex = TryCompile(action.DevicePattern);
+                    if (!MatchPattern(action.DevicePattern, devRegex, endpoint.FriendlyName) &&
+                        !MatchPattern(action.DevicePattern, devRegex, endpoint.DisplayName)) continue;
+
+                    if (action.Type == ActionType.SetDeviceVolume && !targetVolume.HasValue)
+                    {
+                        targetVolume = action.Volume;
+                        volumeRuleName = ruleLabel;
+                    }
+                    else if (action.Type is ActionType.MuteDevice or ActionType.UnmuteDevice && !targetMuted.HasValue)
+                    {
+                        targetMuted = action.Type == ActionType.MuteDevice;
+                        muteRuleName = ruleLabel;
+                    }
+
+                    if (targetVolume.HasValue && targetMuted.HasValue) break;
+                }
+            }
+
+            if (targetVolume.HasValue)
+            {
+                var applied = _endpoints.SetVolume(endpoint.Id, targetVolume.Value);
+                if (applied)
+                {
+                    _logger.LogInformation("Applied volume rule '{Rule}': '{Device}' -> {Volume:F2}",
+                        volumeRuleName, endpoint.DisplayName, targetVolume.Value);
+                }
+            }
+            if (targetMuted.HasValue)
+            {
+                var applied = _endpoints.SetMuted(endpoint.Id, targetMuted.Value);
+                if (applied)
+                {
+                    _logger.LogInformation("Applied {Verb} rule '{Rule}': '{Device}'",
+                        targetMuted.Value ? "mute" : "unmute", muteRuleName, endpoint.DisplayName);
+                }
+            }
+        }
+    }
+
+    private readonly record struct WaveLinkClaim(string TargetMixId, string RuleName);
+
+    private async Task ApplyWaveLinkRulesAsync(CancellationToken ct)
+    {
+        var hasWaveLinkRule = false;
+        foreach (var rule in _rules.Rules)
+        {
+            if (!rule.Enabled) continue;
+            foreach (var action in rule.Actions)
+            {
+                if (action.IsValid && action.IsWaveLinkAction)
+                {
+                    hasWaveLinkRule = true;
+                    break;
+                }
+            }
+            if (hasWaveLinkRule) break;
+        }
+        if (!hasWaveLinkRule)
+        {
+            return;
+        }
+
+        WaveLinkSnapshot? snapshot;
+        try
+        {
+            snapshot = await _waveLink.GetSnapshotAsync(ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { return; }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Wave Link: snapshot failed");
+            return;
+        }
+        if (snapshot is null)
+        {
+            _logger.LogDebug("Wave Link: snapshot unavailable; skipping {Count} rules", _rules.Rules.Count);
+            return;
+        }
+
+        var claims = BuildWaveLinkClaims(snapshot);
+
+        foreach (var output in snapshot.OutputDevices)
+        {
+            if (ct.IsCancellationRequested) return;
+            if (!claims.TryGetValue(output.DeviceId, out var claim)) continue;
+
+            if (string.Equals(output.CurrentMixId, claim.TargetMixId, StringComparison.Ordinal))
+            {
+                _logger.LogDebug("Skip Wave Link for '{Device}': already on '{Mix}'",
+                    output.DeviceName, ResolveMixName(snapshot.Mixes, claim.TargetMixId));
+                continue;
+            }
+
+            bool ok;
+            try
+            {
+                ok = await _waveLink.SetMixForOutputAsync(output.DeviceId, output.OutputId, claim.TargetMixId, ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) { return; }
+
+            if (ok)
+            {
+                _logger.LogInformation("Applied Wave Link rule '{Rule}': '{Device}' {From} -> {To}",
+                    claim.RuleName,
+                    output.DeviceName,
+                    ResolveMixName(snapshot.Mixes, output.CurrentMixId),
+                    ResolveMixName(snapshot.Mixes, claim.TargetMixId));
+            }
+        }
+    }
+
+    private Dictionary<string, WaveLinkClaim> BuildWaveLinkClaims(WaveLinkSnapshot snapshot)
+    {
+        var claims = new Dictionary<string, WaveLinkClaim>(StringComparer.Ordinal);
+        var setOwnedMixes = new HashSet<string>(StringComparer.Ordinal);
+        var renderEndpoints = _endpoints.GetEndpoints(EndpointFlow.Render);
+
+        foreach (var rule in _rules.Rules)
+        {
+            if (!rule.Enabled) continue;
+            if (!_matcher.ConditionsMet(rule, renderEndpoints)) continue;
+
+            var ruleLabel = string.IsNullOrEmpty(rule.Name) ? rule.Id.ToString() : rule.Name;
+
+            foreach (var action in rule.Actions)
+            {
+                if (!action.IsValid || !action.IsWaveLinkAction) continue;
+
+                var mixRegex = TryCompile(action.MixPattern);
+                var devRegex = TryCompile(action.DevicePattern);
+                // Exact-match shortcut covers the case where the pattern equals a name
+                // verbatim (e.g. inserted from auto-suggest), so a missing regex isn't fatal.
+
+                WaveLinkMixInfo? matchedMix = null;
+                foreach (var mix in snapshot.Mixes)
+                {
+                    if (MatchPattern(action.MixPattern, mixRegex, mix.Name))
+                    {
+                        matchedMix = mix;
+                        break;
+                    }
+                }
+                if (matchedMix is null) continue;
+
+                if (action.Type == ActionType.SetWaveLinkMixOutput)
+                {
+                    setOwnedMixes.Add(matchedMix.Id);
+                }
+
+                foreach (var output in snapshot.OutputDevices)
+                {
+                    if (claims.ContainsKey(output.DeviceId)) continue;
+                    var deviceMatches = MatchPattern(action.DevicePattern, devRegex, output.DeviceName);
+
+                    switch (action.Type)
+                    {
+                        case ActionType.AddWaveLinkMixOutput:
+                        case ActionType.SetWaveLinkMixOutput:
+                            if (deviceMatches)
+                            {
+                                claims[output.DeviceId] = new WaveLinkClaim(matchedMix.Id, ruleLabel);
+                            }
+                            break;
+                        case ActionType.RemoveWaveLinkMixOutput:
+                            if (deviceMatches && string.Equals(output.CurrentMixId, matchedMix.Id, StringComparison.Ordinal))
+                            {
+                                claims[output.DeviceId] = new WaveLinkClaim(string.Empty, ruleLabel);
+                            }
+                            break;
+                    }
+                }
+            }
+        }
+
+        // Set's "remove non-matching" sweep: any Set-owned mix loses unclaimed devices.
+        foreach (var output in snapshot.OutputDevices)
+        {
+            if (claims.ContainsKey(output.DeviceId)) continue;
+            if (setOwnedMixes.Contains(output.CurrentMixId))
+            {
+                claims[output.DeviceId] = new WaveLinkClaim(string.Empty, "Set rule (cleanup)");
+            }
+        }
+
+        return claims;
+    }
+
+    private static string ResolveMixName(IReadOnlyList<WaveLinkMixInfo> mixes, string mixId)
+    {
+        if (string.IsNullOrEmpty(mixId)) return "(none)";
+        return mixes.FirstOrDefault(m => string.Equals(m.Id, mixId, StringComparison.Ordinal))?.Name ?? mixId;
+    }
+
+    private static Regex? TryCompile(string pattern)
+    {
+        if (string.IsNullOrWhiteSpace(pattern)) return null;
+        try
+        {
+            return new Regex(
+                pattern,
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
+                TimeSpan.FromMilliseconds(250));
+        }
+        catch (ArgumentException) { return null; }
+    }
+
+    private static bool MatchPattern(string pattern, Regex? regex, string input) =>
+        PatternMatcher.Matches(pattern, regex, input);
 
     public void Dispose()
     {

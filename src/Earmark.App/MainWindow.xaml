@@ -26,6 +26,19 @@
             <TitleBar.IconSource>
                 <ImageIconSource ImageSource="ms-appx:///Assets/logo.png" />
             </TitleBar.IconSource>
+            <TitleBar.LeftHeader>
+                <Button x:Name="PaneToggleButton"
+                        Click="OnPaneToggleClick"
+                        Background="Transparent"
+                        BorderBrush="Transparent"
+                        Padding="10,6"
+                        MinWidth="40"
+                        Height="32"
+                        VerticalAlignment="Center"
+                        ToolTipService.ToolTip="Toggle navigation">
+                    <FontIcon Glyph="&#xE700;" FontSize="14" />
+                </Button>
+            </TitleBar.LeftHeader>
         </TitleBar>
 
         <NavigationView
@@ -33,6 +46,7 @@
             Grid.Row="1"
             IsBackButtonVisible="Collapsed"
             IsSettingsVisible="False"
+            IsPaneToggleButtonVisible="False"
             PaneDisplayMode="Auto"
             OpenPaneLength="220"
             CompactModeThresholdWidth="640"

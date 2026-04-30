@@ -103,4 +103,76 @@ public sealed partial class RulesPage : Page
         }
         return null;
     }
+
+    // CA1822 suppressed: XAML event hookup requires instance methods even when the body
+    // doesn't touch instance state.
+#pragma warning disable CA1822
+    private void OnDevicePatternTextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
+    {
+        if (args.Reason != AutoSuggestionBoxTextChangeReason.UserInput) return;
+        if (sender.DataContext is not ActionRow row) return;
+        sender.ItemsSource = FilterCandidates(row.DeviceCandidates, sender.Text);
+    }
+
+    private void OnDevicePatternGotFocus(object sender, RoutedEventArgs e)
+    {
+        if (sender is AutoSuggestBox box && box.DataContext is ActionRow row)
+        {
+            box.ItemsSource = FilterCandidates(row.DeviceCandidates, box.Text);
+        }
+    }
+
+    private void OnDeviceSuggestionChosen(AutoSuggestBox sender, AutoSuggestBoxSuggestionChosenEventArgs args)
+    {
+        if (args.SelectedItem is string name)
+        {
+            // Insert the literal name. PatternMatcher.Matches treats an exact-name pattern
+            // as a string equality match without compiling, so no regex escaping needed.
+            sender.Text = name;
+        }
+    }
+
+    private void OnMixPatternTextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
+    {
+        if (args.Reason != AutoSuggestionBoxTextChangeReason.UserInput) return;
+        if (sender.DataContext is not ActionRow row) return;
+        sender.ItemsSource = FilterCandidates(row.MixCandidates, sender.Text);
+    }
+
+    private void OnMixPatternGotFocus(object sender, RoutedEventArgs e)
+    {
+        if (sender is AutoSuggestBox box && box.DataContext is ActionRow row)
+        {
+            box.ItemsSource = FilterCandidates(row.MixCandidates, box.Text);
+        }
+    }
+
+    private void OnMixSuggestionChosen(AutoSuggestBox sender, AutoSuggestBoxSuggestionChosenEventArgs args)
+    {
+        if (args.SelectedItem is string name)
+        {
+            sender.Text = name;
+        }
+    }
+#pragma warning restore CA1822
+
+    private static List<string> FilterCandidates(IReadOnlyList<string> candidates, string? text)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return candidates.Take(20).ToList();
+        }
+
+        var matches = new List<string>();
+        foreach (var candidate in candidates)
+        {
+            if (candidate.Contains(text, StringComparison.OrdinalIgnoreCase))
+            {
+                matches.Add(candidate);
+                if (matches.Count >= 20) break;
+            }
+        }
+        return matches;
+    }
+
 }

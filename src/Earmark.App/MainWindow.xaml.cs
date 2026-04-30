@@ -59,6 +59,11 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private void OnPaneToggleClick(object sender, RoutedEventArgs e)
+    {
+        NavView.IsPaneOpen = !NavView.IsPaneOpen;
+    }
+
     private void NavigateTo(NavigationViewItem item)
     {
         if (item.Tag is not string tag)

@@ -52,6 +52,83 @@ public sealed class AudioEndpointService : IAudioEndpointService, IMMNotificatio
         return snap.ById.TryGetValue(id, out var endpoint) ? endpoint : null;
     }
 
+    public float? GetVolume(string id)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(id);
+        try
+        {
+            using var device = _enumerator.GetDevice(id);
+            return device.AudioEndpointVolume.MasterVolumeLevelScalar;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "GetVolume({Id}) failed", id);
+            return null;
+        }
+    }
+
+    public bool? GetMuted(string id)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(id);
+        try
+        {
+            using var device = _enumerator.GetDevice(id);
+            return device.AudioEndpointVolume.Mute;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "GetMuted({Id}) failed", id);
+            return null;
+        }
+    }
+
+    public bool SetVolume(string id, float level)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(id);
+        var clamped = Math.Clamp(level, 0f, 1f);
+        try
+        {
+            using var device = _enumerator.GetDevice(id);
+            var current = device.AudioEndpointVolume.MasterVolumeLevelScalar;
+            if (Math.Abs(current - clamped) < 0.005f)
+            {
+                _logger.LogDebug("SetVolume({Id}) skipped: already at {Level:F2}", id, current);
+                return false;
+            }
+            device.AudioEndpointVolume.MasterVolumeLevelScalar = clamped;
+            _logger.LogInformation("SetVolume({Id}) {Old:F2} -> {New:F2}", id, current, clamped);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "SetVolume({Id}, {Level}) failed", id, clamped);
+            return false;
+        }
+    }
+
+    public bool SetMuted(string id, bool muted)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(id);
+        try
+        {
+            using var device = _enumerator.GetDevice(id);
+            var current = device.AudioEndpointVolume.Mute;
+            if (current == muted)
+            {
+                _logger.LogDebug("SetMuted({Id}) skipped: already {State}", id, muted ? "muted" : "unmuted");
+                return false;
+            }
+            device.AudioEndpointVolume.Mute = muted;
+            _logger.LogInformation("SetMuted({Id}) -> {State}", id, muted ? "muted" : "unmuted");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "SetMuted({Id}, {Muted}) failed", id, muted);
+            return false;
+        }
+    }
+
     private void TryRebuild()
     {
         try
