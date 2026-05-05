@@ -47,13 +47,13 @@ internal static class HostBuilderExtensions
 
         builder.Services.AddSingleton<MainWindow>();
         builder.Services.AddSingleton<ShellViewModel>();
-        builder.Services.AddTransient<RulesViewModel>();
-        builder.Services.AddTransient<SessionsViewModel>();
-        builder.Services.AddTransient<SettingsViewModel>();
+        builder.Services.AddSingleton<RulesViewModel>();
+        builder.Services.AddSingleton<SessionsViewModel>();
+        builder.Services.AddSingleton<SettingsViewModel>();
 
-        builder.Services.AddTransient<RulesPage>();
-        builder.Services.AddTransient<SessionsPage>();
-        builder.Services.AddTransient<SettingsPage>();
+        builder.Services.AddSingleton<RulesPage>();
+        builder.Services.AddSingleton<SessionsPage>();
+        builder.Services.AddSingleton<SettingsPage>();
 
         return builder;
     }

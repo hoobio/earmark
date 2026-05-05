@@ -112,15 +112,26 @@ public sealed class AudioSessionService : IAudioSessionService, IDisposable
                 for (var i = 0; i < sessions.Count; i++)
                 {
                     var session = sessions[i];
-                    if (TryMap(session, device.ID, out var mapped))
+                    try
                     {
-                        results.Add(mapped);
+                        if (TryMap(session, device.ID, out var mapped))
+                        {
+                            results.Add(mapped);
+                        }
+                    }
+                    finally
+                    {
+                        session.Dispose();
                     }
                 }
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Enumerating sessions on {Id} failed", device.ID);
+            }
+            finally
+            {
+                device.Dispose();
             }
         }
 
@@ -142,14 +153,23 @@ public sealed class AudioSessionService : IAudioSessionService, IDisposable
 
             foreach (var device in _enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active))
             {
+                var attached = false;
                 try
                 {
                     var watcher = new SessionWatcher(device, this);
                     _watchers[device.ID] = watcher;
+                    attached = true;
                 }
                 catch (Exception ex)
                 {
                     _logger.LogWarning(ex, "Failed to attach session watcher to {Id}", device.ID);
+                }
+                finally
+                {
+                    if (!attached)
+                    {
+                        device.Dispose();
+                    }
                 }
             }
         }
@@ -264,8 +284,10 @@ public sealed class AudioSessionService : IAudioSessionService, IDisposable
         private readonly MMDevice _device;
         private readonly AudioSessionService _owner;
         private readonly NotificationClient _notify;
+        private readonly System.Collections.Concurrent.ConcurrentBag<AudioSessionControl> _registeredControls = new();
 
         private readonly string _deviceId;
+        private bool _disposed;
 
         public SessionWatcher(MMDevice device, AudioSessionService owner)
         {
@@ -280,10 +302,16 @@ public sealed class AudioSessionService : IAudioSessionService, IDisposable
 
         private void OnSessionCreated(object sender, IAudioSessionControl newSession)
         {
+            if (_disposed)
+            {
+                return;
+            }
+
             try
             {
                 var control = new AudioSessionControl(newSession);
                 control.RegisterEventClient(this);
+                _registeredControls.Add(control);
                 if (_owner.TryMap(control, _deviceId, out var mapped))
                 {
                     _owner._logger.LogInformation(
@@ -310,6 +338,13 @@ public sealed class AudioSessionService : IAudioSessionService, IDisposable
 
         public void Dispose()
         {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _disposed = true;
+
             try
             {
                 _device.AudioSessionManager.OnSessionCreated -= OnSessionCreated;
@@ -317,6 +352,12 @@ public sealed class AudioSessionService : IAudioSessionService, IDisposable
             catch
             {
                 // Ignore.
+            }
+
+            while (_registeredControls.TryTake(out var control))
+            {
+                try { control.UnRegisterEventClient(this); } catch { }
+                try { control.Dispose(); } catch { }
             }
 
             _device.Dispose();
