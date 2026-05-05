@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.7](https://github.com/hoobio/earmark/compare/v0.1.6...v0.1.7) (2026-05-05)
+
+
+### Bug Fixes
+
+* **audio:** release COM wrappers and adopt singleton view-model lifetime ([#28](https://github.com/hoobio/earmark/issues/28)) ([694819e](https://github.com/hoobio/earmark/commit/694819ea032cfe4e1be2f778e893cd1c315a284f))
+* **audio:** release MMDevice / AudioSessionControl wrappers and ([694819e](https://github.com/hoobio/earmark/commit/694819ea032cfe4e1be2f778e893cd1c315a284f))
+
 ## [0.1.6](https://github.com/hoobio/earmark/compare/v0.1.5...v0.1.6) (2026-04-30)
 
 
