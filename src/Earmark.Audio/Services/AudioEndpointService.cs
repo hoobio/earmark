@@ -188,6 +188,10 @@ public sealed class AudioEndpointService : IAudioEndpointService, IMMNotificatio
             {
                 _logger.LogWarning(ex, "Failed to map endpoint {Id}", device.ID);
             }
+            finally
+            {
+                device.Dispose();
+            }
         }
 
         return list;
