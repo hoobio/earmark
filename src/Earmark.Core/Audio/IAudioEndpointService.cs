@@ -22,6 +22,12 @@ public interface IAudioEndpointService
     /// <summary>Plays a short test tone through the specified render endpoint. No-op for capture endpoints.</summary>
     void PlayTestPing(string id);
 
+    /// <summary>
+    /// Renames the device's FriendlyName (the label shown in Windows Sound). Returns true when
+    /// the property store write succeeds and the new name differs from the current one.
+    /// </summary>
+    bool SetFriendlyName(string id, string friendlyName);
+
     /// <summary>Returns the current peak audio level (0-1), or null if unreachable. Cheap enough to call at 20-30Hz.</summary>
     float? GetPeakLevel(string id);
 

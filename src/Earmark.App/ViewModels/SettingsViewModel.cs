@@ -1,4 +1,5 @@
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 
 using Earmark.App.Services;
 using Earmark.App.Settings;
@@ -10,13 +11,22 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
 {
     private readonly ISettingsService _settings;
     private readonly IWaveLinkService _waveLink;
+    private readonly IWaveLinkNameReconciler _reconciler;
+    private readonly INotificationService _notifications;
     private readonly IDispatcherQueueProvider _dispatcher;
     private bool _suppress;
 
-    public SettingsViewModel(ISettingsService settings, IWaveLinkService waveLink, IDispatcherQueueProvider dispatcher)
+    public SettingsViewModel(
+        ISettingsService settings,
+        IWaveLinkService waveLink,
+        IWaveLinkNameReconciler reconciler,
+        INotificationService notifications,
+        IDispatcherQueueProvider dispatcher)
     {
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
         _waveLink = waveLink ?? throw new ArgumentNullException(nameof(waveLink));
+        _reconciler = reconciler ?? throw new ArgumentNullException(nameof(reconciler));
+        _notifications = notifications ?? throw new ArgumentNullException(nameof(notifications));
         _dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
         _waveLink.StateChanged += OnWaveLinkStateChanged;
         SyncFromSettings();
@@ -46,6 +56,9 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
 
     [ObservableProperty]
     public partial WaveLinkConnectionState WaveLinkState { get; set; }
+
+    [ObservableProperty]
+    public partial string? ReconcileStatus { get; set; }
 
     public string WaveLinkStatusText => WaveLinkState switch
     {
@@ -116,6 +129,29 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
 
         mutate(_settings.Current);
         await _settings.SaveAsync();
+    }
+
+    [RelayCommand]
+    private async Task ReconcileWaveLinkNamesAsync()
+    {
+        ReconcileStatus = "Reconciling...";
+        WaveLinkReconcileResult result;
+        try
+        {
+            result = await _reconciler.ReconcileAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            ReconcileStatus = $"Failed: {ex.Message}";
+            return;
+        }
+
+        var summary = result.Error is not null
+            ? result.Error
+            : $"Renamed {result.Renamed} of {result.Inspected} ({result.Unmatched} unmatched)";
+
+        _dispatcher.Enqueue(() => ReconcileStatus = summary);
+        _notifications.Show("Wave Link reconcile", summary);
     }
 
     public void Dispose()

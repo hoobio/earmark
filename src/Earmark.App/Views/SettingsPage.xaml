@@ -52,6 +52,19 @@
                     </StackPanel>
                 </ctrl:SettingsCard>
 
+                <ctrl:SettingsCard Header="Reconcile Wave Link device names"
+                                   Description="Rename Windows audio devices to match the labels shown in Wave Link. Useful after a Wave Link driver reinstall when device names drift."
+                                   Visibility="{x:Bind ViewModel.EnableWaveLink, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+                        <TextBlock Text="{x:Bind ViewModel.ReconcileStatus, Mode=OneWay}"
+                                   VerticalAlignment="Center"
+                                   Style="{StaticResource CaptionTextBlockStyle}"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <Button Content="Reconcile"
+                                Command="{x:Bind ViewModel.ReconcileWaveLinkNamesCommand}" />
+                    </StackPanel>
+                </ctrl:SettingsCard>
+
             </StackPanel>
         </ScrollViewer>
     </Grid>
