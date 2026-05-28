@@ -337,30 +337,62 @@
                                                    Style="{StaticResource CaptionTextBlockStyle}"
                                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
 
-                                        <!-- First chip + inline expander chevron. The chip itself routes its
-                                             Click event to OnRuleChipClicked (opens the rule on the Rules page).
-                                             A separate ghost button on the right handles expand/collapse so the
-                                             two interactions don't fight over the same click target. -->
-                                        <Grid ColumnSpacing="4">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <ContentControl Grid.Column="0"
-                                                            HorizontalAlignment="Stretch"
-                                                            HorizontalContentAlignment="Stretch"
-                                                            Content="{x:Bind FirstRule, Mode=OneWay}"
-                                                            ContentTemplate="{StaticResource RuleChipTemplate}" />
-                                            <Button Grid.Column="1"
-                                                    Style="{StaticResource GhostIconButtonStyle}"
-                                                    Tag="{x:Bind}"
-                                                    Click="OnRulesExpandToggle"
-                                                    Visibility="{x:Bind HasMultipleRules, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
-                                                    ToolTipService.ToolTip="{x:Bind AdditionalRulesLabel}">
-                                                <FontIcon Glyph="{x:Bind RulesExpandGlyph, Mode=OneWay}"
-                                                          FontSize="12" />
-                                            </Button>
-                                        </Grid>
+                                        <!-- First rule chip wraps two interactive surfaces in one chip-styled
+                                             Border so the visual width matches the additional chips in the
+                                             expanded panel. Left: chip-body Button (navigates to Rules page).
+                                             Right: chevron Button (toggles the additional-rules panel). Each
+                                             Button has transparent background; the Border provides the chip
+                                             colour + corners. -->
+                                        <Border Background="{ThemeResource SubtleFillColorTertiaryBrush}"
+                                                CornerRadius="4"
+                                                Margin="0,2,0,0">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <Button Grid.Column="0"
+                                                        Style="{StaticResource SubtleRuleChipButtonStyle}"
+                                                        Background="Transparent"
+                                                        Opacity="{x:Bind FirstRule.Opacity, FallbackValue=1.0, Mode=OneWay}"
+                                                        DataContext="{x:Bind FirstRule, Mode=OneWay}"
+                                                        Click="OnRuleChipClicked"
+                                                        ToolTipService.ToolTip="Open in Rules">
+                                                    <StackPanel Spacing="2">
+                                                        <TextBlock Text="{x:Bind FirstRule.Name, Mode=OneWay, FallbackValue=''}"
+                                                                   Style="{StaticResource BodyStrongTextBlockStyle}"
+                                                                   TextTrimming="CharacterEllipsis"
+                                                                   TextWrapping="NoWrap" />
+                                                        <StackPanel Orientation="Horizontal" Spacing="6">
+                                                            <TextBlock Text="{x:Bind FirstRule.StatusMessage, Mode=OneWay, FallbackValue=''}"
+                                                                       Style="{StaticResource CaptionTextBlockStyle}"
+                                                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                                            <TextBlock Text="·"
+                                                                       Style="{StaticResource CaptionTextBlockStyle}"
+                                                                       Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                                       Visibility="{x:Bind FirstRule.HasMatchSummary, Mode=OneWay, FallbackValue=Collapsed}" />
+                                                            <TextBlock Text="{x:Bind FirstRule.MatchSummary, Mode=OneWay, FallbackValue=''}"
+                                                                       Style="{StaticResource CaptionTextBlockStyle}"
+                                                                       Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                                       Visibility="{x:Bind FirstRule.HasMatchSummary, Mode=OneWay, FallbackValue=Collapsed}" />
+                                                        </StackPanel>
+                                                    </StackPanel>
+                                                </Button>
+                                                <Button Grid.Column="1"
+                                                        Background="Transparent"
+                                                        BorderBrush="Transparent"
+                                                        Padding="10,0"
+                                                        VerticalAlignment="Stretch"
+                                                        Tag="{x:Bind}"
+                                                        Click="OnRulesExpandToggle"
+                                                        Visibility="{x:Bind HasMultipleRules, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                                        ToolTipService.ToolTip="{x:Bind AdditionalRulesLabel}">
+                                                    <FontIcon Glyph="{x:Bind RulesExpandGlyph, Mode=OneWay}"
+                                                              FontSize="12"
+                                                              Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                                </Button>
+                                            </Grid>
+                                        </Border>
 
                                         <!-- Additional rules panel, shown only when expanded. -->
                                         <ItemsControl ItemsSource="{x:Bind AdditionalRules}"

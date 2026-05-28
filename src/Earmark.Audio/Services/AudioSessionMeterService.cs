@@ -61,7 +61,7 @@ public sealed class AudioSessionMeterService : IAudioSessionMeterService, IDispo
         {
             try { Rebuild(); }
             catch (Exception ex) { _logger.LogDebug(ex, "Safety meter rebuild failed"); }
-        }, null, TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(10));
+        }, null, TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(3));
     }
 
     public float? GetPeak(uint processId, string endpointId)
@@ -96,6 +96,12 @@ public sealed class AudioSessionMeterService : IAudioSessionMeterService, IDispo
     }
 
     private void OnSessionsChanged(object? sender, EventArgs e) => Rebuild();
+
+    public void Refresh()
+    {
+        try { Rebuild(); }
+        catch (Exception ex) { _logger.LogDebug(ex, "External meter refresh failed"); }
+    }
 
     private static NAudio.CoreAudioApi.Interfaces.AudioSessionState SafeReadState(AudioSessionControl control)
     {

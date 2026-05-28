@@ -50,6 +50,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     private readonly IAudioSessionService _sessions;
     private readonly IAudioSessionMeterService _sessionMeters;
     private readonly IAudioPolicyService _policy;
+    private readonly IRoutingApplier _routingApplier;
     private readonly ISessionIconService _iconService;
     private readonly IRuleMatcher _matcher;
     private readonly IRuleEvaluator _evaluator;
@@ -77,6 +78,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         IAudioSessionService sessions,
         IAudioSessionMeterService sessionMeters,
         IAudioPolicyService policy,
+        IRoutingApplier routingApplier,
         ISessionIconService iconService,
         IRuleMatcher matcher,
         IRuleEvaluator evaluator,
@@ -92,6 +94,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         _sessions = sessions ?? throw new ArgumentNullException(nameof(sessions));
         _sessionMeters = sessionMeters ?? throw new ArgumentNullException(nameof(sessionMeters));
         _policy = policy ?? throw new ArgumentNullException(nameof(policy));
+        _routingApplier = routingApplier ?? throw new ArgumentNullException(nameof(routingApplier));
         _iconService = iconService ?? throw new ArgumentNullException(nameof(iconService));
         _matcher = matcher ?? throw new ArgumentNullException(nameof(matcher));
         _evaluator = evaluator ?? throw new ArgumentNullException(nameof(evaluator));
@@ -118,6 +121,12 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         _sessions.SessionsChanged += OnSessionsChangedInPlace;
         _sessions.SessionRemoved += OnSessionRemoved;
         _sessions.SessionAdded += OnSessionAdded;
+        // After a route is applied (rule reapply, per-app default change, drag-drop), the
+        // meter cache often holds stale IAudioSessionControl handles that report 0 peak on
+        // the now-correct endpoint and lingering peak on the old one - which leaves the
+        // chip placement frozen on the wrong card. Force a fresh enumeration so the chip
+        // migration catches up immediately.
+        _routingApplier.RouteApplied += OnRouteApplied;
         // Wave Link polls its snapshot every 5s. Even when structurally identical,
         // SnapshotChanged on any per-poll variance used to fire OnAnythingChanged here and
         // visibly flash the entire card grid via the rebuild's ItemsRepeater teardown. We
@@ -478,6 +487,16 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         // routinely landed chips on the wrong endpoint. Phase 2 in TickAppMeters places
         // chips by live peak across all cards within ~50ms - which is fast enough that
         // the user perceives it as instant.
+    }
+
+    private void OnRouteApplied(object? sender, AppliedRoute e)
+    {
+        // The routing applier just pushed a per-app endpoint override. Stale meter
+        // handles are the typical aftermath - the cached IAudioSessionControl on the
+        // old endpoint can briefly keep reporting non-zero peak, which freezes the
+        // chip placement on the wrong card. Force a fresh enumeration; Phase 2 picks
+        // up the new placement on the next tick.
+        _sessionMeters.Refresh();
     }
 
     private void QueueRefresh()
@@ -846,6 +865,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         _sessions.SessionsChanged -= OnSessionsChangedInPlace;
         _sessions.SessionRemoved -= OnSessionRemoved;
         _sessions.SessionAdded -= OnSessionAdded;
+        _routingApplier.RouteApplied -= OnRouteApplied;
         _waveLink.SnapshotChanged -= OnAnythingChanged;
         _waveLink.StateChanged -= OnAnythingChanged;
         if (_peakTimer is not null)

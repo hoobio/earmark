@@ -10,4 +10,13 @@ namespace Earmark.Core.Audio;
 public interface IAudioSessionMeterService
 {
     float? GetPeak(uint processId, string endpointId);
+
+    /// <summary>
+    /// Force an immediate rebuild of the per-session control cache. Used by the routing
+    /// applier after it pushes per-app endpoint overrides - NAudio's events don't always
+    /// fire reliably during a SetDefaultEndpointForApp call, so a one-shot refresh is
+    /// what makes the chips' meters catch up to the new routing without waiting on the
+    /// periodic safety-net.
+    /// </summary>
+    void Refresh();
 }
