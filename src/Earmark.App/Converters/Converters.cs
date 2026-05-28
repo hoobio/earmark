@@ -112,6 +112,72 @@ public sealed class WaveLinkStateGlyphConverter : IValueConverter
         throw new NotSupportedException();
 }
 
+public sealed class PeakLevelToBrushConverter : IValueConverter
+{
+    // Thresholds picked to mirror conventional pro-audio meters:
+    //   < 0.25 (~ -12 dBFS): below the speech / vocal sweet spot - keep it green.
+    //   0.25 - 0.5 (-12 to -6 dBFS): the speech / vocal sweet spot - amber.
+    //   >= 0.5 (~ -6 dBFS and up): hot, approaching 0 dBFS clip - red.
+    public object Convert(object value, Type targetType, object parameter, string language)
+    {
+        var level = value is float f ? f : 0f;
+        var key = level switch
+        {
+            >= 0.5f => "SystemFillColorCriticalBrush",
+            >= 0.25f => "SystemFillColorCautionBrush",
+            _ => "SystemFillColorSuccessBrush",
+        };
+        if (Application.Current.Resources.TryGetValue(key, out var brush) && brush is Brush b)
+        {
+            return b;
+        }
+        return new SolidColorBrush(Microsoft.UI.Colors.Gray);
+    }
+
+    public object ConvertBack(object value, Type targetType, object parameter, string language) =>
+        throw new NotSupportedException();
+}
+
+public sealed class MuteLockedBackgroundConverter : IValueConverter
+{
+    // When the mute is rule-locked, the icon button shouldn't read as "clickable" - drop its
+    // chip background to transparent. Unlocked state uses the normal subtle fill.
+    public object Convert(object value, Type targetType, object parameter, string language)
+    {
+        var locked = value is bool b && b;
+        if (locked)
+        {
+            return new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+        }
+        if (Application.Current.Resources.TryGetValue("SubtleFillColorSecondaryBrush", out var brush) && brush is Brush b2)
+        {
+            return b2;
+        }
+        return new SolidColorBrush(Microsoft.UI.Colors.Transparent);
+    }
+
+    public object ConvertBack(object value, Type targetType, object parameter, string language) =>
+        throw new NotSupportedException();
+}
+
+public sealed class MutedBrushConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, string language)
+    {
+        var key = value is bool muted && muted
+            ? "SystemFillColorCriticalBrush"
+            : "AccentTextFillColorPrimaryBrush";
+        if (Application.Current.Resources.TryGetValue(key, out var brush) && brush is Brush b)
+        {
+            return b;
+        }
+        return new SolidColorBrush(Microsoft.UI.Colors.Gray);
+    }
+
+    public object ConvertBack(object value, Type targetType, object parameter, string language) =>
+        throw new NotSupportedException();
+}
+
 public sealed class VolumeFloatToPercentConverter : IValueConverter
 {
     // Slider values are double; the rule action stores Volume as float in [0,1].

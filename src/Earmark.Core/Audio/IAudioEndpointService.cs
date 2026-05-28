@@ -19,6 +19,25 @@ public interface IAudioEndpointService
     /// <summary>Sets mute only if it differs. Returns true when a write happened.</summary>
     bool SetMuted(string id, bool muted);
 
+    /// <summary>Plays a short test tone through the specified render endpoint. No-op for capture endpoints.</summary>
+    void PlayTestPing(string id);
+
+    /// <summary>Returns the current peak audio level (0-1), or null if unreachable. Cheap enough to call at 20-30Hz.</summary>
+    float? GetPeakLevel(string id);
+
     event EventHandler? EndpointsChanged;
     event EventHandler? DefaultsChanged;
+
+    /// <summary>
+    /// Fires when a device's mute state changes externally (Volume Mixer, another app, the
+    /// device hardware itself). Raised on a COM callback thread - marshal to the UI thread
+    /// before touching XAML.
+    /// </summary>
+    event EventHandler<EndpointMuteChangedEventArgs>? ExternalMuteChanged;
+}
+
+public sealed class EndpointMuteChangedEventArgs(string deviceId, bool muted) : EventArgs
+{
+    public string DeviceId { get; } = deviceId;
+    public bool Muted { get; } = muted;
 }

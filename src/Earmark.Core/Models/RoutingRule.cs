@@ -16,6 +16,8 @@ public enum ConditionType
 {
     DevicePresent,
     DeviceMissing,
+    ApplicationRunning,
+    ApplicationNotRunning,
 }
 
 public enum ConditionFlow
@@ -45,11 +47,19 @@ public sealed class RuleCondition
 
     public ConditionFlow Flow { get; set; } = ConditionFlow.Any;
 
-    /// <summary>Device regex evaluated against the current set of endpoints.</summary>
+    /// <summary>Device regex; required for Device* conditions.</summary>
     public string DevicePattern { get; set; } = string.Empty;
 
+    /// <summary>Process/executable regex; required for Application* conditions.</summary>
+    public string AppPattern { get; set; } = string.Empty;
+
     [JsonIgnore]
-    public bool IsValid => !string.IsNullOrWhiteSpace(DevicePattern);
+    public bool IsApplicationCondition => Type is ConditionType.ApplicationRunning or ConditionType.ApplicationNotRunning;
+
+    [JsonIgnore]
+    public bool IsValid => IsApplicationCondition
+        ? !string.IsNullOrWhiteSpace(AppPattern)
+        : !string.IsNullOrWhiteSpace(DevicePattern);
 }
 
 public sealed class RuleAction

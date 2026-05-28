@@ -52,6 +52,7 @@ public partial class App : Application
         {
             await _host.Services.GetRequiredService<ISettingsService>().LoadAsync();
             _host.Services.GetRequiredService<StartupSettingsApplier>().Start();
+            _host.Services.GetRequiredService<INotificationService>().Register();
             _logger.LogInformation("Settings loaded");
 
             // Heavy init (audio endpoint + session enumeration via COM, rules load, routing
