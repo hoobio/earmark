@@ -66,9 +66,10 @@ public partial class AppChip : ObservableObject
         return true;
     }
 
-    public AppChip(AudioSession session, ISessionIconService iconService, RoutingRule? lockingRule)
+    public AppChip(AudioSession session, string placementEndpointId, ISessionIconService iconService, RoutingRule? lockingRule)
     {
         Session = session ?? throw new ArgumentNullException(nameof(session));
+        PlacementEndpointId = placementEndpointId ?? throw new ArgumentNullException(nameof(placementEndpointId));
         _iconService = iconService ?? throw new ArgumentNullException(nameof(iconService));
         LockingRule = lockingRule;
         LastAudibleAt = DateTime.UtcNow;
@@ -94,7 +95,15 @@ public partial class AppChip : ObservableObject
     public bool IsRuleLocked => LockingRule is not null;
     public bool CanDrag => !IsRuleLocked && !Session.IsSystemSounds;
     public uint ProcessId => Session.ProcessId;
-    public string SourceEndpointId => Session.CurrentEndpointId;
+
+    /// <summary>
+    /// Endpoint the chip is physically rendered on. NAudio's <see cref="AudioSession.CurrentEndpointId"/>
+    /// reports where the session was *created*, not where audio currently flows - a
+    /// per-app-default routing change leaves it stale. We track placement explicitly so the
+    /// chip can migrate cards as audio shifts (driven by live peak signal in <c>HomeViewModel</c>).
+    /// </summary>
+    public string PlacementEndpointId { get; }
+    public string SourceEndpointId => PlacementEndpointId;
 
     public string LockTooltip
     {

@@ -1,11 +1,13 @@
 namespace Earmark.Core.Audio;
 
 /// <summary>
-/// Per-session peak metering. Sessions are identified by owning PID because that's the
-/// stable handle the UI knows (rules match on it, drag/drop carries it). Returns null
-/// when no session for the PID is currently registered on any render endpoint.
+/// Per-session peak metering. Keyed by (PID, endpoint) because a single process can
+/// register sessions on multiple endpoints (apps that enumerate output devices in
+/// shared mode do this) but only one of those sessions is actually producing audio.
+/// Querying per-endpoint lets the UI place the chip on the right card. Returns null
+/// when no session for that pid+endpoint pair is currently registered.
 /// </summary>
 public interface IAudioSessionMeterService
 {
-    float? GetPeak(uint processId);
+    float? GetPeak(uint processId, string endpointId);
 }

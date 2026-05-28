@@ -237,7 +237,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             {
                 foreach (var chip in card.Apps)
                 {
-                    _ = _sessionMeters.GetPeak(chip.ProcessId);
+                    _ = _sessionMeters.GetPeak(chip.ProcessId, card.Endpoint.Id);
                 }
             }
             var probeMs = ElapsedMs(probeStart);
@@ -263,39 +263,64 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             // Phase 1: update peaks on existing chips, keeping LastAudibleAt fresh.
             foreach (var chip in card.Apps)
             {
-                var peak = _sessionMeters.GetPeak(chip.ProcessId) ?? 0f;
+                var peak = _sessionMeters.GetPeak(chip.ProcessId, card.Endpoint.Id) ?? 0f;
                 chip.Tick(peak);
             }
 
-            // Phase 2: revive chips for currently-AUDIBLE sessions. Strictly peak-based -
-            // accepting `Session.State == Active` here would re-add chips immediately after
-            // Phase 3 prunes them (any app that's claimed an audio device but isn't actually
-            // playing reports Active forever). Only sessions producing audio right now get
-            // a chip via this path; idle-but-Active sessions stay pruned until they play.
+            // Phase 2: place chips on cards where audio is currently flowing for that PID.
+            // PEAK-DRIVEN PLACEMENT. We ignore session.CurrentEndpointId entirely - that
+            // value reflects where the session was created, not where audio currently
+            // flows. A per-app-default override (rule, drag-drop) routes audio to a
+            // different endpoint but leaves CurrentEndpointId stale, which used to put
+            // the chip on the wrong card. Live peak is the truth.
             if (card.Endpoint.Flow == EndpointFlow.Render)
             {
+                var seenPidsOnThisCard = new HashSet<uint>();
+                foreach (var chip in card.Apps) seenPidsOnThisCard.Add(chip.ProcessId);
+
                 foreach (var session in sessionsSnapshot)
                 {
-                    if (!string.Equals(session.CurrentEndpointId, card.Endpoint.Id, StringComparison.OrdinalIgnoreCase)) continue;
                     if (!AppChip.ShouldShowAsAppChip(session)) continue;
+                    if (seenPidsOnThisCard.Contains(session.ProcessId)) continue;
 
-                    var livePeak = _sessionMeters.GetPeak(session.ProcessId) ?? 0f;
+                    var livePeak = _sessionMeters.GetPeak(session.ProcessId, card.Endpoint.Id) ?? 0f;
                     if (livePeak < AppChip.AudibleAmplitudeThreshold) continue;
-
-                    var alreadyChipped = false;
-                    foreach (var chip in card.Apps)
-                    {
-                        if (chip.ProcessId == session.ProcessId) { alreadyChipped = true; break; }
-                    }
-                    if (alreadyChipped) continue;
 
                     combinedEndpointsCache ??= _endpoints.GetEndpoints(EndpointFlow.Render)
                         .Concat(_endpoints.GetEndpoints(EndpointFlow.Capture))
                         .ToList();
                     var match = _matcher.FindAppRoute(session, EndpointFlow.Render, rulesSnapshot, combinedEndpointsCache, sessionsSnapshot);
-                    var revivedChip = new AppChip(session, _iconService, match?.Rule);
+                    var revivedChip = new AppChip(session, card.Endpoint.Id, _iconService, match?.Rule);
                     InsertChipSorted(card.Apps, revivedChip);
                     card.NotifyAppsChanged();
+                    seenPidsOnThisCard.Add(session.ProcessId);
+                    var sessionEndpointMatchesCard = string.Equals(session.CurrentEndpointId, card.Endpoint.Id, StringComparison.OrdinalIgnoreCase);
+                    _logger.LogInformation(
+                        "Chip placed via peak: pid={Pid} name='{Name}' card='{Card}' cardEndpoint={CardEp} peak={Peak:0.000} sessionEndpoint={SessEp} match={Match}",
+                        session.ProcessId, session.ProcessName, card.Endpoint.DisplayName,
+                        card.Endpoint.Id, livePeak, session.CurrentEndpointId, sessionEndpointMatchesCard);
+
+                    // Migration: drop the same PID's chip from any OTHER card where it's
+                    // no longer audible. Without this, a per-app-default change (rule or
+                    // drag-drop) leaves the chip on the previous card for the full silence
+                    // grace window before the prune catches up. Multi-endpoint same-PID
+                    // case (e.g. Edge playing through two devices) is preserved because we
+                    // only remove from cards whose peak for this PID is currently silent.
+                    foreach (var otherCard in Devices)
+                    {
+                        if (ReferenceEquals(otherCard, card)) continue;
+                        if (otherCard.Endpoint.Flow != EndpointFlow.Render) continue;
+                        for (var oi = otherCard.Apps.Count - 1; oi >= 0; oi--)
+                        {
+                            if (otherCard.Apps[oi].ProcessId != session.ProcessId) continue;
+                            var otherPeak = _sessionMeters.GetPeak(session.ProcessId, otherCard.Endpoint.Id) ?? 0f;
+                            if (otherPeak < AppChip.AudibleAmplitudeThreshold)
+                            {
+                                otherCard.Apps.RemoveAt(oi);
+                                otherCard.NotifyAppsChanged();
+                            }
+                        }
+                    }
                 }
             }
 
@@ -448,37 +473,11 @@ public partial class HomeViewModel : ObservableObject, IDisposable
 
     private void OnSessionAdded(object? sender, AudioSessionEvent e)
     {
-        var session = e.Session;
-        _dispatcher.Enqueue(() =>
-        {
-            var card = _allCards.FirstOrDefault(c =>
-                c.Endpoint.Flow == EndpointFlow.Render &&
-                string.Equals(c.Endpoint.Id, session.CurrentEndpointId, StringComparison.OrdinalIgnoreCase));
-            if (card is null) return;
-
-            if (!AppChip.ShouldShowAsAppChip(session)) return;
-            // The instant-add path is reserved for sessions that are currently emitting
-            // audio. Inactive new sessions wait for a SessionsChanged rebuild to confirm
-            // they've gone Active before they earn a chip.
-            if (session.State != SessionState.Active) return;
-
-            foreach (var existing in card.Apps)
-            {
-                if (existing.ProcessId == session.ProcessId) return;
-            }
-
-            // Snapshot is good enough for the rule-lock check; a real reroute fires its own
-            // SessionsChanged that will reconcile via QueueRefresh.
-            var rules = _rules.Rules;
-            var renderEndpoints = _endpoints.GetEndpoints(EndpointFlow.Render);
-            var captureEndpoints = _endpoints.GetEndpoints(EndpointFlow.Capture);
-            var combined = renderEndpoints.Concat(captureEndpoints).ToList();
-            var allSessions = _sessions.GetSessions();
-            var match = _matcher.FindAppRoute(session, EndpointFlow.Render, rules, combined, allSessions);
-            var chip = new AppChip(session, _iconService, match?.Rule);
-            InsertChipSorted(card.Apps, chip);
-            card.NotifyAppsChanged();
-        });
+        // No chip work here. session.CurrentEndpointId is unreliable for chip placement
+        // (it reflects creation, not current routing), so picking a target card off it
+        // routinely landed chips on the wrong endpoint. Phase 2 in TickAppMeters places
+        // chips by live peak across all cards within ~50ms - which is fast enough that
+        // the user perceives it as instant.
     }
 
     private void QueueRefresh()
@@ -623,58 +622,31 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             return;
         }
 
+        // PEAK-DRIVEN PLACEMENT. session.CurrentEndpointId is unreliable for chip placement
+        // (it captures where the session was created, not where audio currently flows).
+        // For each session in the global snapshot, ask the meter cache "is this PID audible
+        // ON THIS CARD'S ENDPOINT right now?" - if yes, it belongs here.
         var activePids = new Dictionary<uint, AudioSession>();
         var presentPidsAnyState = new HashSet<uint>();
         foreach (var session in sessions)
         {
-            if (!string.Equals(session.CurrentEndpointId, card.Endpoint.Id, StringComparison.OrdinalIgnoreCase)) continue;
             if (!AppChip.ShouldShowAsAppChip(session)) continue;
 
-            presentPidsAnyState.Add(session.ProcessId);
-            // Audibility = "is producing sound right now". State==Active is unreliable
-            // (apps stay Active long after they go silent), so only the live peak counts.
-            // Existing chips that have gone silent will fall out via the grace-window prune
-            // in TickAppMeters; this path is only about deciding when to ADD a new chip.
-            var livePeak = _sessionMeters.GetPeak(session.ProcessId) ?? 0f;
+            var livePeak = _sessionMeters.GetPeak(session.ProcessId, card.Endpoint.Id) ?? 0f;
             if (livePeak >= AppChip.AudibleAmplitudeThreshold)
             {
+                presentPidsAnyState.Add(session.ProcessId);
                 activePids.TryAdd(session.ProcessId, session);
             }
         }
 
-        // DEFENSIVE: a transient empty snapshot (COM enumeration hiccup under rapid state
-        // transitions, e.g. mpv seeking) used to make this loop wipe every chip on every
-        // card at once - because none of their PIDs were in the empty presentPidsAnyState
-        // set. Authoritative chip removal lives on the SessionRemoved event-driven path.
-        // If this snapshot happens to be empty when we have chips, skip the "session gone"
-        // removal entirely and let SessionRemoved deliver the truth.
-        var now = DateTime.UtcNow;
-        var snapshotLooksValid = sessions.Count > 0;
-        if (!snapshotLooksValid && card.Apps.Count > 0)
-        {
-            _logger.LogWarning(
-                "SyncCardApps for {Card}: snapshot returned 0 sessions but card has {ChipCount} chips - skipping removal pass to avoid mass-wipe",
-                card.Endpoint.DisplayName, card.Apps.Count);
-        }
-        for (var i = card.Apps.Count - 1; i >= 0; i--)
-        {
-            var chip = card.Apps[i];
-            if (snapshotLooksValid && !presentPidsAnyState.Contains(chip.ProcessId))
-            {
-                _logger.LogInformation(
-                    "Chip removed via SyncCardApps (session not in snapshot): pid={Pid} card={Card}",
-                    chip.ProcessId, card.Endpoint.DisplayName);
-                card.Apps.RemoveAt(i);
-                continue;
-            }
-            if (snapshotLooksValid && !activePids.ContainsKey(chip.ProcessId) && now - chip.LastAudibleAt > AppChipAudibleGrace)
-            {
-                _logger.LogInformation(
-                    "Chip removed via SyncCardApps (inactive + silent past grace): pid={Pid} card={Card}",
-                    chip.ProcessId, card.Endpoint.DisplayName);
-                card.Apps.RemoveAt(i);
-            }
-        }
+        // SyncCardApps does ADDITIONS only. Removals live on two paths:
+        //   - event-driven: SessionRemoved when a process exits / session is disposed
+        //   - polled: Phase 3 in TickAppMeters when LastAudibleAt > grace
+        // Tying removal to "peak says it's not audible right this instant" loses chips
+        // during brief silent stretches (track gaps, pause/resume) - that's the grace
+        // window's job and it correctly tolerates a few seconds of quiet.
+        _ = presentPidsAnyState;
 
         var presentPids = new HashSet<uint>();
         foreach (var chip in card.Apps) presentPids.Add(chip.ProcessId);
@@ -687,7 +659,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         foreach (var session in additions)
         {
             var match = _matcher.FindAppRoute(session, EndpointFlow.Render, rules, combinedEndpoints, sessions);
-            var chip = new AppChip(session, _iconService, match?.Rule);
+            var chip = new AppChip(session, card.Endpoint.Id, _iconService, match?.Rule);
             InsertChipSorted(card.Apps, chip);
         }
 

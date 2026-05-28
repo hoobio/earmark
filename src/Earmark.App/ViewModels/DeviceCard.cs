@@ -69,10 +69,10 @@ public partial class DeviceCard : ObservableObject
         RuleMutedSource = ruleMutedSource;
         RuleVolumeSource = ruleVolumeSource;
         Rules = rules;
-        // Start collapsed: only the first chip is in the ItemsControl. The rest stream in
-        // when IsRulesExpanded flips, triggering per-chip composition show animations.
-        SyncVisibleRules();
-
+        for (var i = 1; i < Rules.Count; i++)
+        {
+            AdditionalRules.Add(Rules[i]);
+        }
         _showHidden = showHidden;
         IsHiddenByUser = isHiddenByUser;
         IsPinnedByUser = isPinnedByUser;
@@ -92,11 +92,11 @@ public partial class DeviceCard : ObservableObject
 
     /// <summary>
     /// Combined opt-out from <see cref="Controls.WrapByRowLayout"/>'s row-baseline sizing.
-    /// True when the card has any "extra" content other cards in the row might lack: a
-    /// rules-expanded panel, an apps row, OR a chevron strip (multiple rules). Each adds
-    /// real content height that shouldn't force every other card to pad up to match.
+    /// True when the card has any "extra" content other cards in the row might lack: an
+    /// expanded rules panel OR an apps row. Each adds real content height that shouldn't
+    /// force every other card to pad up to match.
     /// </summary>
-    public bool IsLayoutCustomSized => IsRulesExpanded || HasApps || HasMultipleRules;
+    public bool IsLayoutCustomSized => IsRulesExpanded || HasApps;
 
     /// <summary>Tells the page that <see cref="HasApps"/> may have flipped. Raised from
     /// <c>HomeViewModel</c> after it adds/removes chips so the section visibility binding
@@ -252,29 +252,38 @@ public partial class DeviceCard : ObservableObject
     public bool IsMuteToggleEnabled => !IsMuteLockedByRule;
 
     /// <summary>
-    /// When true, the rules panel renders every chip in <see cref="Rules"/>. Otherwise the
-    /// <see cref="VisibleRules"/> view is trimmed to the first chip and the rest fade in via
-    /// composition animations when this flips. Toggled only when there are 2+ rules.
+    /// Bound directly to the rules <see cref="Microsoft.UI.Xaml.Controls.Expander.IsExpanded"/>.
+    /// The Expander only renders for cards with 2+ rules; for single-rule cards the first
+    /// rule chip stands alone with no expander chrome.
     /// </summary>
     [ObservableProperty]
     public partial bool IsRulesExpanded { get; set; }
 
+    /// <summary>The first rule chip - always visible (when any rules apply at all). Sits
+    /// outside the Expander so users see at-a-glance which rule is active without having
+    /// to expand anything.</summary>
+    public RuleSummary? FirstRule => Rules.Count > 0 ? Rules[0] : null;
 
-    /// <summary>
-    /// Chips currently in the ItemsControl. Mirrors <see cref="Rules"/> when expanded and
-    /// trimmed to the first chip when collapsed. Mutated in place so the framework can fire
-    /// per-chip show/hide composition animations as items come and go, rather than swapping
-    /// the whole ItemsSource and rebuilding every container.
-    /// </summary>
-    public System.Collections.ObjectModel.ObservableCollection<RuleSummary> VisibleRules { get; } = new();
+    /// <summary>Rules beyond the first. The Expander wraps these; toggle to show/hide.</summary>
+    public ObservableCollection<RuleSummary> AdditionalRules { get; } = new();
 
+    /// <summary>Tooltip label for the inline expand chevron next to the first rule chip,
+    /// e.g. "Show 2 more rules". Singular/plural handled here so the XAML stays
+    /// declarative.</summary>
+    public string AdditionalRulesLabel
+    {
+        get
+        {
+            var count = AdditionalRules.Count;
+            if (count <= 0) return string.Empty;
+            return count == 1 ? "Show 1 more rule" : $"Show {count} more rules";
+        }
+    }
+
+    /// <summary>Glyph for the inline expand chevron: down when collapsed, up when expanded.</summary>
     public string RulesExpandGlyph => IsRulesExpanded
-        ? new string((char)0xE70E, 1)   // ChevronUp
-        : new string((char)0xE70D, 1);  // ChevronDown
-
-    public string RulesExpandTooltip => IsRulesExpanded ? "Collapse rules" : "Show all rules";
-
-    private const double RulesPanelMaxHeightExpanded = 320;
+        ? new string((char)0xE70E, 1)
+        : new string((char)0xE70D, 1);
 
     // ---- Peak meter (sectioned + hold) ----
     //
@@ -607,29 +616,8 @@ public partial class DeviceCard : ObservableObject
 
     partial void OnIsRulesExpandedChanged(bool value)
     {
+        OnPropertyChanged(nameof(IsLayoutCustomSized));
         OnPropertyChanged(nameof(RulesExpandGlyph));
-        OnPropertyChanged(nameof(RulesExpandTooltip));
-        SyncVisibleRules();
-    }
-
-    private void SyncVisibleRules()
-    {
-        // Target = all rules when expanded, just the first chip when collapsed (with the
-        // exception of single-rule devices, where the lone chip is always visible).
-        var target = (HasMultipleRules && !IsRulesExpanded) ? 1 : Rules.Count;
-
-        // Add missing chips at the end - WinUI's ItemsControl raises Loaded on the new
-        // container, which is where the implicit show animation gets hooked up.
-        while (VisibleRules.Count < target)
-        {
-            VisibleRules.Add(Rules[VisibleRules.Count]);
-        }
-        // Trim from the end so the first chip survives across collapse cycles - that keeps
-        // its container instance stable and avoids a fade on every collapse.
-        while (VisibleRules.Count > target)
-        {
-            VisibleRules.RemoveAt(VisibleRules.Count - 1);
-        }
     }
 
     partial void OnPeakLevelChanged(float value)

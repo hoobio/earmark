@@ -68,43 +68,10 @@ public sealed partial class HomePage : Page
 
     private void OnRulesExpandToggle(object sender, RoutedEventArgs e)
     {
-        if (sender is not FrameworkElement element) return;
         // ItemsRepeater doesn't propagate DataContext into x:Bind templates, so the button
         // carries the DeviceCard reference via Tag="{x:Bind}" instead.
-        if (element.Tag is not DeviceCard card) return;
-
-        var collapsing = card.IsRulesExpanded;
+        if (sender is not FrameworkElement { Tag: DeviceCard card }) return;
         card.IsRulesExpanded = !card.IsRulesExpanded;
-
-        if (collapsing)
-        {
-            // Was expanded, now collapsing: snap the scroll back to the top of the list so
-            // the next expand starts from the first chip.
-            var scrollViewer = FindAncestorScrollViewer(element);
-            scrollViewer?.ChangeView(null, 0, null, disableAnimation: false);
-        }
-    }
-
-    /// <summary>Walks up the visual tree to the first ancestor StackPanel that contains a
-    /// ScrollViewer named <c>RulesScroll</c> and returns it.</summary>
-    private static ScrollViewer? FindAncestorScrollViewer(DependencyObject start)
-    {
-        var current = VisualTreeHelper.GetParent(start);
-        while (current is not null)
-        {
-            if (current is StackPanel panel)
-            {
-                foreach (var child in panel.Children)
-                {
-                    if (child is ScrollViewer sv && sv.Name == "RulesScroll")
-                    {
-                        return sv;
-                    }
-                }
-            }
-            current = VisualTreeHelper.GetParent(current);
-        }
-        return null;
     }
 
     // CA1822 suppressed: XAML event hookup requires instance methods even when the body
