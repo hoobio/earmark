@@ -119,7 +119,14 @@ public sealed class RuleEvaluator : IRuleEvaluator
             }
             else
             {
-                var endpoint = MatchEndpoint(action.DevicePattern, action.EffectiveFlow, endpoints);
+                // SetDeviceVolume / MuteDevice / UnmuteDevice are flow-agnostic - they target a
+                // device by name regardless of render/capture, matching the applier's behaviour
+                // in ApplyVolumeAndMuteRules. EffectiveFlow defaults to Render for these, so a
+                // flow-specific search would wrongly classify mic-targeted rules as Idle.
+                var flowAgnostic = action.IsVolumeAction || action.IsMuteAction;
+                var endpoint = flowAgnostic
+                    ? MatchEndpointAnyFlow(action.DevicePattern, endpoints)
+                    : MatchEndpoint(action.DevicePattern, action.EffectiveFlow, endpoints);
                 if (endpoint is null)
                 {
                     anyIdle = true;
@@ -252,6 +259,28 @@ public sealed class RuleEvaluator : IRuleEvaluator
 
         return endpoints
             .Where(e => e.Flow == flow && e.State == EndpointState.Active)
+            .FirstOrDefault(e =>
+            {
+                try
+                {
+                    return regex.IsMatch(e.FriendlyName) || regex.IsMatch(e.DisplayName);
+                }
+                catch (RegexMatchTimeoutException)
+                {
+                    return false;
+                }
+            });
+    }
+
+    private static AudioEndpoint? MatchEndpointAnyFlow(string pattern, IReadOnlyList<AudioEndpoint> endpoints)
+    {
+        if (!RegexCache.TryGet(pattern, out var regex) || regex is null)
+        {
+            return null;
+        }
+
+        return endpoints
+            .Where(e => e.State == EndpointState.Active)
             .FirstOrDefault(e =>
             {
                 try
