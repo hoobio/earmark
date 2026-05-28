@@ -40,17 +40,19 @@ public sealed record WaveLinkOutputDevicesResult(
     [property: JsonPropertyName("mainOutput")] WaveLinkMainOutput MainOutput,
     [property: JsonPropertyName("outputDevices")] IReadOnlyList<WaveLinkOutputDevice> OutputDevices);
 
-// Wave Link's getInputConfigs returns localMixer / streamMixer as positional tuples,
-// not objects: index 0 is the mute bool, 1 is volume, 2 is filter-bypass. Carry them
-// as JsonElement[] so we can pluck the bool without coupling to the order if Elgato
-// ever flips it (read with TryGetBoolean / GetBoolean).
-public sealed record WaveLinkInputConfig(
-    [property: JsonPropertyName("identifier")] string Identifier,
+// getInputDevices: hardware audio interfaces / mics WL can capture. Each device has one
+// or more "inputs" (channels on that interface, e.g. SSL 2 has Input 1 / Input 2 / merged
+// Input). Mute lives on the inner inputs[] item, not the device.
+public sealed record WaveLinkInputDeviceInput(
+    [property: JsonPropertyName("id")] string Id,
     [property: JsonPropertyName("name")] string Name,
-    [property: JsonPropertyName("inputType")] string? InputType,
-    [property: JsonPropertyName("isAvailable")] bool IsAvailable,
-    [property: JsonPropertyName("localMixer")] IReadOnlyList<System.Text.Json.JsonElement>? LocalMixer,
-    [property: JsonPropertyName("streamMixer")] IReadOnlyList<System.Text.Json.JsonElement>? StreamMixer);
+    [property: JsonPropertyName("isMuted")] bool IsMuted);
 
-public sealed record WaveLinkInputConfigsResult(
-    [property: JsonPropertyName("inputConfigs")] IReadOnlyList<WaveLinkInputConfig> InputConfigs);
+public sealed record WaveLinkInputDevice(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("deviceType")] string? DeviceType,
+    [property: JsonPropertyName("inputs")] IReadOnlyList<WaveLinkInputDeviceInput> Inputs);
+
+public sealed record WaveLinkInputDevicesResult(
+    [property: JsonPropertyName("inputDevices")] IReadOnlyList<WaveLinkInputDevice> InputDevices);

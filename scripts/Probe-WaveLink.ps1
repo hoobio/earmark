@@ -31,22 +31,25 @@ function Send-Json {
 
 function Receive-Json {
     param($Ws, [int]$TimeoutMs)
+    # NB: do NOT pass a cancellation token to ReceiveAsync that fires on timeout - cancelling
+    # an in-flight receive aborts the whole WebSocket per .NET semantics. Instead, kick off
+    # a non-cancellable receive and poll IsCompleted with a deadline.
     $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMs)
     $sb = [System.Text.StringBuilder]::new()
-    $buf = [byte[]]::new(8192)
+    $buf = [byte[]]::new(16384)
     while ([DateTime]::UtcNow -lt $deadline) {
-        $remain = [int]($deadline - [DateTime]::UtcNow).TotalMilliseconds
-        if ($remain -le 0) { break }
-        $cts2 = [System.Threading.CancellationTokenSource]::new($remain)
+        $task = $Ws.ReceiveAsync([System.ArraySegment[byte]]::new($buf), [System.Threading.CancellationToken]::None)
+        while (-not $task.IsCompleted -and [DateTime]::UtcNow -lt $deadline) {
+            Start-Sleep -Milliseconds 25
+        }
+        if (-not $task.IsCompleted) { return $null }
         try {
-            $task = $Ws.ReceiveAsync([System.ArraySegment[byte]]::new($buf), $cts2.Token)
-            $task.Wait()
             $r = $task.Result
-            $null = $sb.Append([System.Text.Encoding]::UTF8.GetString($buf, 0, $r.Count))
-            if ($r.EndOfMessage) { return $sb.ToString() }
         } catch {
             return $null
         }
+        $null = $sb.Append([System.Text.Encoding]::UTF8.GetString($buf, 0, $r.Count))
+        if ($r.EndOfMessage) { return $sb.ToString() }
     }
     return $null
 }
@@ -54,8 +57,9 @@ function Receive-Json {
 $id = 1
 $results = [ordered]@{}
 
-# Drain any unsolicited push frames first
-while ($null -ne (Receive-Json -Ws $ws -TimeoutMs 250)) {}
+# Don't pre-drain: the receive call would block on the first inbound frame and there's no
+# safe way to cancel it without aborting the WS. WL's request/response IDs let us
+# correlate replies, so any unsolicited push frames in flight get filtered by id matching.
 
 foreach ($method in $Methods) {
     $req = @{ jsonrpc = '2.0'; method = $method; id = $id }

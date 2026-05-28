@@ -32,27 +32,29 @@ public interface IWaveLinkService
     Task<bool> SetMixForOutputAsync(string deviceId, string outputId, string mixId, CancellationToken ct = default);
 
     /// <summary>
-    /// Mute / unmute a Wave Link input channel via the local WS API. Windows-endpoint mute on
-    /// a Wave Link virtual capture device is metadata only - WL's audio engine reads upstream
-    /// and ignores it - so the only way to actually silence a Wave Link input is through this
-    /// path. Mutes both the local (monitor) and stream mixers so the result matches what the
-    /// user expects from a "mute mic" toggle.
+    /// Mute / unmute a Wave Link mix (the virtual capture endpoints WL exposes to apps,
+    /// like "Microphone Mix"). Routes via the setMix WS method. Mute / volume on the
+    /// Windows endpoint side of these virtual devices is metadata only - only the WL-side
+    /// change actually silences what downstream consumers hear.
     /// </summary>
-    Task<bool> SetInputMuteAsync(string identifier, bool muted, CancellationToken ct = default);
+    Task<bool> SetMixMutedAsync(string mixId, bool muted, CancellationToken ct = default);
+
+    /// <summary>Set a Wave Link mix's level (0-1 scalar).</summary>
+    Task<bool> SetMixLevelAsync(string mixId, float level, CancellationToken ct = default);
 
     /// <summary>
-    /// Sets a Wave Link input channel's volume (0-1 scalar, converted to the 0-100 the WS
-    /// API expects). Same rationale as <see cref="SetInputMuteAsync"/> - the Windows
-    /// endpoint volume on a WL virtual input is metadata-only; only the WL-side value
-    /// changes what the user actually hears downstream.
+    /// Mute / unmute a hardware capture device that WL has wired up as an input (e.g. an
+    /// SSL 2 USB Audio Device). Routes via setInputDevice. The Windows-endpoint mute on a
+    /// hardware mic still applies for direct WASAPI consumers; this path additionally
+    /// silences what WL's pipeline sees so streaming / virtual-mic apps are also muted.
     /// </summary>
-    Task<bool> SetInputVolumeAsync(string identifier, float level, CancellationToken ct = default);
+    Task<bool> SetInputDeviceMutedAsync(string deviceId, string inputId, bool muted, CancellationToken ct = default);
 }
 
 public sealed record WaveLinkSnapshot(
     IReadOnlyList<WaveLinkMixInfo> Mixes,
     IReadOnlyList<WaveLinkOutputInfo> OutputDevices,
-    IReadOnlyList<WaveLinkInputInfo> Inputs);
+    IReadOnlyList<WaveLinkInputDeviceInfo> InputDevices);
 
 public sealed record WaveLinkMixInfo(string Id, string Name);
 
@@ -62,6 +64,13 @@ public sealed record WaveLinkOutputInfo(
     string DeviceName,
     string CurrentMixId);
 
-// Identifier + name only: mute state is read off the Windows endpoint (Wave Link mirrors
-// its internal mute back to AudioEndpointVolume), so we don't duplicate that bit here.
-public sealed record WaveLinkInputInfo(string Identifier, string Name);
+// Hardware capture devices WL is wired up to capture from. The Windows MMDevice id
+// matches the WL Id directly (WL uses the same {0.0.1.}.{guid} string), so endpoint
+// routing can match by id without name heuristics. Each device exposes one or more
+// "inputs" (channels); we need both ids to address mute via setInputDevice.
+public sealed record WaveLinkInputDeviceInfo(
+    string DeviceId,
+    string DeviceName,
+    IReadOnlyList<WaveLinkInputChannelInfo> Inputs);
+
+public sealed record WaveLinkInputChannelInfo(string InputId, string Name, bool IsMuted);

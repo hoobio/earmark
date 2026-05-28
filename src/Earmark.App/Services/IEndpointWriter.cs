@@ -41,19 +41,21 @@ internal sealed class EndpointWriter : IEndpointWriter
     {
         ArgumentNullException.ThrowIfNull(endpoint);
 
-        // If Wave Link has this device wired up as an input channel (virtual or physical
-        // routed through it), the WS path is the source of truth: WL mirrors the new state
-        // back to the Windows endpoint so direct WASAPI consumers see it without us
-        // double-writing. Only fall back to the Windows endpoint when WL has no match or
-        // the WS call itself fails.
-        var waveLinkInputId = ResolveWaveLinkInputIdentifier(endpoint);
-        if (waveLinkInputId is not null)
+        // For Wave Link capture endpoints the WL transport is the source of truth - the
+        // Windows endpoint mute on a WL virtual capture device is metadata only, and on a
+        // hardware mic that's wired into WL the Windows mute doesn't reach the WL pipeline
+        // (apps reading via WL's virtual mics keep hearing). Two routing paths:
+        //   - WL InputDevice: id matches the Windows MMDevice id verbatim (hardware mics)
+        //   - WL Mix: name matches the user-facing endpoint name (virtual mix outputs)
+        // Fall back to the Windows endpoint only when WL has no match or the WS call fails.
+        var route = ResolveWaveLinkRoute(endpoint);
+        if (route is not null)
         {
             try
             {
-                var ok = await _waveLink.SetInputMuteAsync(waveLinkInputId, muted, ct).ConfigureAwait(false);
+                var ok = await route.MuteAsync(_waveLink, muted, ct).ConfigureAwait(false);
                 if (ok) return true;
-                _logger.LogDebug("EndpointWriter: WL setInputConfig refused mute for {Device}; falling back", endpoint.DisplayName);
+                _logger.LogDebug("EndpointWriter: WL refused mute for {Device}; falling back", endpoint.DisplayName);
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)
@@ -69,14 +71,14 @@ internal sealed class EndpointWriter : IEndpointWriter
     {
         ArgumentNullException.ThrowIfNull(endpoint);
 
-        var waveLinkInputId = ResolveWaveLinkInputIdentifier(endpoint);
-        if (waveLinkInputId is not null)
+        var route = ResolveWaveLinkRoute(endpoint);
+        if (route is not null)
         {
             try
             {
-                var ok = await _waveLink.SetInputVolumeAsync(waveLinkInputId, level, ct).ConfigureAwait(false);
+                var ok = await route.LevelAsync(_waveLink, level, ct).ConfigureAwait(false);
                 if (ok) return true;
-                _logger.LogDebug("EndpointWriter: WL setInputConfig refused volume for {Device}; falling back", endpoint.DisplayName);
+                _logger.LogDebug("EndpointWriter: WL refused volume for {Device}; falling back", endpoint.DisplayName);
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)
@@ -88,25 +90,73 @@ internal sealed class EndpointWriter : IEndpointWriter
         return _endpoints.SetVolume(endpoint.Id, level);
     }
 
-    private string? ResolveWaveLinkInputIdentifier(AudioEndpoint endpoint)
+    private abstract record WaveLinkRoute
     {
-        // If WL isn't currently reachable (turned off in settings, shut down externally,
-        // mid-reconnect), skip the WL transport so the writer falls straight through to the
-        // Windows endpoint - otherwise a stale LastSnapshot would route us at a service we
-        // can't actually talk to.
+        public abstract Task<bool> MuteAsync(IWaveLinkService waveLink, bool muted, CancellationToken ct);
+        public abstract Task<bool> LevelAsync(IWaveLinkService waveLink, float level, CancellationToken ct);
+    }
+
+    private sealed record MixRoute(string MixId) : WaveLinkRoute
+    {
+        public override Task<bool> MuteAsync(IWaveLinkService waveLink, bool muted, CancellationToken ct) =>
+            waveLink.SetMixMutedAsync(MixId, muted, ct);
+        public override Task<bool> LevelAsync(IWaveLinkService waveLink, float level, CancellationToken ct) =>
+            waveLink.SetMixLevelAsync(MixId, level, ct);
+    }
+
+    private sealed record InputDeviceRoute(string DeviceId, string InputId) : WaveLinkRoute
+    {
+        public override Task<bool> MuteAsync(IWaveLinkService waveLink, bool muted, CancellationToken ct) =>
+            waveLink.SetInputDeviceMutedAsync(DeviceId, InputId, muted, ct);
+        // WL's setInputDevice doesn't expose a 0-1 level - the channel uses a "gain" knob
+        // with a per-device lookup table. Falling through to the Windows endpoint volume is
+        // the honest answer here (and it usually matches what the hardware preamp wants).
+        public override Task<bool> LevelAsync(IWaveLinkService waveLink, float level, CancellationToken ct) =>
+            Task.FromResult(false);
+    }
+
+    private WaveLinkRoute? ResolveWaveLinkRoute(AudioEndpoint endpoint)
+    {
+        // If WL isn't currently reachable (off in settings, shut down externally,
+        // mid-reconnect), skip the WL transport so the writer falls through to the Windows
+        // endpoint - otherwise a stale LastSnapshot would point us at a service we can't
+        // actually talk to.
         if (!_waveLink.IsAvailable) return null;
         if (endpoint.Flow != EndpointFlow.Capture) return null;
 
         var snapshot = _waveLink.LastSnapshot;
-        if (snapshot is null || snapshot.Inputs.Count == 0) return null;
+        if (snapshot is null) return null;
 
-        var bare = StripTrailingParenthetical(endpoint.FriendlyName);
-        foreach (var input in snapshot.Inputs)
+        // Hardware-input match first: WL exposes the same MMDevice id Windows does, so the
+        // capture endpoint id matches the WL device id exactly. The single-input case is
+        // the common one; for multi-input interfaces (SSL 2's Input 1 / Input 2 / merged)
+        // the inner input ids also match the Windows endpoint id for each channel.
+        foreach (var device in snapshot.InputDevices)
         {
-            if (string.Equals(input.Name, bare, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(input.Name, endpoint.FriendlyName, StringComparison.OrdinalIgnoreCase))
+            if (!string.Equals(device.DeviceId, endpoint.Id, StringComparison.OrdinalIgnoreCase)) continue;
+            WaveLinkInputChannelInfo? input = null;
+            foreach (var candidate in device.Inputs)
             {
-                return input.Identifier;
+                if (string.Equals(candidate.InputId, endpoint.Id, StringComparison.OrdinalIgnoreCase))
+                {
+                    input = candidate;
+                    break;
+                }
+            }
+            if (input is null && device.Inputs.Count > 0) input = device.Inputs[0];
+            if (input is null) continue;
+            return new InputDeviceRoute(device.DeviceId, input.InputId);
+        }
+
+        // Virtual capture endpoint -> WL Mix by name. Strip the trailing "(driver)" so
+        // "Microphone Mix (Elgato Virtual Audio)" matches "Microphone Mix".
+        var bare = StripTrailingParenthetical(endpoint.FriendlyName);
+        foreach (var mix in snapshot.Mixes)
+        {
+            if (string.Equals(mix.Name, bare, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(mix.Name, endpoint.FriendlyName, StringComparison.OrdinalIgnoreCase))
+            {
+                return new MixRoute(mix.Id);
             }
         }
         return null;
