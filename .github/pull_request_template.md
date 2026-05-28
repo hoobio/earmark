@@ -26,9 +26,16 @@
 - [ ] CLAUDE.md / README / CONTRIBUTING updated if behavior, build steps, or schema changed
 
 <!-- If this PR contains multiple logical changes for the changelog, add
-     additional conventional commit footers below. See CLAUDE.md for details.
+     additional conventional commit footers below, separated by blank
+     lines. See AGENTS.md "Multi-change PRs" for the full rules.
 
-     Example:
+     Blank lines between footers are REQUIRED - release-please's parser
+     groups consecutive non-blank lines into one paragraph and only
+     picks up the first conventional-commit line per paragraph.
+
+     ---
+
      fix(routing): clear dedupe cache on rule change
+
      test: cover RuleEvaluator shadow logic
 -->
