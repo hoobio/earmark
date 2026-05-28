@@ -25,6 +25,8 @@ tests/
 
 ## Build, run, and iterate (THE pattern)
 
+**Rebuild and re-launch after EVERY code change.** Not "after the last change in a batch", not "if it looked like a UI change" - every change to anything that ends up in a binary (`.cs`, `.xaml`, `.csproj`, etc.). A clean `dotnet build` is not verification; the running app is. If you finish a task with only a build, the task is not finished. Report what the relaunched binary actually did (log lines, observed behaviour) before declaring success. Doc-only edits (`.md`, comments-only) are exempt.
+
 The app holds open file handles on its own DLLs while running, which makes incremental builds fail with `MSB3027`. **Always kill before building.** Standard inner loop:
 
 ```bash
