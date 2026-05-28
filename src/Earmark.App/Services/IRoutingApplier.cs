@@ -72,6 +72,7 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
         _sessions.SessionRemoved += OnSessionRemoved;
         _rules.RulesChanged += OnRulesChanged;
         _endpoints.DefaultsChanged += OnDefaultsChanged;
+        _waveLink.SnapshotChanged += OnWaveLinkSnapshotChanged;
 
         _ = Task.Run(async () =>
         {
@@ -356,6 +357,22 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
         }
     }
 
+    private async void OnWaveLinkSnapshotChanged(object? sender, EventArgs e)
+    {
+        // External drift (user moves a device in Wave Link, snapshot pull catches up to a
+        // restart, etc.) shouldn't wait for the 5-min timer to reconcile. skipIfBusy stops
+        // the SetMix call's own snapshot ripple from stacking re-applies on top of the
+        // in-flight one; the post-fix claim logic is idempotent so a passive re-check is cheap.
+        try
+        {
+            await ApplyAllInternalAsync(force: false, skipIfBusy: true).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Wave Link snapshot-changed handler failed");
+        }
+    }
+
     private async void OnTimerTick(object? state)
     {
         if (_cts is null || _cts.IsCancellationRequested)
@@ -578,9 +595,17 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
                             }
                             break;
                         case ActionType.RemoveWaveLinkMixOutput:
-                            if (deviceMatches && string.Equals(output.CurrentMixId, matchedMix.Id, StringComparison.Ordinal))
+                            if (deviceMatches)
                             {
-                                claims[output.DeviceId] = new WaveLinkClaim(string.Empty, ruleLabel);
+                                // Pin the device regardless of current mix. If it's currently on
+                                // the mix-to-remove, target empty so the apply pass strips it.
+                                // Otherwise hold its current mix so later Set/Add rules can't
+                                // re-add it - without this guard, a SetWaveLinkMixOutput rule
+                                // further down repeatedly re-adds what Remove just stripped.
+                                var target = string.Equals(output.CurrentMixId, matchedMix.Id, StringComparison.Ordinal)
+                                    ? string.Empty
+                                    : output.CurrentMixId;
+                                claims[output.DeviceId] = new WaveLinkClaim(target, ruleLabel);
                             }
                             break;
                     }
@@ -637,6 +662,7 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
         _sessions.SessionRemoved -= OnSessionRemoved;
         _rules.RulesChanged -= OnRulesChanged;
         _endpoints.DefaultsChanged -= OnDefaultsChanged;
+        _waveLink.SnapshotChanged -= OnWaveLinkSnapshotChanged;
         _cts?.Dispose();
         _cts = null;
         _started = false;
