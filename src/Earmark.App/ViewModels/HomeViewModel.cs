@@ -39,19 +39,11 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     private static readonly TimeSpan ToastRateLimit = TimeSpan.FromSeconds(15);
     private readonly Lock _gate = new();
     private readonly List<DeviceCard> _allCards = new();
-    private readonly Stack<UndoAction> _undoStack = new();
+    private readonly DeviceUndoStack _undoStack = new();
     private CancellationTokenSource? _refreshCts;
     private CancellationTokenSource? _settingsSaveCts;
     private DispatcherTimer? _peakTimer;
     private int _muteTickCounter;
-
-    private const int UndoStackLimit = 32;
-
-    // Discriminated set of reversible actions captured by the Devices page. Each variant
-    // carries the prior state so Ctrl+Z can restore it.
-    private abstract record UndoAction(string DeviceId);
-    private sealed record VisibilityUndo(string DeviceId, bool PrevHidden, bool PrevPinned) : UndoAction(DeviceId);
-    private sealed record VolumeMuteUndo(string DeviceId, float PrevVolume, bool PrevMuted) : UndoAction(DeviceId);
 
     public HomeViewModel(
         IRulesService rules,
@@ -368,7 +360,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
 
     private void OnCardVisibilityToggled(DeviceCard card, DeviceCard.VisibilityState prev)
     {
-        PushUndo(new VisibilityUndo(card.Endpoint.Id, prev.IsHidden, prev.IsPinned));
+        _undoStack.PushVisibility(card.Endpoint.Id, prev.IsHidden, prev.IsPinned);
         PersistAndResync(card);
     }
 
@@ -381,19 +373,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         {
             return;
         }
-        PushUndo(new VolumeMuteUndo(card.Endpoint.Id, prevVolume, prevMuted));
-    }
-
-    private void PushUndo(UndoAction action)
-    {
-        _undoStack.Push(action);
-        while (_undoStack.Count > UndoStackLimit)
-        {
-            // Drop the oldest by re-stacking onto a temporary; cheap given the small cap.
-            var tmp = _undoStack.ToArray();
-            _undoStack.Clear();
-            for (var i = 0; i < tmp.Length - 1; i++) _undoStack.Push(tmp[tmp.Length - 2 - i]);
-        }
+        _undoStack.PushVolumeMute(card.Endpoint.Id, prevVolume, prevMuted);
     }
 
     /// <summary>Reverts the most recent reversible action (hide/show, volume drag, mute toggle).
@@ -409,11 +389,11 @@ public partial class HomeViewModel : ObservableObject, IDisposable
 
         switch (action)
         {
-            case VisibilityUndo v:
+            case DeviceUndoStack.VisibilityUndo v:
                 card.SetUserVisibility(v.PrevHidden, v.PrevPinned);
                 PersistAndResync(card);
                 break;
-            case VolumeMuteUndo vm:
+            case DeviceUndoStack.VolumeMuteUndo vm:
                 card.SetVolumeAndMute(vm.PrevVolume, vm.PrevMuted);
                 break;
         }
