@@ -86,27 +86,34 @@
                                             <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
 
-                                        <Button Grid.Column="0"
-                                                Width="56" Height="56"
-                                                Padding="0"
-                                                Background="{x:Bind IsMuteLockedByRule, Mode=OneWay, Converter={StaticResource MuteLockedBackgroundConverter}}"
-                                                BorderBrush="Transparent"
-                                                CornerRadius="10"
-                                                Tag="{x:Bind}"
-                                                IsEnabled="{x:Bind IsMuteToggleEnabled, Mode=OneWay}"
-                                                Click="OnMuteToggleClicked"
+                                        <!-- The Border wrapper carries ToolTipService.ToolTip so the lock-reason
+                                             tooltip still fires when the inner Button is disabled (rule-locked).
+                                             WinUI suppresses tooltips on disabled controls; a transparent
+                                             hit-testable parent is the standard workaround. -->
+                                        <Border Grid.Column="0"
+                                                Background="Transparent"
                                                 ToolTipService.ToolTip="{x:Bind MuteTooltip, Mode=OneWay}">
-                                            <!-- Disabled-state theme brushes paint over the Background binding when
-                                                 IsEnabled is false (i.e. rule-locked). Override them so a locked
-                                                 icon reads as "not interactive" rather than a dimmed chip. -->
-                                            <Button.Resources>
-                                                <SolidColorBrush x:Key="ButtonBackgroundDisabled" Color="Transparent" />
-                                                <SolidColorBrush x:Key="ButtonBorderBrushDisabled" Color="Transparent" />
-                                            </Button.Resources>
-                                            <FontIcon Glyph="{x:Bind Glyph, Mode=OneWay}"
-                                                      FontSize="28"
-                                                      Foreground="{x:Bind IsMuted, Mode=OneWay, Converter={StaticResource MutedBrushConverter}}" />
-                                        </Button>
+                                            <Button Width="56" Height="56"
+                                                    Padding="0"
+                                                    Background="{x:Bind IsMuteLockedByRule, Mode=OneWay, Converter={StaticResource MuteLockedBackgroundConverter}}"
+                                                    BorderBrush="Transparent"
+                                                    CornerRadius="10"
+                                                    Tag="{x:Bind}"
+                                                    IsEnabled="{x:Bind IsMuteToggleEnabled, Mode=OneWay}"
+                                                    Click="OnMuteToggleClicked"
+                                                    ToolTipService.ToolTip="{x:Bind MuteTooltip, Mode=OneWay}">
+                                                <!-- Disabled-state theme brushes paint over the Background binding when
+                                                     IsEnabled is false (i.e. rule-locked). Override them so a locked
+                                                     icon reads as "not interactive" rather than a dimmed chip. -->
+                                                <Button.Resources>
+                                                    <SolidColorBrush x:Key="ButtonBackgroundDisabled" Color="Transparent" />
+                                                    <SolidColorBrush x:Key="ButtonBorderBrushDisabled" Color="Transparent" />
+                                                </Button.Resources>
+                                                <FontIcon Glyph="{x:Bind Glyph, Mode=OneWay}"
+                                                          FontSize="28"
+                                                          Foreground="{x:Bind IsMuted, Mode=OneWay, Converter={StaticResource MutedBrushConverter}}" />
+                                            </Button>
+                                        </Border>
 
                                         <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
                                             <TextBlock Text="{x:Bind DeviceNameOnly}"

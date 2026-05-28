@@ -62,8 +62,9 @@ public sealed class AudioEndpointService : IAudioEndpointService, IMMNotificatio
         ArgumentException.ThrowIfNullOrEmpty(id);
         try
         {
-            using var device = _enumerator.GetDevice(id);
-            return device.AudioEndpointVolume.MasterVolumeLevelScalar;
+            var device = AcquireDevice(id, out var ownsDevice);
+            try { return device.AudioEndpointVolume.MasterVolumeLevelScalar; }
+            finally { if (ownsDevice) device.Dispose(); }
         }
         catch (Exception ex)
         {
@@ -77,8 +78,9 @@ public sealed class AudioEndpointService : IAudioEndpointService, IMMNotificatio
         ArgumentException.ThrowIfNullOrEmpty(id);
         try
         {
-            using var device = _enumerator.GetDevice(id);
-            return device.AudioEndpointVolume.Mute;
+            var device = AcquireDevice(id, out var ownsDevice);
+            try { return device.AudioEndpointVolume.Mute; }
+            finally { if (ownsDevice) device.Dispose(); }
         }
         catch (Exception ex)
         {
@@ -93,16 +95,20 @@ public sealed class AudioEndpointService : IAudioEndpointService, IMMNotificatio
         var clamped = Math.Clamp(level, 0f, 1f);
         try
         {
-            using var device = _enumerator.GetDevice(id);
-            var current = device.AudioEndpointVolume.MasterVolumeLevelScalar;
-            if (Math.Abs(current - clamped) < 0.005f)
+            var device = AcquireDevice(id, out var ownsDevice);
+            try
             {
-                _logger.LogDebug("SetVolume({Id}) skipped: already at {Level:F2}", id, current);
-                return false;
+                var current = device.AudioEndpointVolume.MasterVolumeLevelScalar;
+                if (Math.Abs(current - clamped) < 0.005f)
+                {
+                    _logger.LogDebug("SetVolume({Id}) skipped: already at {Level:F2}", id, current);
+                    return false;
+                }
+                device.AudioEndpointVolume.MasterVolumeLevelScalar = clamped;
+                _logger.LogInformation("SetVolume({Id}) {Old:F2} -> {New:F2}", id, current, clamped);
+                return true;
             }
-            device.AudioEndpointVolume.MasterVolumeLevelScalar = clamped;
-            _logger.LogInformation("SetVolume({Id}) {Old:F2} -> {New:F2}", id, current, clamped);
-            return true;
+            finally { if (ownsDevice) device.Dispose(); }
         }
         catch (Exception ex)
         {
@@ -116,22 +122,50 @@ public sealed class AudioEndpointService : IAudioEndpointService, IMMNotificatio
         ArgumentException.ThrowIfNullOrEmpty(id);
         try
         {
-            using var device = _enumerator.GetDevice(id);
-            var current = device.AudioEndpointVolume.Mute;
-            if (current == muted)
+            var device = AcquireDevice(id, out var ownsDevice);
+            try
             {
-                _logger.LogDebug("SetMuted({Id}) skipped: already {State}", id, muted ? "muted" : "unmuted");
-                return false;
+                var current = device.AudioEndpointVolume.Mute;
+                if (current == muted)
+                {
+                    _logger.LogDebug("SetMuted({Id}) skipped: already {State}", id, muted ? "muted" : "unmuted");
+                    return false;
+                }
+                device.AudioEndpointVolume.Mute = muted;
+                _logger.LogInformation("SetMuted({Id}) -> {State}", id, muted ? "muted" : "unmuted");
+                return true;
             }
-            device.AudioEndpointVolume.Mute = muted;
-            _logger.LogInformation("SetMuted({Id}) -> {State}", id, muted ? "muted" : "unmuted");
-            return true;
+            finally { if (ownsDevice) device.Dispose(); }
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "SetMuted({Id}, {Muted}) failed", id, muted);
             return false;
         }
+    }
+
+    /// <summary>
+    /// Returns an MMDevice for <paramref name="id"/>, reusing the long-lived MMDevice cached
+    /// inside the matching MuteSubscription where available. Each volume-slider drag tick
+    /// otherwise pays a fresh _enumerator.GetDevice + Dispose COM round-trip on the UI thread,
+    /// which is the dominant cost of the slider stutter.
+    /// </summary>
+    private MMDevice AcquireDevice(string id, out bool ownsDevice)
+    {
+        MuteSubscription? sub;
+        lock (_muteSubGate)
+        {
+            _muteSubs.TryGetValue(id, out sub);
+        }
+        var cached = sub?.GetDevice();
+        if (cached is not null)
+        {
+            ownsDevice = false;
+            return cached;
+        }
+
+        ownsDevice = true;
+        return _enumerator.GetDevice(id);
     }
 
     public void PlayTestPing(string id)
@@ -483,6 +517,7 @@ public sealed class AudioEndpointService : IAudioEndpointService, IMMNotificatio
         private readonly ILogger _logger;
         private readonly AudioEndpointVolumeNotificationDelegate _handler;
         private bool _disposed;
+        private bool? _lastMuted;
 
         public MuteSubscription(MMDevice device, string deviceId, Action<string, bool> callback, ILogger logger)
         {
@@ -497,6 +532,13 @@ public sealed class AudioEndpointService : IAudioEndpointService, IMMNotificatio
         private void OnNotification(AudioVolumeNotificationData data)
         {
             if (_disposed) return;
+
+            // OnVolumeNotification fires for every volume change too, not just mute toggles.
+            // Slider drags otherwise post N dispatcher hops to the UI thread per second to do
+            // a no-op SyncMutedFromDevice. Suppress unless the mute bit actually moved.
+            if (_lastMuted.HasValue && _lastMuted.Value == data.Muted) return;
+            _lastMuted = data.Muted;
+
             try
             {
                 _callback(_deviceId, data.Muted);
@@ -506,6 +548,11 @@ public sealed class AudioEndpointService : IAudioEndpointService, IMMNotificatio
                 _logger.LogDebug(ex, "MuteSubscription callback threw for {Id}", _deviceId);
             }
         }
+
+        /// <summary>Exposes the long-lived <see cref="MMDevice"/> so the parent service can
+        /// reuse it for Get/Set Volume / Mute instead of paying a fresh COM activation per
+        /// call. Returns null if the subscription has been disposed.</summary>
+        public MMDevice? GetDevice() => _disposed ? null : _device;
 
         /// <summary>Reads the device peak from the cached <see cref="MMDevice"/>; null if the
         /// underlying meter is unavailable or the subscription has been disposed.</summary>
