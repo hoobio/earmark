@@ -28,6 +28,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
 
     private readonly IRulesService _rules;
     private readonly IAudioEndpointService _endpoints;
+    private readonly IEndpointWriter _writer;
     private readonly IAudioSessionService _sessions;
     private readonly IRuleMatcher _matcher;
     private readonly IRuleEvaluator _evaluator;
@@ -48,6 +49,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     public HomeViewModel(
         IRulesService rules,
         IAudioEndpointService endpoints,
+        IEndpointWriter writer,
         IAudioSessionService sessions,
         IRuleMatcher matcher,
         IRuleEvaluator evaluator,
@@ -58,6 +60,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     {
         _rules = rules ?? throw new ArgumentNullException(nameof(rules));
         _endpoints = endpoints ?? throw new ArgumentNullException(nameof(endpoints));
+        _writer = writer ?? throw new ArgumentNullException(nameof(writer));
         _sessions = sessions ?? throw new ArgumentNullException(nameof(sessions));
         _matcher = matcher ?? throw new ArgumentNullException(nameof(matcher));
         _evaluator = evaluator ?? throw new ArgumentNullException(nameof(evaluator));
@@ -279,6 +282,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
 
             cards.Add(new DeviceCard(
                 _endpoints,
+                _writer,
                 endpoint,
                 volume,
                 muted,
@@ -295,6 +299,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         }
         return cards;
     }
+
 
     /// <summary>
     /// Pulls the list of physical playback endpoint names Wave Link is currently routing

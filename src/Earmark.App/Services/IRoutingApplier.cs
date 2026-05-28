@@ -28,6 +28,7 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
     private readonly IRulesService _rules;
     private readonly IAudioSessionService _sessions;
     private readonly IAudioEndpointService _endpoints;
+    private readonly IEndpointWriter _writer;
     private readonly IAudioPolicyService _policy;
     private readonly IRuleMatcher _matcher;
     private readonly IWaveLinkService _waveLink;
@@ -46,6 +47,7 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
         IRulesService rules,
         IAudioSessionService sessions,
         IAudioEndpointService endpoints,
+        IEndpointWriter writer,
         IAudioPolicyService policy,
         IRuleMatcher matcher,
         IWaveLinkService waveLink,
@@ -56,6 +58,7 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
         _rules = rules;
         _sessions = sessions;
         _endpoints = endpoints;
+        _writer = writer;
         _policy = policy;
         _matcher = matcher;
         _waveLink = waveLink;
@@ -471,21 +474,49 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
 
             if (targetVolume.HasValue)
             {
-                var applied = _endpoints.SetVolume(endpoint.Id, targetVolume.Value);
-                if (applied)
+                var capturedVolume = targetVolume.Value;
+                var capturedRule = volumeRuleName;
+                var capturedDevice = endpoint.DisplayName;
+                var capturedEndpoint = endpoint;
+                _ = Task.Run(async () =>
                 {
-                    _logger.LogInformation("Applied volume rule '{Rule}': '{Device}' -> {Volume:F2}",
-                        volumeRuleName, endpoint.DisplayName, targetVolume.Value);
-                }
+                    try
+                    {
+                        var ok = await _writer.SetVolumeAsync(capturedEndpoint, capturedVolume).ConfigureAwait(false);
+                        if (ok)
+                        {
+                            _logger.LogInformation("Applied volume rule '{Rule}': '{Device}' -> {Volume:F2}",
+                                capturedRule, capturedDevice, capturedVolume);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "Volume rule '{Rule}' write failed for {Device}", capturedRule, capturedDevice);
+                    }
+                });
             }
             if (targetMuted.HasValue)
             {
-                var applied = _endpoints.SetMuted(endpoint.Id, targetMuted.Value);
-                if (applied)
+                var capturedMute = targetMuted.Value;
+                var capturedRule = muteRuleName;
+                var capturedDevice = endpoint.DisplayName;
+                var capturedEndpoint = endpoint;
+                _ = Task.Run(async () =>
                 {
-                    _logger.LogInformation("Applied {Verb} rule '{Rule}': '{Device}'",
-                        targetMuted.Value ? "mute" : "unmute", muteRuleName, endpoint.DisplayName);
-                }
+                    try
+                    {
+                        var ok = await _writer.SetMutedAsync(capturedEndpoint, capturedMute).ConfigureAwait(false);
+                        if (ok)
+                        {
+                            _logger.LogInformation("Applied {Verb} rule '{Rule}': '{Device}'",
+                                capturedMute ? "mute" : "unmute", capturedRule, capturedDevice);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "Mute rule '{Rule}' write failed for {Device}", capturedRule, capturedDevice);
+                    }
+                });
             }
         }
     }

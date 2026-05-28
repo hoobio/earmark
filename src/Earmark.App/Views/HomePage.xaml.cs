@@ -6,6 +6,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Animation;
 
 using Windows.System;
 
@@ -23,6 +24,12 @@ public sealed partial class HomePage : Page
     /// also dodges any "card replaced mid-drag" edge cases by keying off the live control.
     /// </summary>
     private readonly Dictionary<Slider, (float Volume, bool Muted)> _sliderDragStart = new();
+
+    /// <summary>
+    /// In-flight rules-expand storyboards keyed by ScrollViewer. Lets a mid-animation toggle
+    /// stop the previous tween before starting the next so they don't fight over MaxHeight.
+    /// </summary>
+    private readonly Dictionary<ScrollViewer, Storyboard> _rulesExpandStoryboards = new();
 
     public HomePage(HomeViewModel viewModel, RulesViewModel rulesViewModel, MainWindow mainWindow)
     {
@@ -70,15 +77,53 @@ public sealed partial class HomePage : Page
         // carries the DeviceCard reference via Tag="{x:Bind}" instead.
         if (element.Tag is not DeviceCard card) return;
 
+        var scrollViewer = FindAncestorScrollViewer(element);
         var collapsing = card.IsRulesExpanded;
+
+        // Capture the current visible height before any state change so the animation starts
+        // from where the user can see it - even if a previous tween is still mid-flight.
+        var fromHeight = scrollViewer?.ActualHeight ?? 0;
+
         card.IsRulesExpanded = !card.IsRulesExpanded;
 
-        if (collapsing)
+        if (scrollViewer is not null)
         {
-            // Was expanded, now collapsing: snap the scroll back to the top of the list.
-            var scrollViewer = FindAncestorScrollViewer(element);
-            scrollViewer?.ChangeView(null, 0, null, disableAnimation: false);
+            // The x:Bind on MaxHeight has just snapped to the new target. Override it back to
+            // the previous height, then animate up/down to the new RulesPanelMaxHeight value.
+            scrollViewer.MaxHeight = fromHeight;
+            AnimateRulesExpansion(scrollViewer, fromHeight, card.RulesPanelMaxHeight);
+
+            if (collapsing)
+            {
+                // Was expanded, now collapsing: snap the scroll back to the top of the list.
+                scrollViewer.ChangeView(null, 0, null, disableAnimation: false);
+            }
         }
+    }
+
+    private void AnimateRulesExpansion(ScrollViewer target, double from, double to)
+    {
+        if (_rulesExpandStoryboards.TryGetValue(target, out var previous))
+        {
+            previous.Stop();
+        }
+
+        var animation = new DoubleAnimation
+        {
+            From = from,
+            To = to,
+            Duration = new Duration(TimeSpan.FromMilliseconds(220)),
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+            // MaxHeight affects layout, so the animation has to be marked dependent.
+            EnableDependentAnimation = true,
+        };
+        Storyboard.SetTarget(animation, target);
+        Storyboard.SetTargetProperty(animation, "MaxHeight");
+
+        var storyboard = new Storyboard();
+        storyboard.Children.Add(animation);
+        _rulesExpandStoryboards[target] = storyboard;
+        storyboard.Begin();
     }
 
     /// <summary>Walks up the visual tree to the first ancestor StackPanel that contains a

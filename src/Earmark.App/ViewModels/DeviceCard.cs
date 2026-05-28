@@ -1,6 +1,7 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
+using Earmark.App.Services;
 using Earmark.Core.Audio;
 using Earmark.Core.Models;
 
@@ -18,6 +19,7 @@ public partial class DeviceCard : ObservableObject
     private const float PeakHoldDecayPerSecond = 0.55f;
 
     private readonly IAudioEndpointService _endpoints;
+    private readonly IEndpointWriter _writer;
     private readonly Action<DeviceCard, VisibilityState> _onVisibilityToggled;
     private bool _suppressVolumeWrite;
     private bool _showHidden;
@@ -29,6 +31,7 @@ public partial class DeviceCard : ObservableObject
 
     public DeviceCard(
         IAudioEndpointService endpoints,
+        IEndpointWriter writer,
         AudioEndpoint endpoint,
         float volume,
         bool isMuted,
@@ -44,6 +47,7 @@ public partial class DeviceCard : ObservableObject
         Action<DeviceCard, VisibilityState> onUserVisibilityToggled)
     {
         _endpoints = endpoints;
+        _writer = writer;
         _onVisibilityToggled = onUserVisibilityToggled;
         Endpoint = endpoint;
         _split = SplitFriendlyName(endpoint.FriendlyName);
@@ -457,12 +461,20 @@ public partial class DeviceCard : ObservableObject
     }
 
     [RelayCommand]
-    public void ToggleMute()
+    public async Task ToggleMute()
     {
         if (IsMuteLockedByRule) return;
         var target = !IsMuted;
-        _endpoints.SetMuted(Endpoint.Id, target);
-        IsMuted = _endpoints.GetMuted(Endpoint.Id) ?? target;
+        // Optimistic: the WL setInputConfig path mirrors back through the Windows endpoint
+        // notification, but there's a perceptible WS round-trip latency. Flip the UI now and
+        // let the writer reconcile in the background.
+        IsMuted = target;
+        var ok = await _writer.SetMutedAsync(Endpoint, target).ConfigureAwait(true);
+        if (!ok)
+        {
+            var actual = _endpoints.GetMuted(Endpoint.Id);
+            if (actual.HasValue) IsMuted = actual.Value;
+        }
     }
 
     /// <summary>Updates <see cref="IsMuted"/> only when it differs, so the change-notification
@@ -518,18 +530,19 @@ public partial class DeviceCard : ObservableObject
 
         // User-initiated slider change: keep mute state coherent with the value. Dragging
         // off 0 unmutes, dragging back to 0 auto-mutes. Skipped when an active rule has
-        // pinned the mute state.
+        // pinned the mute state. Both writes route through IEndpointWriter so Wave Link
+        // virtual inputs get setInputConfig instead of metadata-only Windows endpoint ops.
         if (!IsMuteLockedByRule)
         {
             var shouldBeMuted = value <= 0.001f;
             if (IsMuted != shouldBeMuted)
             {
-                _endpoints.SetMuted(Endpoint.Id, shouldBeMuted);
                 IsMuted = shouldBeMuted;
+                _ = _writer.SetMutedAsync(Endpoint, shouldBeMuted);
             }
         }
 
-        _endpoints.SetVolume(Endpoint.Id, value);
+        _ = _writer.SetVolumeAsync(Endpoint, value);
     }
 
     private void NotifyMeterChanged()

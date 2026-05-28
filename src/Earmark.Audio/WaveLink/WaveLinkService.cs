@@ -101,6 +101,22 @@ internal sealed class WaveLinkService : IWaveLinkService, IAsyncDisposable
                 return null;
             }
 
+            // getInputConfigs is best-effort - the mix routing path doesn't need it and we
+            // don't want a missing inputs result to poison the rest of the snapshot. The
+            // result is used purely to map a Windows capture endpoint's display name to
+            // Wave Link's input identifier so DeviceCard can route mute toggles through the
+            // WS API instead of the metadata-only AudioEndpointVolume.Mute.
+            WaveLinkInputConfigsResult? inputsResult = null;
+            try
+            {
+                inputsResult = await client.CallAsync<WaveLinkInputConfigsResult>("getInputConfigs", null, ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Wave Link: getInputConfigs failed; continuing without input data");
+            }
+
             var mixes = mixesResult.Mixes
                 .Select(m => new WaveLinkMixInfo(m.Id, m.Name))
                 .ToList();
@@ -118,7 +134,16 @@ internal sealed class WaveLinkService : IWaveLinkService, IAsyncDisposable
                 }
             }
 
-            var snapshot = new WaveLinkSnapshot(mixes, outputs);
+            var inputs = new List<WaveLinkInputInfo>();
+            if (inputsResult is not null)
+            {
+                foreach (var cfg in inputsResult.InputConfigs)
+                {
+                    inputs.Add(new WaveLinkInputInfo(cfg.Identifier, cfg.Name));
+                }
+            }
+
+            var snapshot = new WaveLinkSnapshot(mixes, outputs, inputs);
             SetSnapshot(snapshot);
             SetState(WaveLinkConnectionState.Connected);
             return snapshot;
@@ -172,6 +197,60 @@ internal sealed class WaveLinkService : IWaveLinkService, IAsyncDisposable
         {
             _logger.LogWarning(ex, "Wave Link: setOutputDevice({DeviceId}, {OutputId}, {MixId}) failed",
                 deviceId, outputId, mixId);
+            _clientFailed = true;
+            SetState(WaveLinkConnectionState.Unavailable);
+            return false;
+        }
+    }
+
+    public Task<bool> SetInputMuteAsync(string identifier, bool muted, CancellationToken ct = default) =>
+        SetInputConfigAsync(identifier, "Mute", muted, ct);
+
+    public Task<bool> SetInputVolumeAsync(string identifier, float level, CancellationToken ct = default)
+    {
+        var clamped = Math.Clamp(level, 0f, 1f);
+        // WL exposes volume as integer 0-100; rounding to the nearest int is fine since the
+        // UI surfaces are 1% steps anyway.
+        var percent = (int)Math.Round(clamped * 100f);
+        return SetInputConfigAsync(identifier, "Volume", percent, ct);
+    }
+
+    private async Task<bool> SetInputConfigAsync(string identifier, string property, object value, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(identifier);
+
+        if (!_isEnabled) return false;
+
+        var client = await EnsureConnectedAsync(ct).ConfigureAwait(false);
+        if (client is null)
+        {
+            SetState(WaveLinkConnectionState.Unavailable);
+            return false;
+        }
+
+        try
+        {
+            // mixerID "com.elgato.mix.all" + forceLink=true applies the change to both the
+            // local (monitor) and stream mixers in one call - matches what the user expects
+            // from a single mute/volume change on the device card. See setInputConfig usage
+            // in the official Stream Deck Wave Link plugin
+            // (Nevylish/com.elgato.wavelink.sdPlugin).
+            var payload = new
+            {
+                property,
+                identifier,
+                mixerID = "com.elgato.mix.all",
+                value,
+                forceLink = true,
+            };
+            await client.CallAsync("setInputConfig", payload, ct).ConfigureAwait(false);
+            _logger.LogInformation("Wave Link: setInputConfig {Property} {Identifier} -> {Value}", property, identifier, value);
+            return true;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Wave Link: setInputConfig({Identifier}, {Property}={Value}) failed", identifier, property, value);
             _clientFailed = true;
             SetState(WaveLinkConnectionState.Unavailable);
             return false;
@@ -336,6 +415,7 @@ internal sealed class WaveLinkService : IWaveLinkService, IAsyncDisposable
         if (a is null || b is null) return false;
         if (a.Mixes.Count != b.Mixes.Count) return false;
         if (a.OutputDevices.Count != b.OutputDevices.Count) return false;
+        if (a.Inputs.Count != b.Inputs.Count) return false;
 
         for (var i = 0; i < a.Mixes.Count; i++)
         {
@@ -344,6 +424,10 @@ internal sealed class WaveLinkService : IWaveLinkService, IAsyncDisposable
         for (var i = 0; i < a.OutputDevices.Count; i++)
         {
             if (!a.OutputDevices[i].Equals(b.OutputDevices[i])) return false;
+        }
+        for (var i = 0; i < a.Inputs.Count; i++)
+        {
+            if (!a.Inputs[i].Equals(b.Inputs[i])) return false;
         }
         return true;
     }

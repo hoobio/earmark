@@ -39,3 +39,18 @@ public sealed record WaveLinkMainOutput(
 public sealed record WaveLinkOutputDevicesResult(
     [property: JsonPropertyName("mainOutput")] WaveLinkMainOutput MainOutput,
     [property: JsonPropertyName("outputDevices")] IReadOnlyList<WaveLinkOutputDevice> OutputDevices);
+
+// Wave Link's getInputConfigs returns localMixer / streamMixer as positional tuples,
+// not objects: index 0 is the mute bool, 1 is volume, 2 is filter-bypass. Carry them
+// as JsonElement[] so we can pluck the bool without coupling to the order if Elgato
+// ever flips it (read with TryGetBoolean / GetBoolean).
+public sealed record WaveLinkInputConfig(
+    [property: JsonPropertyName("identifier")] string Identifier,
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("inputType")] string? InputType,
+    [property: JsonPropertyName("isAvailable")] bool IsAvailable,
+    [property: JsonPropertyName("localMixer")] IReadOnlyList<System.Text.Json.JsonElement>? LocalMixer,
+    [property: JsonPropertyName("streamMixer")] IReadOnlyList<System.Text.Json.JsonElement>? StreamMixer);
+
+public sealed record WaveLinkInputConfigsResult(
+    [property: JsonPropertyName("inputConfigs")] IReadOnlyList<WaveLinkInputConfig> InputConfigs);
