@@ -19,27 +19,46 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <TitleBar
-            x:Name="AppTitleBar"
-            Title="Earmark"
-            Subtitle="Per-app audio routing">
-            <TitleBar.IconSource>
-                <ImageIconSource ImageSource="ms-appx:///Assets/logo.png" />
-            </TitleBar.IconSource>
-            <TitleBar.LeftHeader>
-                <Button x:Name="PaneToggleButton"
-                        Click="OnPaneToggleClick"
-                        Background="Transparent"
-                        BorderBrush="Transparent"
-                        Padding="10,6"
-                        MinWidth="40"
-                        Height="32"
-                        VerticalAlignment="Center"
-                        ToolTipService.ToolTip="Toggle navigation">
-                    <FontIcon Glyph="&#xE700;" FontSize="14" />
-                </Button>
-            </TitleBar.LeftHeader>
-        </TitleBar>
+        <Grid x:Name="AppTitleBar"
+              Height="32"
+              Background="Transparent">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <Button x:Name="PaneToggleButton"
+                    Grid.Column="0"
+                    Click="OnPaneToggleClick"
+                    Background="Transparent"
+                    BorderBrush="Transparent"
+                    CornerRadius="0"
+                    Width="48"
+                    Height="32"
+                    Padding="0"
+                    ToolTipService.ToolTip="Toggle navigation">
+                <FontIcon Glyph="&#xE700;" FontSize="14" />
+            </Button>
+
+            <StackPanel Grid.Column="1"
+                        Orientation="Horizontal"
+                        Spacing="8"
+                        VerticalAlignment="Center">
+                <Image Source="ms-appx:///Assets/logo.png"
+                       Width="16"
+                       Height="16"
+                       VerticalAlignment="Center" />
+                <TextBlock Text="Earmark"
+                           Style="{ThemeResource CaptionTextBlockStyle}"
+                           FontWeight="SemiBold"
+                           VerticalAlignment="Center"
+                           Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                <TextBlock Text="Audio rules engine"
+                           Style="{ThemeResource CaptionTextBlockStyle}"
+                           VerticalAlignment="Center"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            </StackPanel>
+        </Grid>
 
         <NavigationView
             x:Name="NavView"
@@ -54,6 +73,11 @@
             SelectionChanged="NavView_SelectionChanged">
 
             <NavigationView.MenuItems>
+                <NavigationViewItem Content="Devices" Tag="Home">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE767;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
                 <NavigationViewItem Content="Rules" Tag="Rules">
                     <NavigationViewItem.Icon>
                         <FontIcon Glyph="&#xE8FD;" />

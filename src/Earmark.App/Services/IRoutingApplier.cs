@@ -142,11 +142,12 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
     {
         ArgumentNullException.ThrowIfNull(session);
 
+        var sessions = _sessions.GetSessions();
         var renderEndpoints = _endpoints.GetEndpoints(EndpointFlow.Render);
         var captureEndpoints = _endpoints.GetEndpoints(EndpointFlow.Capture);
 
-        ApplyAppForFlow(session, EndpointFlow.Render, renderEndpoints);
-        ApplyAppForFlow(session, EndpointFlow.Capture, captureEndpoints);
+        ApplyAppForFlow(session, EndpointFlow.Render, renderEndpoints, sessions);
+        ApplyAppForFlow(session, EndpointFlow.Capture, captureEndpoints, sessions);
         return Task.FromResult<AppliedRoute?>(null);
     }
 
@@ -165,14 +166,14 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
 
         foreach (var session in sessions)
         {
-            ApplyAppForFlow(session, EndpointFlow.Render, renderEndpoints);
-            ApplyAppForFlow(session, EndpointFlow.Capture, captureEndpoints);
+            ApplyAppForFlow(session, EndpointFlow.Render, renderEndpoints, sessions);
+            ApplyAppForFlow(session, EndpointFlow.Capture, captureEndpoints, sessions);
         }
     }
 
-    private void ApplyAppForFlow(AudioSession session, EndpointFlow flow, IReadOnlyList<AudioEndpoint> endpoints)
+    private void ApplyAppForFlow(AudioSession session, EndpointFlow flow, IReadOnlyList<AudioEndpoint> endpoints, IReadOnlyList<AudioSession> sessions)
     {
-        var match = _matcher.FindAppRoute(session, flow, _rules.Rules, endpoints);
+        var match = _matcher.FindAppRoute(session, flow, _rules.Rules, endpoints, sessions);
         if (match is null)
         {
             return;
@@ -240,23 +241,25 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
             }
         }
 
+        var sessions = _sessions.GetSessions();
+
         if (hasOutputDefault)
         {
-            ApplyDefaultFlow(EndpointFlow.Render, _endpoints.GetEndpoints(EndpointFlow.Render));
+            ApplyDefaultFlow(EndpointFlow.Render, _endpoints.GetEndpoints(EndpointFlow.Render), sessions);
         }
 
         if (hasInputDefault)
         {
-            ApplyDefaultFlow(EndpointFlow.Capture, _endpoints.GetEndpoints(EndpointFlow.Capture));
+            ApplyDefaultFlow(EndpointFlow.Capture, _endpoints.GetEndpoints(EndpointFlow.Capture), sessions);
         }
     }
 
-    private void ApplyDefaultFlow(EndpointFlow flow, IReadOnlyList<AudioEndpoint> endpoints)
+    private void ApplyDefaultFlow(EndpointFlow flow, IReadOnlyList<AudioEndpoint> endpoints, IReadOnlyList<AudioSession> sessions)
     {
-        ApplyDefaultRole(flow, DefaultRoleKind.Default, RoleScope.Default, endpoints,
+        ApplyDefaultRole(flow, DefaultRoleKind.Default, RoleScope.Default, endpoints, sessions,
             current => endpoints.FirstOrDefault(e => e.Flow == flow && e.IsDefault));
 
-        ApplyDefaultRole(flow, DefaultRoleKind.Communications, RoleScope.Communications, endpoints,
+        ApplyDefaultRole(flow, DefaultRoleKind.Communications, RoleScope.Communications, endpoints, sessions,
             current => endpoints.FirstOrDefault(e => e.Flow == flow && e.IsDefaultCommunications));
     }
 
@@ -265,9 +268,10 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
         DefaultRoleKind roleKind,
         RoleScope scope,
         IReadOnlyList<AudioEndpoint> endpoints,
+        IReadOnlyList<AudioSession> sessions,
         Func<object?, AudioEndpoint?> currentResolver)
     {
-        var match = _matcher.FindDefaultDevice(flow, roleKind, _rules.Rules, endpoints);
+        var match = _matcher.FindDefaultDevice(flow, roleKind, _rules.Rules, endpoints, sessions);
         if (match is null)
         {
             return;
@@ -386,6 +390,8 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
             return;
         }
 
+        var sessions = _sessions.GetSessions();
+
         foreach (var endpoint in allEndpoints)
         {
             float? targetVolume = null;
@@ -397,7 +403,7 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
             {
                 if (targetVolume.HasValue && targetMuted.HasValue) break;
                 if (!rule.Enabled) continue;
-                if (!_matcher.ConditionsMet(rule, renderEndpoints)) continue;
+                if (!_matcher.ConditionsMet(rule, renderEndpoints, sessions)) continue;
 
                 var ruleLabel = string.IsNullOrEmpty(rule.Name) ? rule.Id.ToString() : rule.Name;
 
@@ -523,11 +529,12 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
         var claims = new Dictionary<string, WaveLinkClaim>(StringComparer.Ordinal);
         var setOwnedMixes = new HashSet<string>(StringComparer.Ordinal);
         var renderEndpoints = _endpoints.GetEndpoints(EndpointFlow.Render);
+        var sessions = _sessions.GetSessions();
 
         foreach (var rule in _rules.Rules)
         {
             if (!rule.Enabled) continue;
-            if (!_matcher.ConditionsMet(rule, renderEndpoints)) continue;
+            if (!_matcher.ConditionsMet(rule, renderEndpoints, sessions)) continue;
 
             var ruleLabel = string.IsNullOrEmpty(rule.Name) ? rule.Id.ToString() : rule.Name;
 

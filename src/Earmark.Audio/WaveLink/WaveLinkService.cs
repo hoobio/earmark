@@ -317,7 +317,10 @@ internal sealed class WaveLinkService : IWaveLinkService, IAsyncDisposable
         bool changed;
         lock (_stateGate)
         {
-            changed = !ReferenceEquals(_lastSnapshot, snapshot);
+            // Compare by content, not reference: GetSnapshotAsync builds a fresh snapshot
+            // object every 5-second poll, so ReferenceEquals would always say "changed" and
+            // make every subscriber rebuild on every tick.
+            changed = !SnapshotsEqual(_lastSnapshot, snapshot);
             _lastSnapshot = snapshot;
         }
 
@@ -325,6 +328,24 @@ internal sealed class WaveLinkService : IWaveLinkService, IAsyncDisposable
         {
             SnapshotChanged?.Invoke(this, EventArgs.Empty);
         }
+    }
+
+    private static bool SnapshotsEqual(WaveLinkSnapshot? a, WaveLinkSnapshot? b)
+    {
+        if (ReferenceEquals(a, b)) return true;
+        if (a is null || b is null) return false;
+        if (a.Mixes.Count != b.Mixes.Count) return false;
+        if (a.OutputDevices.Count != b.OutputDevices.Count) return false;
+
+        for (var i = 0; i < a.Mixes.Count; i++)
+        {
+            if (!a.Mixes[i].Equals(b.Mixes[i])) return false;
+        }
+        for (var i = 0; i < a.OutputDevices.Count; i++)
+        {
+            if (!a.OutputDevices[i].Equals(b.OutputDevices[i])) return false;
+        }
+        return true;
     }
 
     public async ValueTask DisposeAsync()

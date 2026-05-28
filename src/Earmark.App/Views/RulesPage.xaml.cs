@@ -1,3 +1,5 @@
+using System.ComponentModel;
+
 using Earmark.App.ViewModels;
 
 using Microsoft.Extensions.DependencyInjection;
@@ -18,9 +20,40 @@ public sealed partial class RulesPage : Page
         ViewModel = viewModel;
         InitializeComponent();
         _logger = App.Current.Services.GetService<ILogger<RulesPage>>();
+        ViewModel.PropertyChanged += OnViewModelPropertyChanged;
+        Loaded += (_, _) => TryFocusPendingRule();
     }
 
     public RulesViewModel ViewModel { get; }
+
+    private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(RulesViewModel.PendingFocusRuleId))
+        {
+            TryFocusPendingRule();
+        }
+    }
+
+    private void TryFocusPendingRule()
+    {
+        if (ViewModel.PendingFocusRuleId is not Guid id) return;
+
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            var row = ViewModel.Items.FirstOrDefault(r => r.Id == id);
+            if (row is null) return;
+            row.IsExpanded = true;
+            try
+            {
+                RulesList.ScrollIntoView(row, ScrollIntoViewAlignment.Leading);
+            }
+            catch
+            {
+                // The list might not be ready yet (initial nav). Loaded will retry.
+            }
+            ViewModel.PendingFocusRuleId = null;
+        });
+    }
 
     private void OnHeaderTapped(object sender, TappedRoutedEventArgs e)
     {

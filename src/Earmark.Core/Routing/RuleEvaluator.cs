@@ -55,7 +55,7 @@ public sealed class RuleEvaluator : IRuleEvaluator
             return new RuleEvaluation(RuleStatus.Incomplete, "No actions configured");
         }
 
-        if (!_matcher.ConditionsMet(rule, endpoints))
+        if (!_matcher.ConditionsMet(rule, endpoints, sessions))
         {
             return new RuleEvaluation(RuleStatus.ConditionsNotMet, "Conditions not met");
         }
@@ -96,7 +96,7 @@ public sealed class RuleEvaluator : IRuleEvaluator
                     anyShadowed = true;
                 }
             }
-            else
+            else if (action.IsApplicationAction)
             {
                 var matchedPids = MatchAppPids(action.AppPattern, sessions);
                 if (matchedPids.Count == 0)
@@ -115,6 +115,18 @@ public sealed class RuleEvaluator : IRuleEvaluator
                 else
                 {
                     anyShadowed = true;
+                }
+            }
+            else
+            {
+                var endpoint = MatchEndpoint(action.DevicePattern, action.EffectiveFlow, endpoints);
+                if (endpoint is null)
+                {
+                    anyIdle = true;
+                }
+                else
+                {
+                    anyActiveTarget = true;
                 }
             }
         }
@@ -157,7 +169,7 @@ public sealed class RuleEvaluator : IRuleEvaluator
             {
                 break;
             }
-            if (!earlier.Enabled || !_matcher.ConditionsMet(earlier, endpoints))
+            if (!earlier.Enabled || !_matcher.ConditionsMet(earlier, endpoints, sessions))
             {
                 continue;
             }
@@ -182,7 +194,7 @@ public sealed class RuleEvaluator : IRuleEvaluator
                         defaults.Add((action.EffectiveFlow, role));
                     }
                 }
-                else
+                else if (action.IsApplicationAction)
                 {
                     var endpoint = MatchEndpoint(action.DevicePattern, action.EffectiveFlow, endpoints);
                     if (endpoint is null)

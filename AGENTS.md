@@ -90,6 +90,10 @@ Rules apply in **list order** - top of the list wins. There is no priority field
 - `RuleRow` is the per-rule view-model. It owns its own debounced `SaveAsync`. When the underlying rules list changes, `RulesViewModel.OnRulesChanged` calls `SyncFromRule` on each existing row in place (preserving expanded state) when the order is unchanged; only on add/delete/reorder does it rebuild `Items`.
 - Tray: `H.NotifyIcon.WinUI`. `WindowChromeManager` subclasses the window with `SetWindowSubclass` to intercept `WM_SYSCOMMAND/SC_MINIMIZE` for "minimize to tray", and handles `Closed` for "close to tray".
 
+## Reactivity preferences
+
+- **Event-driven first, polling as fallback.** When the OS exposes a change notification (e.g. `IMMNotificationClient`, `AudioEndpointVolume.OnVolumeNotification`, `IAudioSessionEvents`), prefer subscribing to that and reconciling on the event. Polling is acceptable as a safety net (drift recovery, restart correctness), but the primary path for "external state changed -> reconcile our state" must not depend on a tick interval. New code that adds reactivity should plumb the event path first and only fall back to polling when the OS has no usable notification.
+
 ## Common gotchas
 
 - **Don't use `[InterfaceType(InterfaceIsIInspectable)]`** in COM interop. Modern .NET doesn't marshal it. Use `IUnknown` with reserved vtable slots.

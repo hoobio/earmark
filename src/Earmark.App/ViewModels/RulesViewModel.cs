@@ -71,6 +71,38 @@ public partial class RulesViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     public partial RuleRow? Selected { get; set; }
 
+    /// <summary>
+    /// Set by other pages (e.g. Devices) to ask the Rules page to expand a specific rule
+    /// and scroll it into view. Cleared back to null by the page after it handles the focus.
+    /// </summary>
+    [ObservableProperty]
+    public partial Guid? PendingFocusRuleId { get; set; }
+
+    /// <summary>Marks the given rule as the next focus target; collapses every other row so
+    /// only the focused rule's editor is open when the user lands on the Rules page.</summary>
+    public void RequestFocusRule(Guid ruleId)
+    {
+        RuleRow? target = null;
+        foreach (var row in Items)
+        {
+            if (row.Id == ruleId)
+            {
+                target = row;
+                row.IsExpanded = true;
+            }
+            else
+            {
+                row.IsExpanded = false;
+            }
+        }
+
+        if (target is not null)
+        {
+            Selected = target;
+        }
+        PendingFocusRuleId = ruleId;
+    }
+
     private RuleRow BuildRow(RoutingRule rule) => new(rule, r => _rules.UpsertAsync(r));
 
     [RelayCommand]

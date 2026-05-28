@@ -15,4 +15,18 @@ public sealed class AppSettings
     public bool VerboseLogging { get; set; }
 
     public bool EnableWaveLink { get; set; }
+
+    public List<string> HiddenDeviceIds { get; set; } = new();
+
+    /// <summary>
+    /// Devices the user has explicitly chosen to keep visible. Overrides the auto-hide rule
+    /// that hides non-default devices with no rules. <see cref="HiddenDeviceIds"/> still wins
+    /// if the same device somehow ends up in both lists.
+    /// </summary>
+    public List<string> PinnedDeviceIds { get; set; } = new();
+
+    /// <summary>Persisted window size in physical pixels. Null until the user has resized
+    /// at least once (so first launch picks the WinUI default).</summary>
+    public int? WindowWidth { get; set; }
+    public int? WindowHeight { get; set; }
 }
