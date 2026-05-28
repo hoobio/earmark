@@ -156,7 +156,7 @@ public partial class RuleRow : ObservableObject, IDisposable
     {
         foreach (var c in Conditions)
         {
-            c.Recompute(endpoints);
+            c.Recompute(endpoints, sessions);
         }
         foreach (var a in Actions)
         {
@@ -850,6 +850,8 @@ public partial class ConditionRow : ObservableObject, IDisposable, ISyncable<Rul
     {
         new ConditionTypeOption(ConditionType.DevicePresent, "Device present"),
         new ConditionTypeOption(ConditionType.DeviceMissing, "Device missing"),
+        new ConditionTypeOption(ConditionType.ApplicationRunning, "Application running"),
+        new ConditionTypeOption(ConditionType.ApplicationNotRunning, "Application not running"),
     };
 
     public static IReadOnlyList<ConditionFlowOption> FlowOptions { get; } = new[]
@@ -874,12 +876,20 @@ public partial class ConditionRow : ObservableObject, IDisposable, ISyncable<Rul
     public partial string DevicePattern { get; set; } = string.Empty;
 
     [ObservableProperty]
+    public partial string AppPattern { get; set; } = string.Empty;
+
+    [ObservableProperty]
     public partial bool IsSatisfied { get; set; }
+
+    public bool IsApplicationCondition => Type is ConditionType.ApplicationRunning or ConditionType.ApplicationNotRunning;
+    public bool IsDeviceCondition => !IsApplicationCondition;
 
     public string TypeLabel => Type switch
     {
         ConditionType.DevicePresent => "Device present",
         ConditionType.DeviceMissing => "Device missing",
+        ConditionType.ApplicationRunning => "Application running",
+        ConditionType.ApplicationNotRunning => "Application not running",
         _ => Type.ToString(),
     };
 
@@ -912,6 +922,7 @@ public partial class ConditionRow : ObservableObject, IDisposable, ISyncable<Rul
         Type = Type,
         Flow = Flow,
         DevicePattern = DevicePattern,
+        AppPattern = AppPattern,
     };
 
     public void SyncFromModel(RuleCondition condition)
@@ -923,6 +934,7 @@ public partial class ConditionRow : ObservableObject, IDisposable, ISyncable<Rul
             Type = condition.Type;
             Flow = condition.Flow;
             DevicePattern = condition.DevicePattern;
+            AppPattern = condition.AppPattern;
         }
         finally
         {
@@ -930,8 +942,24 @@ public partial class ConditionRow : ObservableObject, IDisposable, ISyncable<Rul
         }
     }
 
-    public void Recompute(IReadOnlyList<AudioEndpoint> endpoints)
+    public void Recompute(IReadOnlyList<AudioEndpoint> endpoints, IReadOnlyList<AudioSession> sessions)
     {
+        if (IsApplicationCondition)
+        {
+            if (string.IsNullOrWhiteSpace(AppPattern))
+            {
+                IsSatisfied = Type == ConditionType.ApplicationNotRunning;
+                return;
+            }
+
+            var anyRunning = sessions.Any(s =>
+                RuleRow.MatchOrExact(AppPattern, s.ProcessName) ||
+                RuleRow.MatchOrExact(AppPattern, s.ExecutablePath));
+
+            IsSatisfied = Type == ConditionType.ApplicationRunning ? anyRunning : !anyRunning;
+            return;
+        }
+
         if (string.IsNullOrWhiteSpace(DevicePattern) || !RuleRow.TryCompile(DevicePattern, out var regex) || regex is null)
         {
             IsSatisfied = Type == ConditionType.DeviceMissing;
@@ -954,6 +982,8 @@ public partial class ConditionRow : ObservableObject, IDisposable, ISyncable<Rul
     {
         OnPropertyChanged(nameof(TypeLabel));
         OnPropertyChanged(nameof(SelectedTypeOption));
+        OnPropertyChanged(nameof(IsApplicationCondition));
+        OnPropertyChanged(nameof(IsDeviceCondition));
         Notify();
     }
     partial void OnFlowChanged(ConditionFlow value)
@@ -962,6 +992,7 @@ public partial class ConditionRow : ObservableObject, IDisposable, ISyncable<Rul
         Notify();
     }
     partial void OnDevicePatternChanged(string value) => Notify();
+    partial void OnAppPatternChanged(string value) => Notify();
 
     private void Notify()
     {

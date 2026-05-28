@@ -43,14 +43,17 @@ internal static class HostBuilderExtensions
         builder.Services.AddSingleton<IDispatcherQueueProvider, DispatcherQueueProvider>();
         builder.Services.AddSingleton<INavigationService, NavigationService>();
         builder.Services.AddSingleton<IWindowChromeManager, WindowChromeManager>();
+        builder.Services.AddSingleton<INotificationService, NotificationService>();
         builder.Services.AddSingleton<StartupSettingsApplier>();
 
         builder.Services.AddSingleton<MainWindow>();
         builder.Services.AddSingleton<ShellViewModel>();
+        builder.Services.AddSingleton<HomeViewModel>();
         builder.Services.AddSingleton<RulesViewModel>();
         builder.Services.AddSingleton<SessionsViewModel>();
         builder.Services.AddSingleton<SettingsViewModel>();
 
+        builder.Services.AddSingleton<HomePage>();
         builder.Services.AddSingleton<RulesPage>();
         builder.Services.AddSingleton<SessionsPage>();
         builder.Services.AddSingleton<SettingsPage>();

@@ -9,7 +9,7 @@ Per-app audio routing for Windows, driven by regex rules. Pin a browser to your 
 [![GitHub Issues](https://img.shields.io/github/issues/hoobio/earmark)](https://github.com/hoobio/earmark/issues)
 [![Last Commit](https://img.shields.io/github/last-commit/hoobio/earmark)](https://github.com/hoobio/earmark/commits/main)
 
-![Earmark](application.png)
+![Devices](ss_application.png) ![Rules Engine](ss_rules.png)
 
 ## Features
 
