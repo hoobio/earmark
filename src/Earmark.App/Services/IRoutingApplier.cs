@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 
+using Earmark.App.Settings;
 using Earmark.Core.Audio;
 using Earmark.Core.Models;
 using Earmark.Core.Routing;
@@ -30,6 +31,8 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
     private readonly IAudioPolicyService _policy;
     private readonly IRuleMatcher _matcher;
     private readonly IWaveLinkService _waveLink;
+    private readonly IWaveLinkNameReconciler _reconciler;
+    private readonly ISettingsService _settings;
     private readonly ILogger<RoutingApplier> _logger;
     private readonly HashSet<string> _appliedSessionKeys = new(StringComparer.OrdinalIgnoreCase);
     private readonly Lock _appliedGate = new();
@@ -46,6 +49,8 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
         IAudioPolicyService policy,
         IRuleMatcher matcher,
         IWaveLinkService waveLink,
+        IWaveLinkNameReconciler reconciler,
+        ISettingsService settings,
         ILogger<RoutingApplier> logger)
     {
         _rules = rules;
@@ -54,6 +59,8 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
         _policy = policy;
         _matcher = matcher;
         _waveLink = waveLink;
+        _reconciler = reconciler;
+        _settings = settings;
         _logger = logger;
     }
 
@@ -131,7 +138,21 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
                 ApplyVolumeAndMuteRules();
             }).ConfigureAwait(false);
 
-            await ApplyWaveLinkRulesAsync(_cts?.Token ?? CancellationToken.None).ConfigureAwait(false);
+            var ct = _cts?.Token ?? CancellationToken.None;
+            await ApplyWaveLinkRulesAsync(ct).ConfigureAwait(false);
+
+            if (_settings.Current.EnableWaveLink && _settings.Current.ReconcileWaveLinkNames)
+            {
+                try
+                {
+                    await _reconciler.ReconcileAsync(ct).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) { }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Auto-reconcile Wave Link names failed");
+                }
+            }
         }
         finally
         {

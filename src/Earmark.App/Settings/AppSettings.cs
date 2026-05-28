@@ -16,6 +16,13 @@ public sealed class AppSettings
 
     public bool EnableWaveLink { get; set; }
 
+    /// <summary>
+    /// When true, the periodic ticker keeps Windows endpoint FriendlyName in sync with the
+    /// label Wave Link uses for the same device. Only meaningful when <see
+    /// cref="EnableWaveLink"/> is also on.
+    /// </summary>
+    public bool ReconcileWaveLinkNames { get; set; }
+
     public List<string> HiddenDeviceIds { get; set; } = new();
 
     /// <summary>

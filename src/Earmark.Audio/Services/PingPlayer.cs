@@ -12,9 +12,11 @@ namespace Earmark.Audio.Services;
 internal static class PingPlayer
 {
     // Built-in Windows sound effects, in order of preference. We pick the first one that
-    // exists on the machine so the ping uses a familiar OS chime instead of a custom tone.
+    // exists on the machine so the ping matches the systray volume slider's audible blip
+    // - that's "Windows Background.wav" (the same file Windows plays on slider release).
     private static readonly string[] CandidateWavNames =
     [
+        "Windows Background.wav",
         "Windows Navigation Start.wav",
         "Windows Menu Command.wav",
         "Windows Pop-up Blocked.wav",

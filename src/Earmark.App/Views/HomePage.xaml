@@ -87,11 +87,11 @@
                                         </Grid.ColumnDefinitions>
 
                                         <Button Grid.Column="0"
-                                                Width="40" Height="40"
+                                                Width="56" Height="56"
                                                 Padding="0"
                                                 Background="{x:Bind IsMuteLockedByRule, Mode=OneWay, Converter={StaticResource MuteLockedBackgroundConverter}}"
                                                 BorderBrush="Transparent"
-                                                CornerRadius="8"
+                                                CornerRadius="10"
                                                 Tag="{x:Bind}"
                                                 IsEnabled="{x:Bind IsMuteToggleEnabled, Mode=OneWay}"
                                                 Click="OnMuteToggleClicked"
@@ -104,16 +104,22 @@
                                                 <SolidColorBrush x:Key="ButtonBorderBrushDisabled" Color="Transparent" />
                                             </Button.Resources>
                                             <FontIcon Glyph="{x:Bind Glyph, Mode=OneWay}"
-                                                      FontSize="20"
+                                                      FontSize="28"
                                                       Foreground="{x:Bind IsMuted, Mode=OneWay, Converter={StaticResource MutedBrushConverter}}" />
                                         </Button>
 
                                         <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
-                                            <TextBlock Text="{x:Bind DisplayName}"
+                                            <TextBlock Text="{x:Bind DeviceNameOnly}"
                                                        Style="{StaticResource BodyStrongTextBlockStyle}"
                                                        TextWrapping="NoWrap"
                                                        TextTrimming="CharacterEllipsis"
                                                        ToolTipService.ToolTip="{x:Bind DisplayName}" />
+                                            <TextBlock Text="{x:Bind DeviceIdSubtext}"
+                                                       Style="{StaticResource CaptionTextBlockStyle}"
+                                                       Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                       TextWrapping="NoWrap"
+                                                       TextTrimming="CharacterEllipsis"
+                                                       Visibility="{x:Bind HasDeviceIdSubtext}" />
                                             <StackPanel Orientation="Horizontal" Spacing="6">
                                                 <Border Padding="0,2"
                                                         VerticalAlignment="Center"

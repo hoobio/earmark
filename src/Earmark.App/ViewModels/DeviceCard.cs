@@ -46,6 +46,11 @@ public partial class DeviceCard : ObservableObject
         _endpoints = endpoints;
         _onVisibilityToggled = onUserVisibilityToggled;
         Endpoint = endpoint;
+        _split = SplitFriendlyName(endpoint.FriendlyName);
+        // Resolve the thematic glyph once - the name doesn't change for the lifetime of
+        // the card (a rename triggers a full rebuild) and the prefix scan, while cheap,
+        // would otherwise re-run on every binding refresh during slider drags.
+        _themedGlyph = WaveLinkGlyphMapper.TryResolve(_split.Name);
 
         _suppressVolumeWrite = true;
         Volume = Math.Clamp(volume, 0f, 1f);
@@ -69,6 +74,34 @@ public partial class DeviceCard : ObservableObject
 
     public string DisplayName => Endpoint.FriendlyName;
     public string Subtitle => Endpoint.DeviceDescription;
+
+    /// <summary>
+    /// Windows hands us names shaped "Speakers (Nvidia Broadcast)" - the user-facing label
+    /// followed by the driver / device-id in parens. Splitting it lets the card render the
+    /// label prominently and the device-id as quieter subtext, and keeps the glyph mapper
+    /// from matching on the bracketed part (which produced bogus hits like "Nvidia
+    /// Broadcast" -> streaming glyph).
+    /// </summary>
+    public string DeviceNameOnly => _split.Name;
+    public string DeviceIdSubtext => _split.Subtext ?? string.Empty;
+    public bool HasDeviceIdSubtext => !string.IsNullOrEmpty(_split.Subtext);
+
+    private readonly (string Name, string? Subtext) _split;
+    private readonly string? _themedGlyph;
+
+    private static (string Name, string? Subtext) SplitFriendlyName(string friendly)
+    {
+        if (string.IsNullOrEmpty(friendly)) return (friendly ?? string.Empty, null);
+        var openIdx = friendly.LastIndexOf(" (", StringComparison.Ordinal);
+        if (openIdx <= 0 || !friendly.EndsWith(')'))
+        {
+            return (friendly, null);
+        }
+        var name = friendly.Substring(0, openIdx);
+        var sub = friendly.Substring(openIdx + 2, friendly.Length - openIdx - 3);
+        return (name, sub);
+    }
+
     public bool IsRender => Endpoint.Flow == EndpointFlow.Render;
     public bool IsCapture => Endpoint.Flow == EndpointFlow.Capture;
     public string FlowLabel => IsRender ? "Output" : "Input";
@@ -297,12 +330,11 @@ public partial class DeviceCard : ObservableObject
     {
         get
         {
-            // Themed glyphs (Game / Voice Chat / Music / ...) override the generic speaker
-            // when the endpoint name matches a default Wave Link mix label. They stay
-            // constant across mute state because MutedBrushConverter already paints the
-            // icon red when muted - swapping the glyph too would double up the signal.
-            var themed = WaveLinkGlyphMapper.TryResolve(DisplayName);
-            if (themed is not null) return themed;
+            // Themed glyph (Game / Voice Chat / Music / ...) is resolved once at
+            // construction. It stays constant across mute state because MutedBrushConverter
+            // already paints the icon red when muted - swapping the glyph too would double
+            // the signal.
+            if (_themedGlyph is not null) return _themedGlyph;
 
             return (IsRender, IsMuted) switch
             {

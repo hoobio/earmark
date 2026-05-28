@@ -42,7 +42,12 @@
                     <ToggleSwitch IsOn="{x:Bind ViewModel.VerboseLogging, Mode=TwoWay}" />
                 </ctrl:SettingsCard>
 
-                <ctrl:SettingsCard Header="Wave Link integration" Description="Route Wave Link mix outputs from rules. Earmark connects to Wave Link's local WebSocket while the integration is on.">
+                <ctrl:SettingsExpander Header="Wave Link integration"
+                                       Description="Route Wave Link mix outputs from rules. Earmark connects to Wave Link's local WebSocket while the integration is on."
+                                       IsExpanded="{x:Bind ViewModel.EnableWaveLink, Mode=OneWay}">
+                    <ctrl:SettingsExpander.HeaderIcon>
+                        <FontIcon Glyph="&#xE767;" />
+                    </ctrl:SettingsExpander.HeaderIcon>
                     <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
                         <Ellipse Width="10" Height="10"
                                  Fill="{x:Bind ViewModel.WaveLinkState, Mode=OneWay, Converter={StaticResource WaveLinkStateBrushConverter}}"
@@ -50,20 +55,14 @@
                                  ToolTipService.ToolTip="{x:Bind ViewModel.WaveLinkStatusText, Mode=OneWay}" />
                         <ToggleSwitch IsOn="{x:Bind ViewModel.EnableWaveLink, Mode=TwoWay}" />
                     </StackPanel>
-                </ctrl:SettingsCard>
-
-                <ctrl:SettingsCard Header="Reconcile Wave Link device names"
-                                   Description="Rename Windows audio devices to match the labels shown in Wave Link. Useful after a Wave Link driver reinstall when device names drift."
-                                   Visibility="{x:Bind ViewModel.EnableWaveLink, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
-                    <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
-                        <TextBlock Text="{x:Bind ViewModel.ReconcileStatus, Mode=OneWay}"
-                                   VerticalAlignment="Center"
-                                   Style="{StaticResource CaptionTextBlockStyle}"
-                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                        <Button Content="Reconcile"
-                                Command="{x:Bind ViewModel.ReconcileWaveLinkNamesCommand}" />
-                    </StackPanel>
-                </ctrl:SettingsCard>
+                    <ctrl:SettingsExpander.Items>
+                        <ctrl:SettingsCard Header="Reconcile device names"
+                                           Description="Keep Windows device FriendlyName in sync with the label Wave Link uses for the same device. Rechecks on every Wave Link snapshot tick. Useful after a driver reinstall when names drift."
+                                           IsEnabled="{x:Bind ViewModel.EnableWaveLink, Mode=OneWay}">
+                            <ToggleSwitch IsOn="{x:Bind ViewModel.ReconcileWaveLinkNames, Mode=TwoWay}" />
+                        </ctrl:SettingsCard>
+                    </ctrl:SettingsExpander.Items>
+                </ctrl:SettingsExpander>
 
             </StackPanel>
         </ScrollViewer>
