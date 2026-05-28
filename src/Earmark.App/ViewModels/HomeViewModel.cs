@@ -11,6 +11,7 @@ using Earmark.Core.Routing;
 using Earmark.Core.Services;
 using Earmark.Core.WaveLink;
 
+using Microsoft.Extensions.Logging;
 using Microsoft.UI.Xaml;
 
 namespace Earmark.App.ViewModels;
@@ -26,16 +27,37 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     private static readonly TimeSpan PeakTickInterval = TimeSpan.FromMilliseconds(50);
     private const int MutePollEveryNthTick = 5;
 
+    // How long a chip lingers on a card after its session goes silent. Process-exit takes
+    // an immediate-remove path; this grace only kicks in for processes that are still
+    // running but quiet (paused video, app open but not playing). Generous window means a
+    // pause / scrub / inter-track gap doesn't make the chip pop in and out.
+    private static readonly TimeSpan AppChipAudibleGrace = TimeSpan.FromSeconds(30);
+
+    // Per-session peak metering measures itself each tick. If the moving average pushes
+    // past <see cref="AppMeterBudgetMs"/> the metering goes into a "too many sessions"
+    // safe mode that holds peak levels flat (chips still draw, just without animation).
+    // The next sustained period under budget re-enables the meters.
+    private const double AppMeterBudgetMs = 8.0;
+    private const int AppMeterTripSamples = 6;     // ~300ms above budget before tripping
+    private const int AppMeterRecoverSamples = 40; // ~2s under budget before recovering
+    private double _appMeterAvgMs;
+    private int _appMeterOverBudget;
+    private int _appMeterUnderBudget;
+
     private readonly IRulesService _rules;
     private readonly IAudioEndpointService _endpoints;
     private readonly IEndpointWriter _writer;
     private readonly IAudioSessionService _sessions;
+    private readonly IAudioSessionMeterService _sessionMeters;
+    private readonly IAudioPolicyService _policy;
+    private readonly ISessionIconService _iconService;
     private readonly IRuleMatcher _matcher;
     private readonly IRuleEvaluator _evaluator;
     private readonly ISettingsService _settings;
     private readonly IWaveLinkService _waveLink;
     private readonly IDispatcherQueueProvider _dispatcher;
     private readonly INotificationService _notifications;
+    private readonly ILogger<HomeViewModel> _logger;
     private readonly Dictionary<string, DateTime> _lastReconcileToast = new(StringComparer.OrdinalIgnoreCase);
     private static readonly TimeSpan ToastRateLimit = TimeSpan.FromSeconds(15);
     private readonly Lock _gate = new();
@@ -43,6 +65,8 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     private readonly DeviceUndoStack _undoStack = new();
     private CancellationTokenSource? _refreshCts;
     private CancellationTokenSource? _settingsSaveCts;
+    private CancellationTokenSource? _sessionsSyncCts;
+    private static readonly TimeSpan SessionsInPlaceDebounce = TimeSpan.FromMilliseconds(200);
     private DispatcherTimer? _peakTimer;
     private int _muteTickCounter;
 
@@ -51,23 +75,31 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         IAudioEndpointService endpoints,
         IEndpointWriter writer,
         IAudioSessionService sessions,
+        IAudioSessionMeterService sessionMeters,
+        IAudioPolicyService policy,
+        ISessionIconService iconService,
         IRuleMatcher matcher,
         IRuleEvaluator evaluator,
         ISettingsService settings,
         IWaveLinkService waveLink,
         INotificationService notifications,
-        IDispatcherQueueProvider dispatcher)
+        IDispatcherQueueProvider dispatcher,
+        ILogger<HomeViewModel> logger)
     {
         _rules = rules ?? throw new ArgumentNullException(nameof(rules));
         _endpoints = endpoints ?? throw new ArgumentNullException(nameof(endpoints));
         _writer = writer ?? throw new ArgumentNullException(nameof(writer));
         _sessions = sessions ?? throw new ArgumentNullException(nameof(sessions));
+        _sessionMeters = sessionMeters ?? throw new ArgumentNullException(nameof(sessionMeters));
+        _policy = policy ?? throw new ArgumentNullException(nameof(policy));
+        _iconService = iconService ?? throw new ArgumentNullException(nameof(iconService));
         _matcher = matcher ?? throw new ArgumentNullException(nameof(matcher));
         _evaluator = evaluator ?? throw new ArgumentNullException(nameof(evaluator));
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
         _waveLink = waveLink ?? throw new ArgumentNullException(nameof(waveLink));
         _notifications = notifications ?? throw new ArgumentNullException(nameof(notifications));
         _dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
         // Show-hidden is session-only: defaults to off on every launch.
 
@@ -75,7 +107,17 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         _endpoints.EndpointsChanged += OnAnythingChanged;
         _endpoints.DefaultsChanged += OnAnythingChanged;
         _endpoints.ExternalMuteChanged += OnExternalMuteChanged;
-        _sessions.SessionsChanged += OnAnythingChanged;
+        // CRITICAL: SessionsChanged must NOT trigger the full card rebuild. mpv seeking
+        // spams OnStateChanged on every position update; a full rebuild clears _allCards,
+        // creates new DeviceCard instances, and the Devices ObservableCollection swap makes
+        // ItemsRepeater destroy and recreate every visual - including all the app chips.
+        // The user sees the entire UI flash empty. Session lifecycle has its own
+        // event-driven path (SessionAdded / SessionRemoved) for chips, plus an in-place
+        // Apps reconcile we run on SessionsChanged. Cards only need to rebuild when their
+        // *shape* changes - rules / endpoints / wave-link state.
+        _sessions.SessionsChanged += OnSessionsChangedInPlace;
+        _sessions.SessionRemoved += OnSessionRemoved;
+        _sessions.SessionAdded += OnSessionAdded;
         _waveLink.SnapshotChanged += OnAnythingChanged;
         _waveLink.StateChanged += OnAnythingChanged;
 
@@ -90,6 +132,14 @@ public partial class HomeViewModel : ObservableObject, IDisposable
 
     [ObservableProperty]
     public partial bool ShowHiddenDevices { get; set; }
+
+    /// <summary>
+    /// True while per-app metering is in safe mode because the per-tick read budget was
+    /// blown - typically a system with many simultaneous sessions. Chips still render, but
+    /// their peak indicator stops animating until the load drops.
+    /// </summary>
+    [ObservableProperty]
+    public partial bool AppMetersThrottled { get; set; }
 
     partial void OnShowHiddenDevicesChanged(bool value)
     {
@@ -147,6 +197,150 @@ public partial class HomeViewModel : ObservableObject, IDisposable
                 }
             }
         }
+
+        TickAppMeters();
+    }
+
+    /// <summary>
+    /// Per-session peak update for every chip on every <i>visible</i> card. Cards filtered
+    /// out by the visibility logic (no rules + not default + not Show-hidden) aren't in
+    /// <see cref="Devices"/>, so their chips don't get touched here. The tick is timed and
+    /// trips into a throttled mode if the running average crosses
+    /// <see cref="AppMeterBudgetMs"/>; in throttled mode peak writes are skipped (chips
+    /// stay rendered, just frozen at zero / their last value).
+    /// </summary>
+    private void TickAppMeters()
+    {
+        if (AppMetersThrottled)
+        {
+            // Cheap probe so we can recover. Walk the chip count without reading peak data.
+            var probeChipCount = 0;
+            foreach (var card in Devices) probeChipCount += card.Apps.Count;
+            if (probeChipCount == 0)
+            {
+                AppMetersThrottled = false;
+                _appMeterOverBudget = 0;
+                _appMeterUnderBudget = 0;
+                _appMeterAvgMs = 0;
+                return;
+            }
+
+            // Run a single timed pass to test recovery. If still over budget, drop back out
+            // without committing the peak writes (chips re-freeze). Under budget enough
+            // ticks in a row -> recover.
+            var probeStart = System.Diagnostics.Stopwatch.GetTimestamp();
+            foreach (var card in Devices)
+            {
+                foreach (var chip in card.Apps)
+                {
+                    _ = _sessionMeters.GetPeak(chip.ProcessId);
+                }
+            }
+            var probeMs = ElapsedMs(probeStart);
+            UpdateBudgetCounters(probeMs);
+            if (_appMeterUnderBudget >= AppMeterRecoverSamples)
+            {
+                AppMetersThrottled = false;
+                _appMeterOverBudget = 0;
+                _appMeterUnderBudget = 0;
+                _appMeterAvgMs = 0;
+            }
+            return;
+        }
+
+        var start = System.Diagnostics.Stopwatch.GetTimestamp();
+        var now = DateTime.UtcNow;
+        var sessionsSnapshot = _sessions.GetSessions();
+        var rulesSnapshot = _rules.Rules;
+        List<AudioEndpoint>? combinedEndpointsCache = null;
+
+        foreach (var card in Devices)
+        {
+            // Phase 1: update peaks on existing chips, keeping LastAudibleAt fresh.
+            foreach (var chip in card.Apps)
+            {
+                var peak = _sessionMeters.GetPeak(chip.ProcessId) ?? 0f;
+                chip.Tick(peak);
+            }
+
+            // Phase 2: revive chips for currently-AUDIBLE sessions. Strictly peak-based -
+            // accepting `Session.State == Active` here would re-add chips immediately after
+            // Phase 3 prunes them (any app that's claimed an audio device but isn't actually
+            // playing reports Active forever). Only sessions producing audio right now get
+            // a chip via this path; idle-but-Active sessions stay pruned until they play.
+            if (card.Endpoint.Flow == EndpointFlow.Render)
+            {
+                foreach (var session in sessionsSnapshot)
+                {
+                    if (!string.Equals(session.CurrentEndpointId, card.Endpoint.Id, StringComparison.OrdinalIgnoreCase)) continue;
+                    if (!AppChip.ShouldShowAsAppChip(session)) continue;
+
+                    var livePeak = _sessionMeters.GetPeak(session.ProcessId) ?? 0f;
+                    if (livePeak < AppChip.AudibleAmplitudeThreshold) continue;
+
+                    var alreadyChipped = false;
+                    foreach (var chip in card.Apps)
+                    {
+                        if (chip.ProcessId == session.ProcessId) { alreadyChipped = true; break; }
+                    }
+                    if (alreadyChipped) continue;
+
+                    combinedEndpointsCache ??= _endpoints.GetEndpoints(EndpointFlow.Render)
+                        .Concat(_endpoints.GetEndpoints(EndpointFlow.Capture))
+                        .ToList();
+                    var match = _matcher.FindAppRoute(session, EndpointFlow.Render, rulesSnapshot, combinedEndpointsCache, sessionsSnapshot);
+                    var revivedChip = new AppChip(session, _iconService, match?.Rule);
+                    InsertChipSorted(card.Apps, revivedChip);
+                    card.NotifyAppsChanged();
+                }
+            }
+
+            // Phase 3: silence-grace prune. Process-exit removal is event-driven via
+            // SessionRemoved (which now fires correctly once BuildSnapshot filters Expired
+            // sessions out of the snapshot). This prune only catches the "process is alive
+            // but quiet" case - long-running app idle for a sustained stretch.
+            for (var i = card.Apps.Count - 1; i >= 0; i--)
+            {
+                if (now - card.Apps[i].LastAudibleAt > AppChipAudibleGrace)
+                {
+                    _logger.LogInformation("Chip prune: pid={Pid} silent past grace", card.Apps[i].ProcessId);
+                    card.Apps.RemoveAt(i);
+                    card.NotifyAppsChanged();
+                }
+            }
+        }
+        var ms = ElapsedMs(start);
+        UpdateBudgetCounters(ms);
+
+        if (_appMeterOverBudget >= AppMeterTripSamples)
+        {
+            AppMetersThrottled = true;
+            _appMeterOverBudget = 0;
+            _appMeterUnderBudget = 0;
+        }
+    }
+
+    private static double ElapsedMs(long startTicks)
+    {
+        var delta = System.Diagnostics.Stopwatch.GetTimestamp() - startTicks;
+        return delta * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+    }
+
+
+    private void UpdateBudgetCounters(double sampleMs)
+    {
+        // EMA so a single hiccup doesn't trip the throttle. ~20-sample window.
+        _appMeterAvgMs = _appMeterAvgMs == 0 ? sampleMs : (_appMeterAvgMs * 0.9 + sampleMs * 0.1);
+        if (_appMeterAvgMs > AppMeterBudgetMs)
+        {
+            _appMeterOverBudget++;
+            _appMeterUnderBudget = 0;
+        }
+        else
+        {
+            _appMeterUnderBudget++;
+            _appMeterOverBudget = 0;
+        }
     }
 
     private void OnExternalMuteChanged(object? sender, EndpointMuteChangedEventArgs e)
@@ -201,6 +395,88 @@ public partial class HomeViewModel : ObservableObject, IDisposable
 
     private void OnAnythingChanged(object? sender, EventArgs e) => QueueRefresh();
 
+    /// <summary>
+    /// In-place chip reconcile, no full card rebuild. Wired to <see cref="IAudioSessionService.SessionsChanged"/>
+    /// so rapid state transitions (mpv seek) only touch <c>card.Apps</c> collections, not
+    /// the card list itself. DEBOUNCED - mpv seek can fire SessionsChanged hundreds of
+    /// times per second; running SyncAllCardsApps on each one (with its per-session
+    /// GetPeak COM calls and matcher invocations) backs up the dispatcher to the point of
+    /// the UI hanging.
+    /// </summary>
+    private void OnSessionsChangedInPlace(object? sender, EventArgs e)
+    {
+        _sessionsSyncCts?.Cancel();
+        _sessionsSyncCts = new CancellationTokenSource();
+        var token = _sessionsSyncCts.Token;
+        _ = Task.Run(async () =>
+        {
+            try { await Task.Delay(SessionsInPlaceDebounce, token).ConfigureAwait(false); }
+            catch (OperationCanceledException) { return; }
+            _dispatcher.Enqueue(() =>
+            {
+                if (token.IsCancellationRequested) return;
+                if (_allCards.Count == 0) return;
+                SyncAllCardsApps();
+            });
+        }, token);
+    }
+
+    private void OnSessionRemoved(object? sender, AudioSessionRemovedEvent e)
+    {
+        var pid = e.ProcessId;
+        _dispatcher.Enqueue(() =>
+        {
+            foreach (var card in _allCards)
+            {
+                for (var i = card.Apps.Count - 1; i >= 0; i--)
+                {
+                    if (card.Apps[i].ProcessId == pid)
+                    {
+                        _logger.LogInformation("Chip removed via SessionRemoved: pid={Pid} card={Card}", pid, card.Endpoint.DisplayName);
+                        card.Apps.RemoveAt(i);
+                        card.NotifyAppsChanged();
+                        break;
+                    }
+                }
+            }
+        });
+    }
+
+    private void OnSessionAdded(object? sender, AudioSessionEvent e)
+    {
+        var session = e.Session;
+        _dispatcher.Enqueue(() =>
+        {
+            var card = _allCards.FirstOrDefault(c =>
+                c.Endpoint.Flow == EndpointFlow.Render &&
+                string.Equals(c.Endpoint.Id, session.CurrentEndpointId, StringComparison.OrdinalIgnoreCase));
+            if (card is null) return;
+
+            if (!AppChip.ShouldShowAsAppChip(session)) return;
+            // The instant-add path is reserved for sessions that are currently emitting
+            // audio. Inactive new sessions wait for a SessionsChanged rebuild to confirm
+            // they've gone Active before they earn a chip.
+            if (session.State != SessionState.Active) return;
+
+            foreach (var existing in card.Apps)
+            {
+                if (existing.ProcessId == session.ProcessId) return;
+            }
+
+            // Snapshot is good enough for the rule-lock check; a real reroute fires its own
+            // SessionsChanged that will reconcile via QueueRefresh.
+            var rules = _rules.Rules;
+            var renderEndpoints = _endpoints.GetEndpoints(EndpointFlow.Render);
+            var captureEndpoints = _endpoints.GetEndpoints(EndpointFlow.Capture);
+            var combined = renderEndpoints.Concat(captureEndpoints).ToList();
+            var allSessions = _sessions.GetSessions();
+            var match = _matcher.FindAppRoute(session, EndpointFlow.Render, rules, combined, allSessions);
+            var chip = new AppChip(session, _iconService, match?.Rule);
+            InsertChipSorted(card.Apps, chip);
+            card.NotifyAppsChanged();
+        });
+    }
+
     private void QueueRefresh()
     {
         CancellationToken token;
@@ -239,7 +515,24 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             _allCards.Clear();
             _allCards.AddRange(built);
             SyncVisibleDevices();
+            SyncAllCardsApps();
         });
+    }
+
+    /// <summary>UI-thread helper that re-reads the session/rule snapshot and reconciles each
+    /// card's <c>Apps</c> collection in place. Called after a rebuild swaps cards and any time
+    /// the snapshot may have drifted (rule edit, endpoint default change).</summary>
+    private void SyncAllCardsApps()
+    {
+        var sessions = _sessions.GetSessions();
+        var rules = _rules.Rules;
+        var renderEndpoints = _endpoints.GetEndpoints(EndpointFlow.Render);
+        var captureEndpoints = _endpoints.GetEndpoints(EndpointFlow.Capture);
+        var combined = renderEndpoints.Concat(captureEndpoints).ToList();
+        foreach (var card in _allCards)
+        {
+            SyncCardApps(card, sessions, rules, combined);
+        }
     }
 
     private List<DeviceCard> BuildCards(HashSet<string> hiddenIds, HashSet<string> pinnedIds, bool showHidden)
@@ -280,7 +573,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             var hiddenByUser = hiddenIds.Contains(endpoint.Id);
             var pinnedByUser = pinnedIds.Contains(endpoint.Id);
 
-            cards.Add(new DeviceCard(
+            var card = new DeviceCard(
                 _endpoints,
                 _writer,
                 endpoint,
@@ -295,9 +588,147 @@ public partial class HomeViewModel : ObservableObject, IDisposable
                 hiddenByUser,
                 pinnedByUser,
                 showHidden,
-                OnCardVisibilityToggled));
+                OnCardVisibilityToggled);
+            // Apps are filled later on the UI thread; ObservableCollection mutations have to
+            // happen there, and the rule-lock recompute needs the same fresh snapshot.
+            cards.Add(card);
         }
         return cards;
+    }
+
+    /// <summary>
+    /// Reconciles the card's <see cref="DeviceCard.Apps"/> collection with the current
+    /// session snapshot. Mutates in place (Add / Remove on the ObservableCollection) so the
+    /// XAML implicit animations fire per chip; replacing the collection wholesale tears down
+    /// and re-creates every chip on every refresh, which both kills the fade and forces an
+    /// icon re-load.
+    /// </summary>
+    private void SyncCardApps(
+        DeviceCard card,
+        IReadOnlyList<AudioSession> sessions,
+        IReadOnlyList<RoutingRule> rules,
+        IReadOnlyList<AudioEndpoint> combinedEndpoints)
+    {
+        if (card.Endpoint.Flow != EndpointFlow.Render)
+        {
+            if (card.Apps.Count > 0)
+            {
+                card.Apps.Clear();
+                card.NotifyAppsChanged();
+            }
+            return;
+        }
+
+        var activePids = new Dictionary<uint, AudioSession>();
+        var presentPidsAnyState = new HashSet<uint>();
+        foreach (var session in sessions)
+        {
+            if (!string.Equals(session.CurrentEndpointId, card.Endpoint.Id, StringComparison.OrdinalIgnoreCase)) continue;
+            if (!AppChip.ShouldShowAsAppChip(session)) continue;
+
+            presentPidsAnyState.Add(session.ProcessId);
+            // Audibility = "is producing sound right now". State==Active is unreliable
+            // (apps stay Active long after they go silent), so only the live peak counts.
+            // Existing chips that have gone silent will fall out via the grace-window prune
+            // in TickAppMeters; this path is only about deciding when to ADD a new chip.
+            var livePeak = _sessionMeters.GetPeak(session.ProcessId) ?? 0f;
+            if (livePeak >= AppChip.AudibleAmplitudeThreshold)
+            {
+                activePids.TryAdd(session.ProcessId, session);
+            }
+        }
+
+        // DEFENSIVE: a transient empty snapshot (COM enumeration hiccup under rapid state
+        // transitions, e.g. mpv seeking) used to make this loop wipe every chip on every
+        // card at once - because none of their PIDs were in the empty presentPidsAnyState
+        // set. Authoritative chip removal lives on the SessionRemoved event-driven path.
+        // If this snapshot happens to be empty when we have chips, skip the "session gone"
+        // removal entirely and let SessionRemoved deliver the truth.
+        var now = DateTime.UtcNow;
+        var snapshotLooksValid = sessions.Count > 0;
+        if (!snapshotLooksValid && card.Apps.Count > 0)
+        {
+            _logger.LogWarning(
+                "SyncCardApps for {Card}: snapshot returned 0 sessions but card has {ChipCount} chips - skipping removal pass to avoid mass-wipe",
+                card.Endpoint.DisplayName, card.Apps.Count);
+        }
+        for (var i = card.Apps.Count - 1; i >= 0; i--)
+        {
+            var chip = card.Apps[i];
+            if (snapshotLooksValid && !presentPidsAnyState.Contains(chip.ProcessId))
+            {
+                _logger.LogInformation(
+                    "Chip removed via SyncCardApps (session not in snapshot): pid={Pid} card={Card}",
+                    chip.ProcessId, card.Endpoint.DisplayName);
+                card.Apps.RemoveAt(i);
+                continue;
+            }
+            if (snapshotLooksValid && !activePids.ContainsKey(chip.ProcessId) && now - chip.LastAudibleAt > AppChipAudibleGrace)
+            {
+                _logger.LogInformation(
+                    "Chip removed via SyncCardApps (inactive + silent past grace): pid={Pid} card={Card}",
+                    chip.ProcessId, card.Endpoint.DisplayName);
+                card.Apps.RemoveAt(i);
+            }
+        }
+
+        var presentPids = new HashSet<uint>();
+        foreach (var chip in card.Apps) presentPids.Add(chip.ProcessId);
+
+        // Add chips for newly-present sessions, in alphabetical position.
+        var additions = activePids.Values
+            .Where(s => !presentPids.Contains(s.ProcessId))
+            .OrderBy(s => s.IsSystemSounds ? "System Sounds" : s.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        foreach (var session in additions)
+        {
+            var match = _matcher.FindAppRoute(session, EndpointFlow.Render, rules, combinedEndpoints, sessions);
+            var chip = new AppChip(session, _iconService, match?.Rule);
+            InsertChipSorted(card.Apps, chip);
+        }
+
+        card.NotifyAppsChanged();
+    }
+
+    private static void InsertChipSorted(ObservableCollection<AppChip> chips, AppChip chip)
+    {
+        var name = chip.Session.IsSystemSounds ? "System Sounds" : chip.Session.DisplayName;
+        for (var i = 0; i < chips.Count; i++)
+        {
+            var existing = chips[i].Session.IsSystemSounds ? "System Sounds" : chips[i].Session.DisplayName;
+            if (string.Compare(name, existing, StringComparison.OrdinalIgnoreCase) < 0)
+            {
+                chips.Insert(i, chip);
+                return;
+            }
+        }
+        chips.Add(chip);
+    }
+
+    /// <summary>
+    /// Per-app default endpoint override. Called by the Home page drag/drop handler when a
+    /// chip lands on a render card whose endpoint id differs from the chip's source. Calls
+    /// straight into <see cref="IAudioPolicyService"/>; the OS routes new audio streams to
+    /// the target on the next session activation. The session snapshot rebuild that the
+    /// session manager fires picks the chip up on the new card.
+    /// </summary>
+    public void MoveSessionToEndpoint(AppChip chip, AudioEndpoint targetEndpoint)
+    {
+        ArgumentNullException.ThrowIfNull(chip);
+        ArgumentNullException.ThrowIfNull(targetEndpoint);
+        if (targetEndpoint.Flow != EndpointFlow.Render) return;
+        if (chip.IsRuleLocked) return;
+        if (string.Equals(chip.SourceEndpointId, targetEndpoint.Id, StringComparison.OrdinalIgnoreCase)) return;
+
+        try
+        {
+            var pid = chip.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            _policy.SetDefaultEndpointForApp(pid, targetEndpoint.Id, RoleScope.All, EndpointFlow.Render);
+        }
+        catch
+        {
+            // Errors surface via the logger inside the policy service.
+        }
     }
 
 
@@ -436,7 +867,9 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         _endpoints.EndpointsChanged -= OnAnythingChanged;
         _endpoints.DefaultsChanged -= OnAnythingChanged;
         _endpoints.ExternalMuteChanged -= OnExternalMuteChanged;
-        _sessions.SessionsChanged -= OnAnythingChanged;
+        _sessions.SessionsChanged -= OnSessionsChangedInPlace;
+        _sessions.SessionRemoved -= OnSessionRemoved;
+        _sessions.SessionAdded -= OnSessionAdded;
         _waveLink.SnapshotChanged -= OnAnythingChanged;
         _waveLink.StateChanged -= OnAnythingChanged;
         if (_peakTimer is not null)
@@ -449,5 +882,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         _refreshCts?.Dispose();
         _settingsSaveCts?.Cancel();
         _settingsSaveCts?.Dispose();
+        _sessionsSyncCts?.Cancel();
+        _sessionsSyncCts?.Dispose();
     }
 }

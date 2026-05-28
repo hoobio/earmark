@@ -99,6 +99,11 @@ public partial class SessionsViewModel : ObservableObject, IDisposable
                     return;
                 }
 
+                // The System Sounds session attaches to every active render endpoint, so
+                // it shows up as a row per device - duplicated noise the user can't act on.
+                // Drop it the same way the Home page apps row does.
+                if (session.IsSystemSounds) continue;
+
                 endpointById.TryGetValue(session.CurrentEndpointId, out var endpoint);
                 var row = new SessionRow(session, endpoint);
                 _dispatcher.Enqueue(() =>

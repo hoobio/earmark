@@ -1,4 +1,5 @@
 using Earmark.App.ViewModels;
+using Earmark.Core.Models;
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -6,8 +7,8 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
-using Microsoft.UI.Xaml.Media.Animation;
 
+using Windows.ApplicationModel.DataTransfer;
 using Windows.System;
 
 namespace Earmark.App.Views;
@@ -25,11 +26,6 @@ public sealed partial class HomePage : Page
     /// </summary>
     private readonly Dictionary<Slider, (float Volume, bool Muted)> _sliderDragStart = new();
 
-    /// <summary>
-    /// In-flight rules-expand storyboards keyed by ScrollViewer. Lets a mid-animation toggle
-    /// stop the previous tween before starting the next so they don't fight over MaxHeight.
-    /// </summary>
-    private readonly Dictionary<ScrollViewer, Storyboard> _rulesExpandStoryboards = new();
 
     public HomePage(HomeViewModel viewModel, RulesViewModel rulesViewModel, MainWindow mainWindow)
     {
@@ -77,53 +73,16 @@ public sealed partial class HomePage : Page
         // carries the DeviceCard reference via Tag="{x:Bind}" instead.
         if (element.Tag is not DeviceCard card) return;
 
-        var scrollViewer = FindAncestorScrollViewer(element);
         var collapsing = card.IsRulesExpanded;
-
-        // Capture the current visible height before any state change so the animation starts
-        // from where the user can see it - even if a previous tween is still mid-flight.
-        var fromHeight = scrollViewer?.ActualHeight ?? 0;
-
         card.IsRulesExpanded = !card.IsRulesExpanded;
 
-        if (scrollViewer is not null)
+        if (collapsing)
         {
-            // The x:Bind on MaxHeight has just snapped to the new target. Override it back to
-            // the previous height, then animate up/down to the new RulesPanelMaxHeight value.
-            scrollViewer.MaxHeight = fromHeight;
-            AnimateRulesExpansion(scrollViewer, fromHeight, card.RulesPanelMaxHeight);
-
-            if (collapsing)
-            {
-                // Was expanded, now collapsing: snap the scroll back to the top of the list.
-                scrollViewer.ChangeView(null, 0, null, disableAnimation: false);
-            }
+            // Was expanded, now collapsing: snap the scroll back to the top of the list so
+            // the next expand starts from the first chip.
+            var scrollViewer = FindAncestorScrollViewer(element);
+            scrollViewer?.ChangeView(null, 0, null, disableAnimation: false);
         }
-    }
-
-    private void AnimateRulesExpansion(ScrollViewer target, double from, double to)
-    {
-        if (_rulesExpandStoryboards.TryGetValue(target, out var previous))
-        {
-            previous.Stop();
-        }
-
-        var animation = new DoubleAnimation
-        {
-            From = from,
-            To = to,
-            Duration = new Duration(TimeSpan.FromMilliseconds(220)),
-            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
-            // MaxHeight affects layout, so the animation has to be marked dependent.
-            EnableDependentAnimation = true,
-        };
-        Storyboard.SetTarget(animation, target);
-        Storyboard.SetTargetProperty(animation, "MaxHeight");
-
-        var storyboard = new Storyboard();
-        storyboard.Children.Add(animation);
-        _rulesExpandStoryboards[target] = storyboard;
-        storyboard.Begin();
     }
 
     /// <summary>Walks up the visual tree to the first ancestor StackPanel that contains a
@@ -216,6 +175,137 @@ public sealed partial class HomePage : Page
         {
             card.PlayPing();
         }
+    }
+
+    // ---- App chip drag / drop ----
+    //
+    // In-process drag of an AppChip onto a render DeviceCard rebinds the session's per-app
+    // default endpoint. The DataPackage Text carries an "earmark:chip:{pid}:{sourceEndpointId}"
+    // sentinel; the Drop handler parses it back into a chip + target card and asks the VM
+    // to apply the override via IAudioPolicyService.
+    //
+    // Cursor feedback is OS-native via DataPackageOperation.None - WinUI draws the slashed
+    // circle the user expects when DragOver decides the drop isn't valid (capture endpoint
+    // target, or dropping back on the source card). No custom cursor work needed.
+
+    private const string DragPayloadPrefix = "earmark:chip:";
+
+    private void OnAppChipDragStarting(UIElement sender, DragStartingEventArgs args)
+    {
+        if (sender is not FrameworkElement { Tag: AppChip chip }) return;
+        if (!chip.CanDrag)
+        {
+            args.Cancel = true;
+            return;
+        }
+
+        // Payload is parsed in OnDeviceCardDrop. Keep it small; the AppChip itself doesn't
+        // have to round-trip - the page resolves PID + source endpoint back to the live chip
+        // via the HomeViewModel's card list, which is the source of truth.
+        var payload = $"{DragPayloadPrefix}{chip.ProcessId}|{chip.SourceEndpointId}";
+        args.Data.SetText(payload);
+        args.Data.RequestedOperation = DataPackageOperation.Move;
+    }
+
+    private void OnAppChipDropCompleted(UIElement sender, DropCompletedEventArgs args)
+    {
+        // Nothing to clean up - the payload is value-typed text. Hook exists so future
+        // affordances (e.g. flash the source card on a successful move) have a place to land.
+    }
+
+    private void OnDeviceCardDragOver(object sender, DragEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: DeviceCard card }) return;
+
+        // Bail early when the drag isn't ours. Other drags (file drops onto the window, etc.)
+        // shouldn't get our acceptance.
+        if (!e.DataView.Contains(StandardDataFormats.Text))
+        {
+            e.AcceptedOperation = DataPackageOperation.None;
+            return;
+        }
+
+        if (TryReadPayload(e.DataView, out var pid, out var sourceEndpointId))
+        {
+            _ = pid;
+            // Capture endpoint -> cursor shows slashed circle. Same goes for dropping on the
+            // source card (no-op). Anything else accepts as Move.
+            if (card.IsCapture ||
+                string.Equals(card.Endpoint.Id, sourceEndpointId, StringComparison.OrdinalIgnoreCase))
+            {
+                e.AcceptedOperation = DataPackageOperation.None;
+            }
+            else
+            {
+                e.AcceptedOperation = DataPackageOperation.Move;
+            }
+            e.Handled = true;
+        }
+        else
+        {
+            e.AcceptedOperation = DataPackageOperation.None;
+        }
+    }
+
+    private void OnDeviceCardDrop(object sender, DragEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: DeviceCard card }) return;
+        if (card.IsCapture) return;
+        if (!TryReadPayload(e.DataView, out var pid, out var sourceEndpointId)) return;
+        if (string.Equals(card.Endpoint.Id, sourceEndpointId, StringComparison.OrdinalIgnoreCase)) return;
+
+        var chip = FindChipByPid(pid);
+        if (chip is null)
+        {
+            _logger?.LogInformation("Drop: chip with pid={Pid} no longer present, ignoring", pid);
+            return;
+        }
+
+        _logger?.LogInformation(
+            "Drop: pid={Pid} {Source} -> {Target}",
+            pid, sourceEndpointId, card.Endpoint.Id);
+        ViewModel.MoveSessionToEndpoint(chip, card.Endpoint);
+        e.Handled = true;
+    }
+
+    private AppChip? FindChipByPid(uint pid)
+    {
+        foreach (var card in ViewModel.Devices)
+        {
+            foreach (var chip in card.Apps)
+            {
+                if (chip.ProcessId == pid) return chip;
+            }
+        }
+        return null;
+    }
+
+    private static bool TryReadPayload(DataPackageView view, out uint pid, out string sourceEndpointId)
+    {
+        pid = 0;
+        sourceEndpointId = string.Empty;
+        if (!view.Contains(StandardDataFormats.Text)) return false;
+
+        // GetTextAsync is async; the DragOver/Drop handlers can't await without losing the
+        // synchronous accept decision. Block on the async via GetResults - the source of
+        // this DataPackage is in-process so it's already resolved.
+        string text;
+        try
+        {
+            text = view.GetTextAsync().AsTask().GetAwaiter().GetResult();
+        }
+        catch
+        {
+            return false;
+        }
+        if (string.IsNullOrEmpty(text) || !text.StartsWith(DragPayloadPrefix, StringComparison.Ordinal)) return false;
+
+        var body = text.Substring(DragPayloadPrefix.Length);
+        var sep = body.IndexOf('|');
+        if (sep <= 0 || sep == body.Length - 1) return false;
+        if (!uint.TryParse(body.AsSpan(0, sep), System.Globalization.CultureInfo.InvariantCulture, out pid)) return false;
+        sourceEndpointId = body.Substring(sep + 1);
+        return true;
     }
 #pragma warning restore CA1822
 }

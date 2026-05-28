@@ -62,6 +62,22 @@ public sealed class AudioSessionService : IAudioSessionService, IDisposable
                 try
                 {
                     var fresh = BuildSnapshot();
+
+                    // Transient empty-enumeration defence: MMDeviceEnumerator returns zero
+                    // devices for tens of ms during certain state transitions (default-
+                    // device change, audio service hiccup). Without this, the diff against
+                    // _knownPids fires SessionRemoved for EVERY pid in one shot and the
+                    // apps row gets wiped. If we previously had sessions and now have none,
+                    // assume the enumeration glitched and keep serving the previous
+                    // snapshot - the next dirty-flag rebuild will recover.
+                    if (fresh.Count == 0 && _knownPids.Count > 0)
+                    {
+                        _logger.LogWarning(
+                            "GetSessions: fresh snapshot empty but {Known} pids were known last cycle; suppressing as transient",
+                            _knownPids.Count);
+                        break;
+                    }
+
                     var freshPids = new HashSet<uint>();
                     foreach (var session in fresh)
                     {
@@ -102,8 +118,11 @@ public sealed class AudioSessionService : IAudioSessionService, IDisposable
     private List<AudioSession> BuildSnapshot()
     {
         var results = new List<AudioSession>();
+        var deviceCount = 0;
+        var expiredSkipped = 0;
         foreach (var device in _enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active))
         {
+            deviceCount++;
             try
             {
                 var manager = device.AudioSessionManager;
@@ -116,6 +135,17 @@ public sealed class AudioSessionService : IAudioSessionService, IDisposable
                     {
                         if (TryMap(session, device.ID, out var mapped))
                         {
+                            // Expired sessions are NAudio's signal that the underlying
+                            // IAudioSessionControl has been disconnected (process exit,
+                            // session recycle on format change, etc.). Including them in
+                            // the snapshot keeps the PID in _knownPids and suppresses the
+                            // SessionRemoved event - the chip then sticks around even after
+                            // the process is gone. Drop them so the diff fires the removal.
+                            if (mapped.State == SessionStateModel.Expired)
+                            {
+                                expiredSkipped++;
+                                continue;
+                            }
                             results.Add(mapped);
                         }
                     }
@@ -133,6 +163,22 @@ public sealed class AudioSessionService : IAudioSessionService, IDisposable
             {
                 device.Dispose();
             }
+        }
+
+        // Trace empty-or-near-empty snapshots loudly; an audio system never has zero
+        // sessions in normal operation, and a transient empty snapshot during a state
+        // transition was the trigger for the apps-row mass-wipe bug.
+        if (results.Count == 0)
+        {
+            _logger.LogWarning(
+                "BuildSnapshot returned 0 sessions (devices enumerated={DeviceCount}, expired skipped={ExpiredSkipped})",
+                deviceCount, expiredSkipped);
+        }
+        else
+        {
+            _logger.LogDebug(
+                "BuildSnapshot: {Count} sessions across {DeviceCount} devices ({Expired} expired skipped)",
+                results.Count, deviceCount, expiredSkipped);
         }
 
         return results;
@@ -202,14 +248,29 @@ public sealed class AudioSessionService : IAudioSessionService, IDisposable
         try
         {
             var pid = session.GetProcessID;
-            var (procName, exePath) = ResolveProcess(pid);
+            var (procName, exePath, fileDescription) = ResolveProcess(pid);
+            var sessionDisplayName = session.DisplayName;
+            string displayName;
+            if (!string.IsNullOrEmpty(sessionDisplayName))
+            {
+                displayName = sessionDisplayName;
+            }
+            else if (!string.IsNullOrEmpty(fileDescription))
+            {
+                displayName = fileDescription;
+            }
+            else
+            {
+                displayName = procName;
+            }
+
             mapped = new AudioSession(
                 SessionInstanceId: session.GetSessionInstanceIdentifier,
                 SessionIdentifier: session.GetSessionIdentifier,
                 ProcessId: pid,
                 ProcessName: procName,
                 ExecutablePath: exePath,
-                DisplayName: string.IsNullOrEmpty(session.DisplayName) ? procName : session.DisplayName,
+                DisplayName: displayName,
                 IconPath: session.IconPath ?? string.Empty,
                 CurrentEndpointId: endpointId,
                 State: session.State switch
@@ -228,13 +289,13 @@ public sealed class AudioSessionService : IAudioSessionService, IDisposable
         }
     }
 
-    private static readonly ConcurrentDictionary<uint, (string Name, string Path)> ProcessInfoCache = new();
+    private static readonly ConcurrentDictionary<uint, (string Name, string Path, string FileDescription)> ProcessInfoCache = new();
 
-    private static (string Name, string Path) ResolveProcess(uint pid)
+    private static (string Name, string Path, string FileDescription) ResolveProcess(uint pid)
     {
         if (pid == 0)
         {
-            return ("System", string.Empty);
+            return ("System", string.Empty, string.Empty);
         }
 
         return ProcessInfoCache.GetOrAdd(pid, static p =>
@@ -253,7 +314,21 @@ public sealed class AudioSessionService : IAudioSessionService, IDisposable
                     : System.IO.Path.GetFileNameWithoutExtension(path);
             }
 
-            return (name, path);
+            var description = string.Empty;
+            if (!string.IsNullOrEmpty(path))
+            {
+                try
+                {
+                    var info = FileVersionInfo.GetVersionInfo(path);
+                    description = info.FileDescription?.Trim() ?? string.Empty;
+                }
+                catch
+                {
+                    // Protected processes, missing version resource, or transient I/O — keep description empty.
+                }
+            }
+
+            return (name, path, description);
         });
     }
 
@@ -297,6 +372,41 @@ public sealed class AudioSessionService : IAudioSessionService, IDisposable
             var manager = device.AudioSessionManager;
             manager.RefreshSessions();
             _notify = new NotificationClient(this);
+
+            // Subscribe to state events for sessions that already exist on this endpoint at
+            // attach time. OnSessionCreated only fires for sessions created AFTER the
+            // subscription, so without this loop a long-running app (e.g. mpv started before
+            // Earmark) never raises OnStateChanged on pause / resume, and downstream consumers
+            // see stale snapshots until something else dirties the cache.
+            try
+            {
+                var sessions = manager.Sessions;
+                for (var i = 0; i < sessions.Count; i++)
+                {
+                    AudioSessionControl? control = null;
+                    try
+                    {
+                        control = sessions[i];
+                        control.RegisterEventClient(this);
+                        _registeredControls.Add(control);
+                        control = null;
+                    }
+                    catch (Exception ex)
+                    {
+                        _owner._logger.LogDebug(ex, "Failed to subscribe to existing session on {Id}", _deviceId);
+                    }
+                    finally
+                    {
+                        // Only dispose if we couldn't take ownership above.
+                        control?.Dispose();
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _owner._logger.LogDebug(ex, "Enumerating existing sessions on {Id} failed", _deviceId);
+            }
+
             manager.OnSessionCreated += OnSessionCreated;
         }
 
