@@ -118,7 +118,11 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         _sessions.SessionsChanged += OnSessionsChangedInPlace;
         _sessions.SessionRemoved += OnSessionRemoved;
         _sessions.SessionAdded += OnSessionAdded;
-        _waveLink.SnapshotChanged += OnAnythingChanged;
+        // Wave Link polls its snapshot every 5s. Even when structurally identical,
+        // SnapshotChanged on any per-poll variance used to fire OnAnythingChanged here and
+        // visibly flash the entire card grid via the rebuild's ItemsRepeater teardown. We
+        // only consume WL data for card sort order (mix targets, virtual channels), which
+        // only changes on connect/disconnect - covered by StateChanged.
         _waveLink.StateChanged += OnAnythingChanged;
 
         QueueRefresh();

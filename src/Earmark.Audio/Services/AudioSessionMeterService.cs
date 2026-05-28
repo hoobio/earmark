@@ -22,8 +22,14 @@ public sealed class AudioSessionMeterService : IAudioSessionMeterService, IDispo
     private readonly IAudioSessionService _sessions;
     private readonly MMDeviceEnumerator _enumerator;
     private readonly Lock _gate = new();
-    private readonly Dictionary<uint, AudioSessionControl> _byPid = new();
+    // List per PID instead of a single control: a process can own multiple non-Expired
+    // sessions at once (Edge with audio in multiple tabs, mpv during recycle, anything
+    // emitting through multiple endpoints). GetPeak reads the MAX peak across all of them
+    // so two tabs playing audio surface as one combined chip-level meter, and a stale
+    // sibling with 0 peak doesn't drown out the live one.
+    private readonly Dictionary<uint, List<AudioSessionControl>> _byPid = new();
     private readonly List<MMDevice> _devices = new();
+    private readonly System.Threading.Timer _safetyRebuild;
     private bool _disposed;
 
     public AudioSessionMeterService(
@@ -43,35 +49,49 @@ public sealed class AudioSessionMeterService : IAudioSessionMeterService, IDispo
         _sessions.SessionsChanged += OnSessionsChanged;
         _endpoints.EndpointsChanged += OnSessionsChanged;
         Rebuild();
+
+        // Safety-net rebuild. SessionsChanged is the primary path; this catches the cases
+        // where NAudio's state events drop on the floor (rare but observed: an
+        // IAudioSessionControl going stale without firing OnStateChanged, leaving the
+        // cached handle reading 0 peak forever even though the underlying session is
+        // emitting audio). 30s is well inside the chip-prune grace window so a stuck
+        // meter never gets the chance to falsely prune.
+        _safetyRebuild = new System.Threading.Timer(_ =>
+        {
+            try { Rebuild(); }
+            catch (Exception ex) { _logger.LogDebug(ex, "Safety meter rebuild failed"); }
+        }, null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
     }
 
     public float? GetPeak(uint processId)
     {
-        AudioSessionControl? control;
+        List<AudioSessionControl>? controls;
         lock (_gate)
         {
-            _byPid.TryGetValue(processId, out control);
+            _byPid.TryGetValue(processId, out controls);
         }
-        if (control is null) return null;
-        try
+        if (controls is null || controls.Count == 0) return null;
+
+        // Take the loudest sibling - if Edge has two tabs playing audio under the same PID,
+        // we want the chip's meter to reflect the louder of the two, not whichever happens
+        // to be first in the list.
+        float? best = null;
+        for (var i = 0; i < controls.Count; i++)
         {
-            return control.AudioMeterInformation.MasterPeakValue;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "GetPeak({Pid}) failed; dropping cached session control", processId);
-            // The session died between rebuilds. Drop the stale control so we don't keep
-            // hitting the same exception until the next reconcile fires.
-            lock (_gate)
+            var control = controls[i];
+            try
             {
-                if (_byPid.TryGetValue(processId, out var stored) && ReferenceEquals(stored, control))
-                {
-                    _byPid.Remove(processId);
-                    try { control.Dispose(); } catch { }
-                }
+                var peak = control.AudioMeterInformation.MasterPeakValue;
+                if (best is null || peak > best) best = peak;
             }
-            return null;
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "GetPeak({Pid}) sibling failed; will reconcile on next rebuild", processId);
+                // Don't tear the list apart from inside a read - that races with concurrent
+                // GetPeak calls. The safety-net rebuild (or next SessionsChanged) refreshes.
+            }
         }
+        return best;
     }
 
     private void OnSessionsChanged(object? sender, EventArgs e) => Rebuild();
@@ -93,7 +113,7 @@ public sealed class AudioSessionMeterService : IAudioSessionMeterService, IDispo
     {
         if (_disposed) return;
 
-        var newByPid = new Dictionary<uint, AudioSessionControl>();
+        var newByPid = new Dictionary<uint, List<AudioSessionControl>>();
         var newDevices = new List<MMDevice>();
 
         try
@@ -112,24 +132,21 @@ public sealed class AudioSessionMeterService : IAudioSessionMeterService, IDispo
                         try
                         {
                             var pid = control.GetProcessID;
-                            // Skip Expired controls outright (their peak meter reads 0 forever
-                            // - this is the trap that caused mpv-style apps to "go silent"
-                            // after a session recycle). Among non-Expired duplicates for the
-                            // same PID, take the first; calling .State on every control to
-                            // rank them invites COM races during rapid state transitions
-                            // (mpv scrubbing) which were dropping chips for unrelated apps.
+                            // Skip Expired controls (peak reads 0 forever and they'd just
+                            // dilute the max). Everything else - Active or Inactive -
+                            // joins the per-PID list. GetPeak returns the max across them.
                             var state = SafeReadState(control);
                             if (state == NAudio.CoreAudioApi.Interfaces.AudioSessionState.AudioSessionStateExpired)
                             {
                                 control.Dispose();
                                 continue;
                             }
-                            if (newByPid.ContainsKey(pid))
+                            if (!newByPid.TryGetValue(pid, out var list))
                             {
-                                control.Dispose();
-                                continue;
+                                list = new List<AudioSessionControl>();
+                                newByPid[pid] = list;
                             }
-                            newByPid[pid] = control;
+                            list.Add(control);
                             keep = true;
                         }
                         catch
@@ -155,16 +172,17 @@ public sealed class AudioSessionMeterService : IAudioSessionMeterService, IDispo
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Per-session meter rebuild failed");
-            foreach (var c in newByPid.Values) { try { c.Dispose(); } catch { } }
+            foreach (var list in newByPid.Values)
+                foreach (var c in list) { try { c.Dispose(); } catch { } }
             foreach (var d in newDevices) { try { d.Dispose(); } catch { } }
             return;
         }
 
-        Dictionary<uint, AudioSessionControl> oldByPid;
+        Dictionary<uint, List<AudioSessionControl>> oldByPid;
         List<MMDevice> oldDevices;
         lock (_gate)
         {
-            oldByPid = new Dictionary<uint, AudioSessionControl>(_byPid);
+            oldByPid = new Dictionary<uint, List<AudioSessionControl>>(_byPid);
             oldDevices = new List<MMDevice>(_devices);
             _byPid.Clear();
             _devices.Clear();
@@ -172,7 +190,8 @@ public sealed class AudioSessionMeterService : IAudioSessionMeterService, IDispo
             _devices.AddRange(newDevices);
         }
 
-        foreach (var c in oldByPid.Values) { try { c.Dispose(); } catch { } }
+        foreach (var list in oldByPid.Values)
+            foreach (var c in list) { try { c.Dispose(); } catch { } }
         foreach (var d in oldDevices) { try { d.Dispose(); } catch { } }
     }
 
@@ -180,12 +199,14 @@ public sealed class AudioSessionMeterService : IAudioSessionMeterService, IDispo
     {
         if (_disposed) return;
         _disposed = true;
+        _safetyRebuild.Dispose();
         _sessions.SessionsChanged -= OnSessionsChanged;
         _endpoints.EndpointsChanged -= OnSessionsChanged;
 
         lock (_gate)
         {
-            foreach (var c in _byPid.Values) { try { c.Dispose(); } catch { } }
+            foreach (var list in _byPid.Values)
+                foreach (var c in list) { try { c.Dispose(); } catch { } }
             _byPid.Clear();
             foreach (var d in _devices) { try { d.Dispose(); } catch { } }
             _devices.Clear();

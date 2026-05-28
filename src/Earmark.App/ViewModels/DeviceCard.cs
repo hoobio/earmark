@@ -90,10 +90,22 @@ public partial class DeviceCard : ObservableObject
 
     public bool HasApps => Apps.Count > 0;
 
+    /// <summary>
+    /// Combined opt-out from <see cref="Controls.WrapByRowLayout"/>'s row-baseline sizing.
+    /// True when the card has any "extra" content other cards in the row might lack: a
+    /// rules-expanded panel, an apps row, OR a chevron strip (multiple rules). Each adds
+    /// real content height that shouldn't force every other card to pad up to match.
+    /// </summary>
+    public bool IsLayoutCustomSized => IsRulesExpanded || HasApps || HasMultipleRules;
+
     /// <summary>Tells the page that <see cref="HasApps"/> may have flipped. Raised from
     /// <c>HomeViewModel</c> after it adds/removes chips so the section visibility binding
     /// re-evaluates without us having to plumb a CollectionChanged subscription through XAML.</summary>
-    public void NotifyAppsChanged() => OnPropertyChanged(nameof(HasApps));
+    public void NotifyAppsChanged()
+    {
+        OnPropertyChanged(nameof(HasApps));
+        OnPropertyChanged(nameof(IsLayoutCustomSized));
+    }
 
     public string DisplayName => Endpoint.FriendlyName;
     public string Subtitle => Endpoint.DeviceDescription;
