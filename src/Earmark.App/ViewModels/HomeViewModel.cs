@@ -286,6 +286,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
                 summary.MuteLocked,
                 summary.RuleMutedTarget,
                 summary.RuleMutedSource,
+                summary.RuleVolumeSource,
                 summary.Rules,
                 hiddenByUser,
                 pinnedByUser,

@@ -37,7 +37,8 @@ internal static class DeviceRulesSummary
         bool VolumeLocked,
         bool MuteLocked,
         bool? RuleMutedTarget,
-        string? RuleMutedSource);
+        string? RuleMutedSource,
+        string? RuleVolumeSource);
 
     public static Result For(
         AudioEndpoint endpoint,
@@ -62,6 +63,7 @@ internal static class DeviceRulesSummary
         var muteLocked = false;
         bool? ruleMutedTarget = null;
         string? ruleMutedSource = null;
+        string? ruleVolumeSource = null;
 
         foreach (var rule in rules)
         {
@@ -82,7 +84,11 @@ internal static class DeviceRulesSummary
                 {
                     if (!action.IsValid || !ActionTargetsEndpoint(action, endpoint)) continue;
 
-                    if (action.Type == ActionType.SetDeviceVolume) volumeLocked = true;
+                    if (action.Type == ActionType.SetDeviceVolume)
+                    {
+                        volumeLocked = true;
+                        ruleVolumeSource ??= name;
+                    }
                     if (action.Type is ActionType.MuteDevice or ActionType.UnmuteDevice)
                     {
                         muteLocked = true;
@@ -102,7 +108,7 @@ internal static class DeviceRulesSummary
             .OrderByDescending(s => s.Status == RuleStatus.Active)
             .ToList();
 
-        return new Result(ordered, volumeLocked, muteLocked, ruleMutedTarget, ruleMutedSource);
+        return new Result(ordered, volumeLocked, muteLocked, ruleMutedTarget, ruleMutedSource, ruleVolumeSource);
     }
 
     private static bool RuleTargetsEndpoint(RoutingRule rule, AudioEndpoint endpoint)

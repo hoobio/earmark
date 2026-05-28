@@ -5,7 +5,8 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:vm="using:Earmark.App.ViewModels"
     xmlns:controls="using:Earmark.App.Controls"
-    Background="Transparent">
+    Background="Transparent"
+    KeyboardAcceleratorPlacementMode="Hidden">
 
     <Page.KeyboardAccelerators>
         <KeyboardAccelerator Key="Z" Modifiers="Control" Invoked="OnUndoInvoked" />
@@ -246,7 +247,8 @@
 
                                             <Border Background="Transparent"
                                                     Tapped="OnLockedSliderTapped"
-                                                    Visibility="{x:Bind IsVolumeLockedByRule, Mode=OneWay}" />
+                                                    ToolTipService.ToolTip="{x:Bind VolumeLockedTooltip, Mode=OneWay}"
+                                                    Visibility="{x:Bind IsVolumeLocked, Mode=OneWay}" />
                                         </Grid>
 
                                         <TextBlock Grid.Column="1"
@@ -261,7 +263,7 @@
                                                   Glyph="&#xE72E;" FontSize="12"
                                                   Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                                                   VerticalAlignment="Center"
-                                                  ToolTipService.ToolTip="Volume is locked by a rule"
+                                                  ToolTipService.ToolTip="{x:Bind VolumeLockedTooltip, Mode=OneWay}"
                                                   Visibility="{x:Bind IsVolumeLockedByRule, Mode=OneWay}" />
                                     </Grid>
 

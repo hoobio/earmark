@@ -36,6 +36,7 @@ public partial class DeviceCard : ObservableObject
         bool isMuteLockedByRule,
         bool? ruleMutedTarget,
         string? ruleMutedSource,
+        string? ruleVolumeSource,
         IReadOnlyList<RuleSummary> rules,
         bool isHiddenByUser,
         bool isPinnedByUser,
@@ -55,6 +56,7 @@ public partial class DeviceCard : ObservableObject
         IsMuteLockedByRule = isMuteLockedByRule;
         RuleMutedTarget = ruleMutedTarget;
         RuleMutedSource = ruleMutedSource;
+        RuleVolumeSource = ruleVolumeSource;
         Rules = rules;
 
         _showHidden = showHidden;
@@ -91,6 +93,11 @@ public partial class DeviceCard : ObservableObject
     public bool IsVolumeEditable =>
         !IsVolumeLockedByRule && !(IsMuteLockedByRule && RuleMutedTarget == true);
 
+    /// <summary>Inverse of <see cref="IsVolumeEditable"/>: true when something (volume rule or
+    /// active mute-to-muted rule) is keeping the user from changing the level. Drives the
+    /// transparent overlay that captures clicks and shows the lock tooltip.</summary>
+    public bool IsVolumeLocked => !IsVolumeEditable;
+
     /// <summary>If a rule is currently pinning this device's mute state, this is the target
     /// value (true = forced muted, false = forced unmuted). Null when no rule applies.</summary>
     public bool? RuleMutedTarget { get; private set; }
@@ -98,6 +105,10 @@ public partial class DeviceCard : ObservableObject
     /// <summary>The display name of the rule currently pinning the mute state, used by the
     /// reconciliation toast to tell the user which rule overrode their change.</summary>
     public string? RuleMutedSource { get; private set; }
+
+    /// <summary>The display name of the rule currently pinning the volume level, used for the
+    /// locked-slider tooltip so the user knows which rule is in charge.</summary>
+    public string? RuleVolumeSource { get; private set; }
 
     // ---- Persistence-bound state ----
 
@@ -296,11 +307,34 @@ public partial class DeviceCard : ObservableObject
         {
             if (IsMuteLockedByRule)
             {
-                return IsMuted ? "Mute locked by rule" : "Unmute locked by rule";
+                var verb = IsMuted ? "Mute" : "Unmute";
+                return string.IsNullOrEmpty(RuleMutedSource)
+                    ? $"{verb} locked by rule"
+                    : $"{verb} locked by rule '{RuleMutedSource}'";
             }
             return IsMuted
                 ? (IsRender ? "Unmute output" : "Unmute input")
                 : (IsRender ? "Mute output" : "Mute input");
+        }
+    }
+
+    public string VolumeLockedTooltip
+    {
+        get
+        {
+            if (IsVolumeLockedByRule)
+            {
+                return string.IsNullOrEmpty(RuleVolumeSource)
+                    ? "Volume locked by rule"
+                    : $"Volume locked by rule '{RuleVolumeSource}'";
+            }
+            if (IsMuteLockedByRule && RuleMutedTarget == true)
+            {
+                return string.IsNullOrEmpty(RuleMutedSource)
+                    ? "Volume disabled while a mute rule silences this device"
+                    : $"Volume disabled while mute rule '{RuleMutedSource}' silences this device";
+            }
+            return "Volume locked by rule";
         }
     }
 
@@ -475,14 +509,20 @@ public partial class DeviceCard : ObservableObject
         OnPropertyChanged(nameof(VolumeAreaOpacity));
     }
 
-    partial void OnIsVolumeLockedByRuleChanged(bool value) =>
+    partial void OnIsVolumeLockedByRuleChanged(bool value)
+    {
         OnPropertyChanged(nameof(IsVolumeEditable));
+        OnPropertyChanged(nameof(IsVolumeLocked));
+        OnPropertyChanged(nameof(VolumeLockedTooltip));
+    }
 
     partial void OnIsMuteLockedByRuleChanged(bool value)
     {
         OnPropertyChanged(nameof(IsMuteToggleEnabled));
         OnPropertyChanged(nameof(MuteTooltip));
         OnPropertyChanged(nameof(IsVolumeEditable));
+        OnPropertyChanged(nameof(IsVolumeLocked));
+        OnPropertyChanged(nameof(VolumeLockedTooltip));
     }
 
     partial void OnIsRulesExpandedChanged(bool value)
