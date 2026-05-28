@@ -142,6 +142,20 @@ public sealed class AudioEndpointService : IAudioEndpointService, IMMNotificatio
     public float? GetPeakLevel(string id)
     {
         ArgumentException.ThrowIfNullOrEmpty(id);
+
+        // Reuse the long-lived MMDevice held by the mute subscription so we don't pay a fresh
+        // COM activation per poll (the Devices page calls this at ~20Hz per visible card).
+        MuteSubscription? sub;
+        lock (_muteSubGate)
+        {
+            _muteSubs.TryGetValue(id, out sub);
+        }
+        if (sub is not null)
+        {
+            var cached = sub.TryReadPeakLevel();
+            if (cached.HasValue) return cached;
+        }
+
         try
         {
             using var device = _enumerator.GetDevice(id);
@@ -454,6 +468,21 @@ public sealed class AudioEndpointService : IAudioEndpointService, IMMNotificatio
             catch (Exception ex)
             {
                 _logger.LogDebug(ex, "MuteSubscription callback threw for {Id}", _deviceId);
+            }
+        }
+
+        /// <summary>Reads the device peak from the cached <see cref="MMDevice"/>; null if the
+        /// underlying meter is unavailable or the subscription has been disposed.</summary>
+        public float? TryReadPeakLevel()
+        {
+            if (_disposed) return null;
+            try
+            {
+                return _device.AudioMeterInformation.MasterPeakValue;
+            }
+            catch
+            {
+                return null;
             }
         }
 
