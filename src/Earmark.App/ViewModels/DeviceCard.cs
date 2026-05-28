@@ -293,13 +293,26 @@ public partial class DeviceCard : ObservableObject
 
     // ---- Icon visuals ----
 
-    public string Glyph => (IsRender, IsMuted) switch
+    public string Glyph
     {
-        (true, false) => new string((char)0xE15D, 1),   // Volume / speaker
-        (true, true) => new string((char)0xE74F, 1),    // Volume Mute
-        (false, false) => new string((char)0xE720, 1),  // Microphone
-        (false, true) => new string((char)0xF781, 1),   // MicOff
-    };
+        get
+        {
+            // Themed glyphs (Game / Voice Chat / Music / ...) override the generic speaker
+            // when the endpoint name matches a default Wave Link mix label. They stay
+            // constant across mute state because MutedBrushConverter already paints the
+            // icon red when muted - swapping the glyph too would double up the signal.
+            var themed = WaveLinkGlyphMapper.TryResolve(DisplayName);
+            if (themed is not null) return themed;
+
+            return (IsRender, IsMuted) switch
+            {
+                (true, false) => new string((char)0xE15D, 1),   // Volume / speaker
+                (true, true) => new string((char)0xE74F, 1),    // Volume Mute
+                (false, false) => new string((char)0xE720, 1),  // Microphone
+                (false, true) => new string((char)0xF781, 1),   // MicOff
+            };
+        }
+    }
 
     public string MuteTooltip
     {
