@@ -127,8 +127,14 @@
                                                        TextWrapping="NoWrap"
                                                        TextTrimming="CharacterEllipsis"
                                                        Visibility="{x:Bind HasDeviceIdSubtext}" />
-                                            <StackPanel Orientation="Horizontal" Spacing="6">
-                                                <Border Padding="0,2"
+                                            <!-- Negative left margin compensates for the ChipBorderStyle's 8px
+                                                 horizontal padding so pill text starts on the same x as the
+                                                 subtitle above it. Top margin gives the row a little breathing
+                                                 space below the subtitle so the three lines don't read crammed. -->
+                                            <StackPanel Orientation="Horizontal"
+                                                        Spacing="6"
+                                                        Margin="-8,4,0,0">
+                                                <Border Padding="8,2"
                                                         VerticalAlignment="Center"
                                                         Visibility="{x:Bind ShowFlowLabel}">
                                                     <TextBlock Text="{x:Bind FlowLabel}"
@@ -324,17 +330,20 @@
                                             </ItemsControl>
                                         </ScrollViewer>
 
-                                        <!-- Chevron sits in the card's own bottom padding via a negative
-                                             margin and minimal height; it stays clickable but adds almost
-                                             no visual footprint. Tag carries the DeviceCard since ItemsRepeater
-                                             doesn't propagate DataContext to template children. Hover/press
-                                             background is suppressed to keep the chevron a flat affordance. -->
+                                        <!-- Chevron sits in the card's own bottom padding. Height + margins
+                                             net out the parent StackPanel's 4px spacing so the chevron adds
+                                             zero layout height to the card; otherwise sibling cards on the
+                                             same row would shrink by a few px when this one expands (the row
+                                             baseline drops because the expanded card is excluded from it).
+                                             Tag carries the DeviceCard since ItemsRepeater doesn't propagate
+                                             DataContext to template children. Hover/press background is
+                                             suppressed to keep the chevron a flat affordance. -->
                                         <Button HorizontalAlignment="Stretch"
                                                 Background="Transparent"
                                                 BorderBrush="Transparent"
                                                 Padding="0"
                                                 MinHeight="0"
-                                                Height="18"
+                                                Height="12"
                                                 Margin="0,-4,0,-12"
                                                 Tag="{x:Bind}"
                                                 Click="OnRulesExpandToggle"
