@@ -22,8 +22,8 @@ env:
   BOM_FILE: sbom.cdx.json
   # NOTE: GitHub Actions does not allow expressions in `uses:` refs, so the
   # pipeline-tools pin is repeated in each `uses:` line below. Bump in lockstep.
-  # Current pin: hoobio/pipeline-tools @ v1.5.0 (adds Backstage hierarchy bootstrap
-  # and channel routing for Dependency-Track SBOM uploads).
+  # Current pin: hoobio/pipeline-tools @ v2.2.1 (v2 split the Dependency-Track
+  # channel input into channel + sub-channel; see the SBOM job below).
 
 jobs:
   release-please:
@@ -286,9 +286,13 @@ jobs:
         with:
           dotnet-version: ${{ env.DOTNET_SDK_VERSION }}
 
-      # Channel routing for the Backstage hierarchy in Dependency-Track:
-      #   release event              -> channel=release,    mark-latest=true,  no prune
-      #   push / dispatch / PR       -> channel=ci/<branch>,mark-latest=false, prune
+      # Channel routing for the Backstage hierarchy in Dependency-Track. v2 of
+      # pipeline-tools takes channel + sub-channel as two separate inputs (the
+      # old single `ci/<branch>` string is a v1 shape that the bootstrap now
+      # treats as a legacy and migrates out from under us).
+      #   release event           -> channel=release,        sub-channel='',         mark-latest=true,  no prune
+      #   push to default branch  -> channel=main,           sub-channel='',         mark-latest=false, prune
+      #   push to feature / PR    -> channel=ci,             sub-channel=<branch>,   mark-latest=false, prune
       - name: Resolve DT channel
         id: dt
         shell: pwsh
@@ -297,9 +301,11 @@ jobs:
           REF_NAME: ${{ github.ref_name }}
           HEAD_REF: ${{ github.head_ref }}
           SHA: ${{ github.sha }}
+          DEFAULT_BRANCH: main
         run: |
           if ($env:EVENT_NAME -eq 'release') {
             $channel = 'release'
+            $subChannel = ''
             $projectVersion = $env:REF_NAME
             $markLatest = 'true'
             $prune = 'false'
@@ -307,20 +313,36 @@ jobs:
           else {
             $branchSource = if ($env:EVENT_NAME -eq 'pull_request') { $env:HEAD_REF } else { $env:REF_NAME }
             $sanitized = ($branchSource -replace '[^A-Za-z0-9._/-]', '-')
-            $channel = "ci/$sanitized"
+            if ($sanitized -eq $env:DEFAULT_BRANCH) {
+              # Default branch sits at top-level alongside release, not nested under ci.
+              $channel = $sanitized
+              $subChannel = ''
+            }
+            else {
+              $channel = 'ci'
+              $subChannel = $sanitized
+            }
             $projectVersion = $env:SHA
             $markLatest = 'false'
             $prune = 'true'
           }
 
-          "channel=$channel"                | Out-File -Append $env:GITHUB_OUTPUT
-          "project_version=$projectVersion" | Out-File -Append $env:GITHUB_OUTPUT
-          "mark_latest=$markLatest"         | Out-File -Append $env:GITHUB_OUTPUT
-          "prune=$prune"                    | Out-File -Append $env:GITHUB_OUTPUT
-          Write-Host "Channel:        $channel"
-          Write-Host "ProjectVersion: $projectVersion"
-          Write-Host "MarkLatest:     $markLatest"
-          Write-Host "Prune:          $prune"
+          # Effective parent name used by the upload step. Used for the tag value
+          # so DT filters match the new v2 hierarchy.
+          $effectiveChannel = if ($subChannel) { $subChannel } else { $channel }
+
+          "channel=$channel"                  | Out-File -Append $env:GITHUB_OUTPUT
+          "sub_channel=$subChannel"           | Out-File -Append $env:GITHUB_OUTPUT
+          "effective_channel=$effectiveChannel" | Out-File -Append $env:GITHUB_OUTPUT
+          "project_version=$projectVersion"   | Out-File -Append $env:GITHUB_OUTPUT
+          "mark_latest=$markLatest"           | Out-File -Append $env:GITHUB_OUTPUT
+          "prune=$prune"                      | Out-File -Append $env:GITHUB_OUTPUT
+          Write-Host "Channel:           $channel"
+          Write-Host "SubChannel:        $subChannel"
+          Write-Host "EffectiveChannel:  $effectiveChannel"
+          Write-Host "ProjectVersion:    $projectVersion"
+          Write-Host "MarkLatest:        $markLatest"
+          Write-Host "Prune:             $prune"
 
       - name: Generate CycloneDX SBOM
         uses: hoobio/pipeline-tools/pipeline/github/step/cyclonedx-sbom-dotnet@v2.2.1
@@ -347,8 +369,10 @@ jobs:
           system: ${{ env.DT_SYSTEM }}
           component: ${{ env.DT_COMPONENT }}
           channel: ${{ steps.dt.outputs.channel }}
+          sub-channel: ${{ steps.dt.outputs.sub_channel }}
+          default-branch: main
           project-version: ${{ steps.dt.outputs.project_version }}
-          project-tags: channel=${{ steps.dt.outputs.channel }},repo=${{ github.repository }},commit=${{ github.sha }},run_url=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          project-tags: channel=${{ steps.dt.outputs.effective_channel }},repo=${{ github.repository }},commit=${{ github.sha }},run_url=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           mark-latest: ${{ steps.dt.outputs.mark_latest }}
           prune-stale-children: ${{ steps.dt.outputs.prune }}
           keep: ${{ github.event_name == 'workflow_dispatch' && '1' || '10' }}
