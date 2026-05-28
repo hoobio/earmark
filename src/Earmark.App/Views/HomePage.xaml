@@ -95,6 +95,13 @@
                                                 IsEnabled="{x:Bind IsMuteToggleEnabled, Mode=OneWay}"
                                                 Click="OnMuteToggleClicked"
                                                 ToolTipService.ToolTip="{x:Bind MuteTooltip, Mode=OneWay}">
+                                            <!-- Disabled-state theme brushes paint over the Background binding when
+                                                 IsEnabled is false (i.e. rule-locked). Override them so a locked
+                                                 icon reads as "not interactive" rather than a dimmed chip. -->
+                                            <Button.Resources>
+                                                <SolidColorBrush x:Key="ButtonBackgroundDisabled" Color="Transparent" />
+                                                <SolidColorBrush x:Key="ButtonBorderBrushDisabled" Color="Transparent" />
+                                            </Button.Resources>
                                             <FontIcon Glyph="{x:Bind Glyph, Mode=OneWay}"
                                                       FontSize="20"
                                                       Foreground="{x:Bind IsMuted, Mode=OneWay, Converter={StaticResource MutedBrushConverter}}" />
