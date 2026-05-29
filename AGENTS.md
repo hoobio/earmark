@@ -201,23 +201,32 @@ Update
 
 ### Multi-change PRs (PR description format)
 
-This repo uses **squash merges**, so the PR description body becomes the commit message that release-please parses. To produce multiple changelog entries from a single PR, append additional conventional-commit footers at the **bottom** of the PR description body:
+This repo uses **squash merges**, so the PR description body becomes the commit message that release-please parses. To produce multiple changelog entries from a single PR, append additional conventional-commit footers at the **bottom** of the PR description body, **each separated by a blank line**:
 
 ```
 feat: add per-app input routing
 
 Optional body text explaining the PR.
 
+---
+
+<!-- release-please footers: one bare conventional-commit line per
+extra change, separated by blank lines. -->
+
 fix(audio): release COM factory on shutdown
-BREAKING-CHANGE: rename ApplicationOutput field "Priority" to "Order"
+
 test: cover the new RuleEvaluator shadow logic
+
+BREAKING-CHANGE: rename ApplicationOutput field "Priority" to "Order"
 ```
 
-- Each footer entry must follow the same `type(scope): description` format
-- `BREAKING-CHANGE:` (or `BREAKING CHANGE:`) triggers a MAJOR bump
-- Additional entries must appear **after** any free-form body text, not between paragraphs
-- Only `feat`, `fix`, `perf`, and `revert` produce changelog entries; `ci`, `test`, `docs`, `chore`, `build`, `style`, `refactor` do not
-- Each entry produces its own changelog line
+- **Blank line between every footer is required.** release-please's parser groups consecutive non-blank lines into a single paragraph and only treats the first conventional-commit line in each paragraph as an entry. Stacked footers without blank lines produce exactly one extra changelog line (the first), and the rest are silently dropped (this is what bit PR #32).
+- Soft-wrapping the description text *within* a single footer is fine (e.g. GitHub auto-wraps at ~80 chars when you save the PR description). The parser walks the whole paragraph for the conventional-commit prefix - just don't introduce a blank line mid-footer.
+- Each footer must follow the same `type(scope): description` format.
+- `BREAKING-CHANGE:` (or `BREAKING CHANGE:`) triggers a MAJOR bump. Place it as its own blank-line-separated footer.
+- Additional entries must appear **after** any free-form body text, not between paragraphs.
+- Every type produces a changelog entry (`release-please-config.json` sets `hidden: false` for all sections). Only `feat`, `fix`, `perf`, `revert`, and any footer with a breaking-change marker trigger a version bump; `chore` / `docs` / `style` / `refactor` / `test` / `build` / `ci` add a line under their section without bumping the version.
+- Each footer produces its own changelog line.
 
 ### Repo CI plumbing
 
