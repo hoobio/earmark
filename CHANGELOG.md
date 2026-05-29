@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.1.8](https://github.com/hoobio/earmark/compare/v0.1.7...v0.1.8) (2026-05-29)
+
+
+### Features
+
+* devices page peak meters, drag-reorder, and silent-app chips ([#35](https://github.com/hoobio/earmark/issues/35)) ([bc68d1f](https://github.com/hoobio/earmark/commit/bc68d1f935e59b9e660f6b615b9d34feb782c49d))
+* explicit-save rule editor with an else branch and duplicate-rule ([bc68d1f](https://github.com/hoobio/earmark/commit/bc68d1f935e59b9e660f6b615b9d34feb782c49d))
+
+
+### Bug Fixes
+
+* keep rule-locked volume sliders usable inside a card and unclipped ([bc68d1f](https://github.com/hoobio/earmark/commit/bc68d1f935e59b9e660f6b615b9d34feb782c49d))
+
+
+### Code Refactoring
+
+* centralise device volume/mute resolution in DeviceRuleResolver ([bc68d1f](https://github.com/hoobio/earmark/commit/bc68d1f935e59b9e660f6b615b9d34feb782c49d))
+
 ## [0.1.7](https://github.com/hoobio/earmark/compare/v0.1.6...v0.1.7) (2026-05-29)
 
 
