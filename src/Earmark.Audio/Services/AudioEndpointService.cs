@@ -60,6 +60,9 @@ public sealed class AudioEndpointService : IAudioEndpointService, IMMNotificatio
     // the 20Hz per-card poll doesn't do COM on the dispatcher. Treated as immutable once
     // published (sampler swaps in a fully-built dict; readers only TryGetValue).
     private volatile Dictionary<string, float> _peakSnapshot = new(StringComparer.OrdinalIgnoreCase);
+    // Per-endpoint channel-grouped peaks (L / R / Centre+LFE), sampled in the same pass off the
+    // master read. Same publish-immutable contract as _peakSnapshot.
+    private volatile Dictionary<string, EndpointChannelPeaks> _channelPeakSnapshot = new(StringComparer.OrdinalIgnoreCase);
 
     public AudioEndpointService(ILogger<AudioEndpointService> logger)
     {
@@ -268,6 +271,15 @@ public sealed class AudioEndpointService : IAudioEndpointService, IMMNotificatio
         return _peakSnapshot.TryGetValue(id, out var sampled) ? sampled : null;
     }
 
+    public EndpointChannelPeaks? GetChannelPeaks(string id)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(id);
+
+        _lastPeakQueryTicks = Environment.TickCount64;
+        // Cache-only, same contract as GetPeakLevel: the background sampler owns all the COM.
+        return _channelPeakSnapshot.TryGetValue(id, out var sampled) ? sampled : null;
+    }
+
     // Reads the cached MMDevice peak for every active mute subscription on a background thread
     // and publishes an immutable snapshot that GetPeakLevel reads lock-free. A re-entrancy
     // guard drops overlapping passes.
@@ -285,15 +297,21 @@ public sealed class AudioEndpointService : IAudioEndpointService, IMMNotificatio
             }
 
             var fresh = new Dictionary<string, float>(entries.Length, StringComparer.OrdinalIgnoreCase);
+            var freshChannels = new Dictionary<string, EndpointChannelPeaks>(entries.Length, StringComparer.OrdinalIgnoreCase);
             foreach (var entry in entries)
             {
-                var peak = entry.Value.TryReadPeakLevel();
-                if (peak.HasValue)
+                var channels = entry.Value.TryReadChannelPeaks();
+                if (channels.HasValue)
                 {
-                    fresh[entry.Key] = peak.Value;
+                    var c = channels.Value;
+                    freshChannels[entry.Key] = c;
+                    // Master peak == max across channels (== AudioMeterInformation.MasterPeakValue),
+                    // derived here so the per-channel read is the only COM call this pass.
+                    fresh[entry.Key] = MathF.Max(c.Left, MathF.Max(c.Right, c.CentreLfe));
                 }
             }
             _peakSnapshot = fresh;
+            _channelPeakSnapshot = freshChannels;
         }
         finally
         {
@@ -827,19 +845,61 @@ public sealed class AudioEndpointService : IAudioEndpointService, IMMNotificatio
         /// call. Returns null if the subscription has been disposed.</summary>
         public MMDevice? GetDevice() => _disposed ? null : _device;
 
-        /// <summary>Reads the device peak from the cached <see cref="MMDevice"/>; null if the
-        /// underlying meter is unavailable or the subscription has been disposed.</summary>
-        public float? TryReadPeakLevel()
+        /// <summary>
+        /// Reads per-channel peaks from the cached <see cref="MMDevice"/> and folds them into
+        /// Left / Right / Centre+LFE bands by canonical WASAPI channel order. Null if the meter
+        /// is unavailable or the subscription has been disposed.
+        /// </summary>
+        public EndpointChannelPeaks? TryReadChannelPeaks()
         {
             if (_disposed) return null;
             try
             {
-                return _device.AudioMeterInformation.MasterPeakValue;
+                var channels = _device.AudioMeterInformation.PeakValues;
+                var count = channels.Count;
+                if (count <= 0) return null;
+
+                float left = 0f, right = 0f, centreLfe = 0f;
+                for (var i = 0; i < count; i++)
+                {
+                    var value = channels[i];
+                    switch (Classify(i, count))
+                    {
+                        case ChannelGroup.Left: if (value > left) left = value; break;
+                        case ChannelGroup.Right: if (value > right) right = value; break;
+                        default: if (value > centreLfe) centreLfe = value; break;
+                    }
+                }
+                return new EndpointChannelPeaks(left, right, centreLfe, count);
             }
             catch
             {
                 return null;
             }
+        }
+
+        private enum ChannelGroup { Left, Right, CentreLfe }
+
+        // Windows shared-mode mix formats present channels in canonical SPEAKER_* (ascending
+        // channel-mask bit) order, so the index alone is enough to fold into L / R / Centre+LFE
+        // without reading the (private-in-NAudio) channel mask:
+        //   mono/stereo: 0 -> L, 1 -> R
+        //   surround:    0 -> L, 1 -> R, 2|3 -> Centre+LFE (FC, LFE), then even -> L, odd -> R
+        //                (BL/BR/SL/SR/FLC/FRC). 4ch quad is the only common mis-fold (treated as
+        //                3.1), which is vanishingly rare on Windows consumer endpoints.
+        private static ChannelGroup Classify(int index, int count)
+        {
+            if (count <= 2)
+            {
+                return index == 1 ? ChannelGroup.Right : ChannelGroup.Left;
+            }
+            return index switch
+            {
+                0 => ChannelGroup.Left,
+                1 => ChannelGroup.Right,
+                2 or 3 => ChannelGroup.CentreLfe,
+                _ => (index % 2 == 0) ? ChannelGroup.Left : ChannelGroup.Right,
+            };
         }
 
         public void Dispose()

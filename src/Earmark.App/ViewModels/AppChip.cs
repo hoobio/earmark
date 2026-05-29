@@ -169,28 +169,12 @@ public partial class AppChip : ObservableObject
         }
     }
 
-    // Log-scaled bar position so the chip meter reads in dB the same way the device peak
-    // meter does. Linear amplitude pinned to a usable [-60, 0] dBFS window then mapped
-    // [0..1] for the bar width.
-    private const float PeakMinDb = -60f;
-
-    private static double DbBar(float amplitude)
-    {
-        if (amplitude <= 0f) return 0;
-        var db = 20.0 * Math.Log10(amplitude);
-        if (db <= PeakMinDb) return 0;
-        return Math.Clamp((db - PeakMinDb) / -PeakMinDb, 0.0, 1.0);
-    }
-
-    public GridLength PeakBarLeftStars =>
-        new GridLength(Math.Max(DbBar(PeakLevel), 0.0001), GridUnitType.Star);
-
-    public GridLength PeakBarRightStars =>
-        new GridLength(Math.Max(1.0 - DbBar(PeakLevel), 0.0001), GridUnitType.Star);
+    /// <summary>Peak as a double for the chip's <see cref="Controls.ChannelPeakMeter"/> underbar:
+    /// a single colour-banded bar that reuses the device meter's dB / band maths.</summary>
+    public double PeakLevelScalar => PeakLevel;
 
     partial void OnPeakLevelChanged(float value)
     {
-        OnPropertyChanged(nameof(PeakBarLeftStars));
-        OnPropertyChanged(nameof(PeakBarRightStars));
+        OnPropertyChanged(nameof(PeakLevelScalar));
     }
 }

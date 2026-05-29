@@ -34,7 +34,12 @@ public partial class DeviceCard : ObservableObject
     private readonly Action<DeviceCard, VisibilityState> _onVisibilityToggled;
     private bool _suppressVolumeWrite;
     private bool _showHidden;
-    private DateTime _peakHoldExpiry = DateTime.MinValue;
+    private float _leftHold;
+    private float _rightHold;
+    private float _centreLfeHold;
+    private DateTime _leftHoldExpiry = DateTime.MinValue;
+    private DateTime _rightHoldExpiry = DateTime.MinValue;
+    private DateTime _centreLfeHoldExpiry = DateTime.MinValue;
     private DateTime _lastUserVolumeChange = DateTime.MinValue;
 
     /// <summary>Snapshot of the two user-visibility flags. Used to capture pre-toggle state
@@ -288,79 +293,37 @@ public partial class DeviceCard : ObservableObject
         }
     }
 
-    // ---- Peak meter (sectioned + hold) ----
+    // ---- Peak meter (per-channel, rendered by ChannelPeakMeter) ----
     //
-    // The meter is log-scaled so it matches how pro-audio VU meters render dB. Linear
-    // amplitude is converted to dBFS (-60 to 0 dB display range), then mapped to bar
-    // position [0..1]. Bar position is then bounded on the right by the volume thumb
-    // (final width = barPosition(peak) * volume).
-    //
-    // Colour thresholds are fixed dBFS values; the log-scale maps them to bar positions.
-    // Each boundary is wrapped in a narrow ±BlendHalf gradient band so the transition is
-    // smooth but the dB-accurate centre stays at the threshold itself:
-    //   -inf  ... -12 dBFS  -> bar 0   ... 0.78  : green
-    //   ±BlendHalf around -12 dBFS                : green->yellow blend
-    //   -12   ... -6  dBFS  -> bar 0.82 ... 0.88 : amber (speech / vocal sweet spot)
-    //   ±BlendHalf around -6 dBFS                 : yellow->red blend
-    //   -6    ... 0   dBFS  -> bar 0.92 ... 1.00 : red (approaching clip)
-    private const float MinDb = -60f;
-    private const double YellowCentre = 0.80;  // = (-12 - MinDb) / -MinDb
-    private const double RedCentre = 0.90;     // = (-6  - MinDb) / -MinDb
-    private const double BlendHalf = 0.02;     // ±2% on either side of each threshold
+    // The endpoint's channels are folded into up to three bands (Left / Right / Centre+LFE) by
+    // the audio layer. The card carries each band's live level plus a latched peak-hold, and the
+    // raw channel count (which decides how many bars render). All dB / colour-band maths lives in
+    // MeterBar + ChannelPeakMeter so the card just forwards numbers.
 
-    private const double GreenEnd = YellowCentre - BlendHalf;       // 0.78
-    private const double YellowStart = YellowCentre + BlendHalf;    // 0.82
-    private const double YellowEnd = RedCentre - BlendHalf;         // 0.88
-    private const double RedStart = RedCentre + BlendHalf;          // 0.92
-
-    /// <summary>Current audio peak level (0..1 linear amplitude), pushed by <see cref="HomeViewModel"/>.</summary>
     [ObservableProperty]
-    public partial float PeakLevel { get; set; }
+    public partial double LeftLevel { get; set; }
 
-    /// <summary>Latched peak hold (0..1 linear amplitude): rises instantly with new highs, holds, then decays.</summary>
     [ObservableProperty]
-    public partial float PeakHoldLevel { get; set; }
+    public partial double RightLevel { get; set; }
 
-    public double PeakLevelPercent => Math.Clamp(PeakLevel * 100.0, 0.0, 100.0);
+    [ObservableProperty]
+    public partial double CentreLfeLevel { get; set; }
 
-    private static GridLength Star(double value) =>
-        new GridLength(Math.Max(value, 0.0001), GridUnitType.Star);
+    [ObservableProperty]
+    public partial double LeftHold { get; set; }
 
-    /// <summary>Linear amplitude (0..1) -> bar position (0..1), log-scaled across [MinDb, 0] dBFS.</summary>
-    private static double DbBar(float amplitude)
-    {
-        if (amplitude <= 0f) return 0;
-        var db = 20.0 * Math.Log10(amplitude);
-        if (db <= MinDb) return 0;
-        return Math.Clamp((db - MinDb) / -MinDb, 0.0, 1.0);
-    }
+    [ObservableProperty]
+    public partial double RightHold { get; set; }
 
-    public GridLength GreenStars =>
-        Star(Math.Min(DbBar(PeakLevel), GreenEnd) * Volume);
+    [ObservableProperty]
+    public partial double CentreLfeHold { get; set; }
 
-    public GridLength GreenYellowBlendStars =>
-        Star(Math.Max(0.0, Math.Min(DbBar(PeakLevel), YellowStart) - GreenEnd) * Volume);
+    /// <summary>Raw endpoint channel count: 1 -> one bar, 2 -> L/R, 3+ -> L/R/Centre+LFE.</summary>
+    [ObservableProperty]
+    public partial int ChannelCount { get; set; } = 2;
 
-    public GridLength YellowStars =>
-        Star(Math.Max(0.0, Math.Min(DbBar(PeakLevel), YellowEnd) - YellowStart) * Volume);
-
-    public GridLength YellowRedBlendStars =>
-        Star(Math.Max(0.0, Math.Min(DbBar(PeakLevel), RedStart) - YellowEnd) * Volume);
-
-    public GridLength RedStars =>
-        Star(Math.Max(0.0, DbBar(PeakLevel) - RedStart) * Volume);
-
-    public GridLength MeterRemainderStars =>
-        Star(1.0 - Math.Clamp(DbBar(PeakLevel) * Volume, 0.0, 1.0));
-
-    public GridLength PeakHoldLeftStars =>
-        Star(Math.Clamp(DbBar(PeakHoldLevel) * Volume, 0.0, 1.0));
-
-    public GridLength PeakHoldRightStars =>
-        Star(1.0 - Math.Clamp(DbBar(PeakHoldLevel) * Volume, 0.0, 1.0));
-
-    public Visibility PeakHoldVisibility =>
-        PeakHoldLevel > 0.001f ? Visibility.Visible : Visibility.Collapsed;
+    /// <summary>Volume as a double for the meter's bar-fill scale (the thumb bounds each bar).</summary>
+    public double MeterVolume => Volume;
 
     // ---- Icon visuals ----
 
@@ -616,29 +579,36 @@ public partial class DeviceCard : ObservableObject
         finally { _suppressVolumeWrite = false; }
     }
 
-    /// <summary>Pushes a new peak sample. <see cref="PeakHoldLevel"/> latches at new highs,
+    /// <summary>Pushes a fresh per-channel peak sample. Each band's hold latches at new highs,
     /// holds for <see cref="PeakHoldSeconds"/>, then decays linearly toward the current peak.</summary>
-    public void UpdatePeak(float peak, TimeSpan tickInterval)
+    public void UpdatePeak(EndpointChannelPeaks peaks, TimeSpan tickInterval)
     {
-        PeakLevel = peak;
-
+        ChannelCount = peaks.ChannelCount;
         var now = DateTime.UtcNow;
-        if (peak >= PeakHoldLevel)
-        {
-            PeakHoldLevel = peak;
-            _peakHoldExpiry = now + TimeSpan.FromSeconds(PeakHoldSeconds);
-            return;
-        }
 
-        if (now > _peakHoldExpiry)
+        LeftLevel = peaks.Left;
+        RightLevel = peaks.Right;
+        CentreLfeLevel = peaks.CentreLfe;
+
+        LeftHold = UpdateHold(peaks.Left, ref _leftHold, ref _leftHoldExpiry, tickInterval, now);
+        RightHold = UpdateHold(peaks.Right, ref _rightHold, ref _rightHoldExpiry, tickInterval, now);
+        CentreLfeHold = UpdateHold(peaks.CentreLfe, ref _centreLfeHold, ref _centreLfeHoldExpiry, tickInterval, now);
+    }
+
+    private static float UpdateHold(float peak, ref float hold, ref DateTime expiry, TimeSpan tick, DateTime now)
+    {
+        if (peak >= hold)
         {
-            var step = PeakHoldDecayPerSecond * (float)tickInterval.TotalSeconds;
-            var next = MathF.Max(peak, PeakHoldLevel - step);
-            if (Math.Abs(next - PeakHoldLevel) > 0.0005f)
-            {
-                PeakHoldLevel = next;
-            }
+            hold = peak;
+            expiry = now + TimeSpan.FromSeconds(PeakHoldSeconds);
+            return hold;
         }
+        if (now > expiry)
+        {
+            var step = PeakHoldDecayPerSecond * (float)tick.TotalSeconds;
+            hold = MathF.Max(peak, hold - step);
+        }
+        return hold;
     }
 
     /// <summary>Plays a brief test tone through this device. No-op on capture devices.</summary>
@@ -654,7 +624,7 @@ public partial class DeviceCard : ObservableObject
     {
         OnPropertyChanged(nameof(VolumePercent));
         OnPropertyChanged(nameof(VolumePercentText));
-        NotifyMeterChanged();
+        OnPropertyChanged(nameof(MeterVolume));
         if (_suppressVolumeWrite || IsVolumeLockedByRule) return;
 
         // User-initiated change: stamp it so SyncVolumeFromDevice's grace window leaves the
@@ -676,19 +646,6 @@ public partial class DeviceCard : ObservableObject
         }
 
         _ = _writer.SetVolumeAsync(Endpoint, value);
-    }
-
-    private void NotifyMeterChanged()
-    {
-        OnPropertyChanged(nameof(GreenStars));
-        OnPropertyChanged(nameof(GreenYellowBlendStars));
-        OnPropertyChanged(nameof(YellowStars));
-        OnPropertyChanged(nameof(YellowRedBlendStars));
-        OnPropertyChanged(nameof(RedStars));
-        OnPropertyChanged(nameof(MeterRemainderStars));
-        OnPropertyChanged(nameof(PeakHoldLeftStars));
-        OnPropertyChanged(nameof(PeakHoldRightStars));
-        OnPropertyChanged(nameof(PeakHoldVisibility));
     }
 
     partial void OnIsMutedChanged(bool value)
@@ -729,19 +686,6 @@ public partial class DeviceCard : ObservableObject
     partial void OnIsRulesExpandedChanged(bool value)
     {
         OnPropertyChanged(nameof(IsLayoutCustomSized));
-    }
-
-    partial void OnPeakLevelChanged(float value)
-    {
-        OnPropertyChanged(nameof(PeakLevelPercent));
-        NotifyMeterChanged();
-    }
-
-    partial void OnPeakHoldLevelChanged(float value)
-    {
-        OnPropertyChanged(nameof(PeakHoldLeftStars));
-        OnPropertyChanged(nameof(PeakHoldRightStars));
-        OnPropertyChanged(nameof(PeakHoldVisibility));
     }
 
     // OnIsHiddenByUserChanged / OnIsPinnedByUserChanged do not fire the visibility callback

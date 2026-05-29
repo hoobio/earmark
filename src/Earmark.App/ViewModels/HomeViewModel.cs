@@ -213,8 +213,11 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         // reflected event-driven via ExternalMuteChanged / ExternalVolumeChanged - no poll.
         foreach (var card in Devices)
         {
-            var level = _endpoints.GetPeakLevel(card.Endpoint.Id) ?? 0f;
-            card.UpdatePeak(level, PeakTickInterval);
+            // Fall back to a zero sample at the card's current channel count so the bar count
+            // stays stable until the background sampler publishes the first read.
+            var peaks = _endpoints.GetChannelPeaks(card.Endpoint.Id)
+                ?? new EndpointChannelPeaks(0f, 0f, 0f, card.ChannelCount);
+            card.UpdatePeak(peaks, PeakTickInterval);
         }
 
         TickAppMeters();
