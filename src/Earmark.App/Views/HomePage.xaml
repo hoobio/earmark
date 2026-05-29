@@ -352,6 +352,8 @@
 
                                             <Border Background="Transparent"
                                                     Tapped="OnLockedSliderTapped"
+                                                    PointerPressed="OnLockedSliderPointerPressed"
+                                                    PointerReleased="OnLockedSliderPointerReleased"
                                                     ToolTipService.ToolTip="{x:Bind VolumeLockedTooltip, Mode=OneWay}"
                                                     Visibility="{x:Bind IsVolumeLocked, Mode=OneWay}" />
                                         </Grid>

@@ -148,6 +148,16 @@ public sealed partial class HomePage : Page
         }
     }
 
+    // A rule-locked (disabled) slider doesn't capture the pointer the way an enabled one does, so
+    // a press-drag over it would otherwise bubble to the card's CanDrag and start a reorder. The
+    // transparent lock overlay captures the pointer on press (mirroring the enabled slider) to keep
+    // the gesture off the card; the tooltip and tap-to-ping still work.
+    private void OnLockedSliderPointerPressed(object sender, PointerRoutedEventArgs e) =>
+        (sender as UIElement)?.CapturePointer(e.Pointer);
+
+    private void OnLockedSliderPointerReleased(object sender, PointerRoutedEventArgs e) =>
+        (sender as UIElement)?.ReleasePointerCapture(e.Pointer);
+
     // ---- App chip drag / drop ----
     //
     // In-process drag of an AppChip onto a render DeviceCard rebinds the session's per-app
