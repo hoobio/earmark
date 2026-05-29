@@ -1,27 +1,51 @@
 using Earmark.App.Services;
+using Earmark.App.Settings;
 using Earmark.App.Views;
 
+using Microsoft.UI;
+using Microsoft.UI.Composition;
+using Microsoft.UI.Composition.SystemBackdrops;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media.Animation;
 
+using Windows.UI;
+
+using WinRT;
+
 namespace Earmark.App;
 
-public sealed partial class MainWindow : Window
+public sealed partial class MainWindow : Window, IDisposable
 {
     private readonly INavigationService _navigation;
     private readonly IDispatcherQueueProvider _dispatcher;
+    private readonly ISettingsService _settings;
+    private MicaController? _micaController;
+    private SystemBackdropConfiguration? _backdropConfig;
     private bool _initialNavComplete;
 
-    public MainWindow(INavigationService navigation, IDispatcherQueueProvider dispatcher)
+    public MainWindow(INavigationService navigation, IDispatcherQueueProvider dispatcher, ISettingsService settings)
     {
         _navigation = navigation;
         _dispatcher = dispatcher;
+        _settings = settings;
 
         InitializeComponent();
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(AppTitleBar);
         AppWindow.SetIcon("Assets/AppIcon.ico");
+
+        // Apply the saved theme to the content root and keep the Mica backdrop and caption
+        // buttons in sync with the setting and, in System mode, the live OS theme.
+        TrySetupBackdrop();
+        ApplyTheme();
+        RootGrid.ActualThemeChanged += (_, _) => UpdateThemeChrome();
+        _settings.SettingsChanged += OnSettingsChanged;
+        Closed += (_, _) =>
+        {
+            _settings.SettingsChanged -= OnSettingsChanged;
+            Dispose();
+        };
 
         _dispatcher.Register(DispatcherQueue);
         _navigation.Register(ContentFrame);
@@ -57,6 +81,87 @@ public sealed partial class MainWindow : Window
     }
 
     public Task? InitializationTask { get; set; }
+
+    private void OnSettingsChanged(object? sender, EventArgs e)
+    {
+        if (DispatcherQueue.HasThreadAccess)
+        {
+            ApplyTheme();
+        }
+        else
+        {
+            DispatcherQueue.TryEnqueue(ApplyTheme);
+        }
+    }
+
+    private void ApplyTheme()
+    {
+        var element = _settings.Current.Theme switch
+        {
+            AppTheme.Light => ElementTheme.Light,
+            AppTheme.Dark => ElementTheme.Dark,
+            _ => ElementTheme.Default,
+        };
+        if (RootGrid.RequestedTheme != element)
+        {
+            RootGrid.RequestedTheme = element;
+        }
+        UpdateThemeChrome();
+    }
+
+    // The Mica backdrop and the system-drawn caption glyphs don't follow RootGrid's theme on
+    // their own, so push the resolved theme to both. Driven off ActualTheme so System mode
+    // tracks live OS theme changes too.
+    private void UpdateThemeChrome()
+    {
+        var effective = RootGrid.RequestedTheme == ElementTheme.Default ? RootGrid.ActualTheme : RootGrid.RequestedTheme;
+        var isLight = effective == ElementTheme.Light;
+
+        if (_backdropConfig is not null)
+        {
+            _backdropConfig.Theme = isLight ? SystemBackdropTheme.Light : SystemBackdropTheme.Dark;
+        }
+
+        if (AppWindow?.TitleBar is { } titleBar)
+        {
+            var foreground = isLight ? Colors.Black : Colors.White;
+            titleBar.ButtonForegroundColor = foreground;
+            titleBar.ButtonHoverForegroundColor = foreground;
+            titleBar.ButtonPressedForegroundColor = foreground;
+            titleBar.ButtonInactiveForegroundColor = isLight
+                ? Color.FromArgb(255, 0x88, 0x88, 0x88)
+                : Color.FromArgb(255, 0x99, 0x99, 0x99);
+        }
+    }
+
+    // Mica via the controller (not <Window.SystemBackdrop>) so its tint can be themed to the
+    // app's Theme setting rather than only the OS. No-op on OSes without Mica support.
+    private void TrySetupBackdrop()
+    {
+        if (!MicaController.IsSupported())
+        {
+            return;
+        }
+
+        _backdropConfig = new SystemBackdropConfiguration { IsInputActive = true };
+        _micaController = new MicaController { Kind = MicaKind.BaseAlt };
+        _micaController.SetSystemBackdropConfiguration(_backdropConfig);
+        _micaController.AddSystemBackdropTarget(this.As<ICompositionSupportsSystemBackdrop>());
+
+        Activated += (_, args) =>
+        {
+            if (_backdropConfig is not null)
+            {
+                _backdropConfig.IsInputActive = args.WindowActivationState != WindowActivationState.Deactivated;
+            }
+        };
+    }
+
+    public void Dispose()
+    {
+        _micaController?.Dispose();
+        _micaController = null;
+    }
 
     /// <summary>
     /// Switches the navigation pane (and therefore the active page) to the menu item with
