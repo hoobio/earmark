@@ -71,7 +71,7 @@ public partial class DeviceCard : ObservableObject
         // Resolve the thematic glyph once - the name doesn't change for the lifetime of
         // the card (a rename triggers a full rebuild) and the prefix scan, while cheap,
         // would otherwise re-run on every binding refresh during slider drags.
-        _themedGlyph = WaveLinkGlyphMapper.TryResolve(_split.Name);
+        _themedGlyph = DeviceGlyphMapper.TryResolve(_split.Name);
 
         _suppressVolumeWrite = true;
         Volume = Math.Clamp(volume, 0f, 1f);
