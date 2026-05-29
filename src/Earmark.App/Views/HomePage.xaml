@@ -311,12 +311,16 @@
                                             <!-- Right margin = thumb radius so the thumb visual at 100% isn't
                                                  clipped by the column edge. Left margin kept at 0; the thumb
                                                  at 0% sits inside the existing peak-meter 8px inset. -->
+                                            <!-- Padding insets the thumb travel inside the slider's own clip bounds
+                                                 (the control clips its thumb at the edge), so the thumb stays fully
+                                                 round at 0% / 100% instead of having its outer ring shaved off. -->
                                             <Slider Minimum="0"
                                                     Maximum="100"
                                                     StepFrequency="1"
                                                     SmallChange="1"
                                                     LargeChange="5"
-                                                    Margin="0,0,10,0"
+                                                    Margin="0,0,2,0"
+                                                    Padding="8,0,8,0"
                                                     Value="{x:Bind VolumePercent, Mode=TwoWay}"
                                                     IsEnabled="{x:Bind IsVolumeEditable, Mode=OneWay}"
                                                     Tag="{x:Bind}"
