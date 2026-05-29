@@ -122,15 +122,15 @@ internal static class DeviceRulesSummary
 
     /// <summary>
     /// Replicates the Rules page's "<i>X apps / Y devices</i>" line for this rule.
-    /// Counts unique PIDs across all SetApplication* actions, and unique endpoints across
-    /// actions that target a device.
+    /// Counts unique applications (by executable path, so an app's several processes count once)
+    /// across all SetApplication* actions, and unique endpoints across actions targeting a device.
     /// </summary>
     private static string BuildMatchSummary(
         RoutingRule rule,
         IReadOnlyList<AudioSession> sessions,
         IReadOnlyList<AudioEndpoint> endpoints)
     {
-        var seenPids = new HashSet<uint>();
+        var seenApps = new HashSet<string>(StringComparer.Ordinal);
         var deviceMatchActions = 0;
 
         foreach (var action in rule.Actions)
@@ -145,7 +145,7 @@ internal static class DeviceRulesSummary
                     if (RuleRow.MatchOrExact(action.AppPattern, session.ProcessName) ||
                         RuleRow.MatchOrExact(action.AppPattern, session.ExecutablePath))
                     {
-                        seenPids.Add(session.ProcessId);
+                        seenApps.Add(session.IdentityKey);
                     }
                 }
             }
@@ -160,9 +160,9 @@ internal static class DeviceRulesSummary
         }
 
         var parts = new List<string>();
-        if (seenPids.Count > 0)
+        if (seenApps.Count > 0)
         {
-            parts.Add(seenPids.Count == 1 ? "1 app" : $"{seenPids.Count} apps");
+            parts.Add(seenApps.Count == 1 ? "1 app" : $"{seenApps.Count} apps");
         }
         if (deviceMatchActions > 0)
         {

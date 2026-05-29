@@ -66,13 +66,17 @@ public partial class AppChip : ObservableObject
         return true;
     }
 
-    public AppChip(AudioSession session, string placementEndpointId, ISessionIconService iconService, RoutingRule? lockingRule)
+    public AppChip(AudioSession session, string placementEndpointId, ISessionIconService iconService, RoutingRule? lockingRule, bool startsActive = true)
     {
         Session = session ?? throw new ArgumentNullException(nameof(session));
         PlacementEndpointId = placementEndpointId ?? throw new ArgumentNullException(nameof(placementEndpointId));
         _iconService = iconService ?? throw new ArgumentNullException(nameof(iconService));
         LockingRule = lockingRule;
-        LastAudibleAt = DateTime.UtcNow;
+        // Audible chips start active with a fresh audible timestamp (drives the removal grace
+        // and full-strength brightness). Silent rule-pinned chips start idle and dimmed, with
+        // LastAudibleAt parked one active-window in the past so IsActive reads false at once.
+        IsActive = startsActive;
+        LastAudibleAt = startsActive ? DateTime.UtcNow : DateTime.UtcNow - ActiveWindow;
 
         // First call kicks the async load; subsequent calls (driven by the peak tick) pick
         // up the cached ImageSource once the load completes.
@@ -89,6 +93,28 @@ public partial class AppChip : ObservableObject
     /// <summary>Peak amplitude below which we treat the session as silent. -46 dBFS is comfortably
     /// below speech-noise but well above the digital-zero floor most clean exits land at.</summary>
     public const float AudibleAmplitudeThreshold = 0.005f;
+
+    /// <summary>Window after the last audible tick during which the chip still counts as
+    /// "active" (currently producing audio). Far shorter than the removal grace - it only
+    /// governs brightness and sort position, so a brief track gap won't dim/reorder the chip,
+    /// but a deliberate pause settles it to the idle state within a couple of seconds.</summary>
+    public static readonly TimeSpan ActiveWindow = TimeSpan.FromSeconds(2);
+
+    /// <summary>True while the session produced audio on its card within <see cref="ActiveWindow"/>.
+    /// Drives brightness and sort order: active chips render full-strength and sort first; idle
+    /// rule-pinned chips dim and sort last. Recomputed each peak tick from <see cref="LastAudibleAt"/>.</summary>
+    public bool IsActive { get; private set; }
+
+    /// <summary>Set during the debounced card sync: an enabled <c>ApplicationOutput</c> rule pins
+    /// this session to the owning card's endpoint. Keeps the chip on the card while the process
+    /// runs even when silent, and exempts it from the silence-grace prune.</summary>
+    [ObservableProperty]
+    public partial bool RulePinnedHere { get; set; }
+
+    partial void OnRulePinnedHereChanged(bool value)
+    {
+        OnPropertyChanged(nameof(ChipOpacity));
+    }
 
     public AudioSession Session { get; }
     public RoutingRule? LockingRule { get; }
@@ -118,22 +144,17 @@ public partial class AppChip : ObservableObject
         }
     }
 
-    /// <summary>Tooltip body: display name + path; when rule-locked, the rule name as well.</summary>
+    /// <summary>Tooltip body: display name + path. The rule-lock explanation lives on the padlock
+    /// badge's own tooltip (<see cref="LockTooltip"/>), so it isn't repeated here.</summary>
     public string Tooltip
     {
         get
         {
             var name = Session.IsSystemSounds ? "System Sounds" : Session.DisplayName;
             var path = string.IsNullOrEmpty(Session.ExecutablePath) ? Session.ProcessName : Session.ExecutablePath;
-            var head = string.IsNullOrEmpty(path) || string.Equals(name, path, StringComparison.OrdinalIgnoreCase)
+            return string.IsNullOrEmpty(path) || string.Equals(name, path, StringComparison.OrdinalIgnoreCase)
                 ? name
                 : $"{name}\n{path}";
-            if (LockingRule is { } rule)
-            {
-                var ruleName = string.IsNullOrWhiteSpace(rule.Name) ? "Unnamed rule" : rule.Name;
-                return $"{head}\n\nPinned by rule \"{ruleName}\" - drag is disabled.";
-            }
-            return head;
         }
     }
 
@@ -152,10 +173,11 @@ public partial class AppChip : ObservableObject
     [ObservableProperty]
     public partial float PeakLevel { get; set; }
 
-    public double ChipOpacity => IsRuleLocked ? 0.72 : 1.0;
+    public double ChipOpacity => (RulePinnedHere && !IsActive) ? 0.4 : (IsRuleLocked ? 0.72 : 1.0);
 
-    /// <summary>Tick entry point. Updates peak and, if the icon hasn't arrived yet, re-queries
-    /// the cache (the icon service loads asynchronously on first request).</summary>
+    /// <summary>Tick entry point. Updates peak, refreshes the active/idle state from the clock,
+    /// and, if the icon hasn't arrived yet, re-queries the cache (the icon service loads
+    /// asynchronously on first request).</summary>
     public void Tick(float peak)
     {
         PeakLevel = MathF.Min(peak, 1f);
@@ -163,10 +185,23 @@ public partial class AppChip : ObservableObject
         {
             LastAudibleAt = DateTime.UtcNow;
         }
+        RefreshActivity();
         if (Icon is null && !string.IsNullOrEmpty(Session.ExecutablePath))
         {
             Icon = _iconService.TryGetIcon(Session.ProcessId, Session.ExecutablePath);
         }
+    }
+
+    /// <summary>Recomputes <see cref="IsActive"/> from <see cref="LastAudibleAt"/> and raises the
+    /// dependent change notifications when it flips, so the bound opacity updates live and the
+    /// owner can reorder the chip.</summary>
+    private void RefreshActivity()
+    {
+        var active = DateTime.UtcNow - LastAudibleAt < ActiveWindow;
+        if (active == IsActive) return;
+        IsActive = active;
+        OnPropertyChanged(nameof(IsActive));
+        OnPropertyChanged(nameof(ChipOpacity));
     }
 
     /// <summary>Peak as a double for the chip's <see cref="Controls.ChannelPeakMeter"/> underbar:

@@ -753,7 +753,10 @@ public partial class ActionRow : ObservableObject, IDisposable, ISyncable<RuleAc
             return;
         }
 
-        var seen = new HashSet<uint>();
+        // Dedupe by application identity (executable path), so an app that spawns several
+        // processes (Discord, Chromium browsers) counts once. Two same-named apps from different
+        // locations stay distinct because their paths differ.
+        var seen = new HashSet<string>(StringComparer.Ordinal);
         var names = new List<string>();
         foreach (var session in sessions)
         {
@@ -762,7 +765,7 @@ public partial class ActionRow : ObservableObject, IDisposable, ISyncable<RuleAc
             {
                 continue;
             }
-            if (!seen.Add(session.ProcessId))
+            if (!seen.Add(session.IdentityKey))
             {
                 continue;
             }
