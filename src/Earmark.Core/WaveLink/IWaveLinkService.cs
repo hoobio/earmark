@@ -54,9 +54,25 @@ public interface IWaveLinkService
 public sealed record WaveLinkSnapshot(
     IReadOnlyList<WaveLinkMixInfo> Mixes,
     IReadOnlyList<WaveLinkOutputInfo> OutputDevices,
-    IReadOnlyList<WaveLinkInputDeviceInfo> InputDevices);
+    IReadOnlyList<WaveLinkInputDeviceInfo> InputDevices,
+    IReadOnlyList<WaveLinkChannelInfo> Channels);
 
-public sealed record WaveLinkMixInfo(string Id, string Name);
+// A Wave Link mixer channel/strip (Game, Comms, Media, SFX, System, plus any hardware mic
+// strip). Carries the per-channel artwork Wave Link draws on its pill: a base64 PNG that is
+// a solid fill of the channel's accent colour with a glyph (or a real app icon) on top.
+// There's no colour field in the protocol - the accent is derived from the bitmap's dominant
+// opaque pixel. Software channels map to the matching "Elgato Virtual Audio" render endpoint
+// by name; hardware channels carry the Windows MMDevice id directly in <see cref="Id"/>.
+public sealed record WaveLinkChannelInfo(
+    string Id,
+    string Name,
+    string Type,
+    bool IsAppIcon,
+    string? ImageData);
+
+// IconName is Wave Link's named icon for the mix (e.g. "headphones", "podcast"); mixes expose
+// only a name, never a bitmap or colour, so the UI maps the name to a Fluent glyph.
+public sealed record WaveLinkMixInfo(string Id, string Name, string? IconName);
 
 public sealed record WaveLinkOutputInfo(
     string DeviceId,

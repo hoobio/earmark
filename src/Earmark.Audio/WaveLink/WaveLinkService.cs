@@ -116,8 +116,22 @@ internal sealed class WaveLinkService : IWaveLinkService, IAsyncDisposable
                 _logger.LogDebug(ex, "Wave Link: getInputDevices failed; continuing without input-device data");
             }
 
+            // getChannels: mixer strips + their per-channel artwork (the coloured tiles).
+            // Best-effort: only consumed for optional UI theming, so a failure here must not
+            // break name reconciliation or mix routing.
+            WaveLinkChannelsResult? channelsResult = null;
+            try
+            {
+                channelsResult = await client.CallAsync<WaveLinkChannelsResult>("getChannels", null, ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Wave Link: getChannels failed; continuing without channel artwork");
+            }
+
             var mixes = mixesResult.Mixes
-                .Select(m => new WaveLinkMixInfo(m.Id, m.Name))
+                .Select(m => new WaveLinkMixInfo(m.Id, m.Name, m.Image?.Name))
                 .ToList();
 
             var outputs = new List<WaveLinkOutputInfo>();
@@ -145,7 +159,21 @@ internal sealed class WaveLinkService : IWaveLinkService, IAsyncDisposable
                 }
             }
 
-            var snapshot = new WaveLinkSnapshot(mixes, outputs, inputDevices);
+            var channels = new List<WaveLinkChannelInfo>();
+            if (channelsResult is not null)
+            {
+                foreach (var channel in channelsResult.Channels)
+                {
+                    channels.Add(new WaveLinkChannelInfo(
+                        channel.Id,
+                        channel.Name,
+                        channel.Type,
+                        channel.Image?.IsAppIcon ?? false,
+                        channel.Image?.ImgData));
+                }
+            }
+
+            var snapshot = new WaveLinkSnapshot(mixes, outputs, inputDevices, channels);
             SetSnapshot(snapshot);
             SetState(WaveLinkConnectionState.Connected);
             return snapshot;
@@ -403,6 +431,7 @@ internal sealed class WaveLinkService : IWaveLinkService, IAsyncDisposable
         if (a.Mixes.Count != b.Mixes.Count) return false;
         if (a.OutputDevices.Count != b.OutputDevices.Count) return false;
         if (a.InputDevices.Count != b.InputDevices.Count) return false;
+        if (a.Channels.Count != b.Channels.Count) return false;
 
         for (var i = 0; i < a.Mixes.Count; i++)
         {
@@ -422,6 +451,12 @@ internal sealed class WaveLinkService : IWaveLinkService, IAsyncDisposable
             {
                 if (!ad.Inputs[j].Equals(bd.Inputs[j])) return false;
             }
+        }
+        // Record equality covers Id/Name/Type/IsAppIcon/ImageData; the base64 compare is what
+        // lets a user recolouring a channel in Wave Link propagate to the card theming.
+        for (var i = 0; i < a.Channels.Count; i++)
+        {
+            if (!a.Channels[i].Equals(b.Channels[i])) return false;
         }
         return true;
     }
