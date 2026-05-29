@@ -7,7 +7,12 @@ using Earmark.App.Services;
 using Earmark.Core.Audio;
 using Earmark.Core.Models;
 
+using Microsoft.UI;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Imaging;
+
+using Windows.UI;
 
 namespace Earmark.App.ViewModels;
 
@@ -283,11 +288,6 @@ public partial class DeviceCard : ObservableObject
         }
     }
 
-    /// <summary>Expand chevron glyph: down when collapsed, up when expanded.</summary>
-    public string RulesExpandGlyph => IsRulesExpanded
-        ? new string((char)0xE70E, 1)
-        : new string((char)0xE70D, 1);
-
     // ---- Peak meter (sectioned + hold) ----
     //
     // The meter is log-scaled so it matches how pro-audio VU meters render dB. Linear
@@ -368,8 +368,12 @@ public partial class DeviceCard : ObservableObject
     {
         get
         {
+            // A Wave Link mix exposes a named icon (no bitmap); we map that to the closest
+            // Fluent glyph and let it win over the device-name guess below.
+            if (_waveLinkGlyphOverride is not null) return _waveLinkGlyphOverride;
+
             // Themed glyph (Game / Voice Chat / Music / ...) is resolved once at
-            // construction. It stays constant across mute state because MutedBrushConverter
+            // construction. It stays constant across mute state because the glyph foreground
             // already paints the icon red when muted - swapping the glyph too would double
             // the signal.
             if (_themedGlyph is not null) return _themedGlyph;
@@ -382,6 +386,80 @@ public partial class DeviceCard : ObservableObject
                 (false, true) => new string((char)0xF781, 1),   // MicOff
             };
         }
+    }
+
+    // ---- Wave Link channel theming (optional, driven by WaveLinkChannelStyle) ----
+    //
+    // All null unless the device maps to a Wave Link channel/mix and the user picked a style.
+    //  - Channel + Colours: _waveLinkAccent = the channel's bitmap-derived colour (tints tile).
+    //  - Channel + Icons:   _waveLinkIcon = the channel's bitmap (replaces the glyph).
+    //  - Mix (either style): _waveLinkAccent = white (mixes are monochrome, no colour) and
+    //    _waveLinkGlyphOverride = the Fluent glyph mapped from the mix's named icon.
+    // The accent tile (absolute colour) and the muted card tint live on separate XAML borders
+    // bound to ShowAccentTile / ShowDefaultTile so theme-dependent fills stay {ThemeResource}.
+    private Color? _waveLinkAccent;
+    private ImageSource? _waveLinkIcon;
+    private string? _waveLinkGlyphOverride;
+
+    /// <summary>Applies (or clears) the Wave Link visual. Called on the UI thread by the Home
+    /// view-model after a rebuild or a style-setting change.</summary>
+    public void SetWaveLinkVisual(Color? accent, ImageSource? icon, string? glyphOverride)
+    {
+        _waveLinkAccent = accent;
+        _waveLinkIcon = icon;
+        _waveLinkGlyphOverride = glyphOverride;
+        OnPropertyChanged(nameof(WaveLinkIconSource));
+        OnPropertyChanged(nameof(ShowWaveLinkIcon));
+        OnPropertyChanged(nameof(ShowGlyph));
+        OnPropertyChanged(nameof(ShowAccentTile));
+        OnPropertyChanged(nameof(ShowDefaultTile));
+        OnPropertyChanged(nameof(WaveLinkTileBrush));
+        OnPropertyChanged(nameof(GlyphContrastBrush));
+        OnPropertyChanged(nameof(GlyphOnAccent));
+        OnPropertyChanged(nameof(GlyphMutedThemed));
+        OnPropertyChanged(nameof(GlyphNormalThemed));
+        OnPropertyChanged(nameof(Glyph));
+    }
+
+    public ImageSource? WaveLinkIconSource => _waveLinkIcon;
+    public bool ShowWaveLinkIcon => _waveLinkIcon is not null;
+    public bool ShowGlyph => _waveLinkIcon is null;
+
+    /// <summary>Absolute (theme-independent) accent fill for the icon tile: the Wave Link
+    /// channel colour, or white for a mix (mixes carry only a monochrome named icon). Null when
+    /// no tint applies.</summary>
+    public Brush? WaveLinkTileBrush => _waveLinkAccent is Color c ? new SolidColorBrush(c) : null;
+
+    /// <summary>Show the absolute-colour accent tile: a tint exists, the device isn't muted (the
+    /// muted card tint owns that signal), and it isn't showing a bitmap or rule-locked.</summary>
+    public bool ShowAccentTile => _waveLinkAccent.HasValue && !IsMuted && _waveLinkIcon is null && !IsMuteLockedByRule;
+
+    /// <summary>Show the default theme tile ({ThemeResource} subtle fill): no Wave Link tint or
+    /// bitmap, and not rule-locked (locked stays transparent / non-interactive).</summary>
+    public bool ShowDefaultTile => _waveLinkIcon is null && !IsMuteLockedByRule && !ShowAccentTile;
+
+    // The glyph is drawn by one of three overlaid FontIcons in XAML, chosen by the bools below,
+    // so the two theme-dependent colours can stay {ThemeResource} (which a code-resolved brush
+    // can't - it snapshots one theme and shows the wrong variant after a light/dark switch).
+    //
+    //  - GlyphOnAccent    : on a coloured / white tile - an absolute contrast colour.
+    //  - GlyphMutedThemed : muted, default tile        - {ThemeResource} critical red.
+    //  - GlyphNormalThemed: otherwise                  - {ThemeResource} accent text.
+
+    /// <summary>Absolute contrast colour (near-black or white) for a glyph sitting on an accent
+    /// or white tile. Null when there's no tile colour.</summary>
+    public Brush? GlyphContrastBrush => _waveLinkAccent is Color c ? new SolidColorBrush(ContrastingGlyph(c)) : null;
+
+    public bool GlyphOnAccent => ShowGlyph && ShowAccentTile;
+    public bool GlyphMutedThemed => ShowGlyph && !ShowAccentTile && IsMuted;
+    public bool GlyphNormalThemed => ShowGlyph && !ShowAccentTile && !IsMuted;
+
+    // Rec. 601 luma: bright tiles get a near-black glyph (matching Wave Link's own choice),
+    // dark / saturated ones get white. Keeps the Fluent glyph legible on any accent.
+    private static Color ContrastingGlyph(Color c)
+    {
+        var luma = (0.299 * c.R) + (0.587 * c.G) + (0.114 * c.B);
+        return luma >= 150 ? Color.FromArgb(255, 0x1A, 0x1A, 0x1A) : Colors.White;
     }
 
     public string MuteTooltip
@@ -620,6 +698,11 @@ public partial class DeviceCard : ObservableObject
         OnPropertyChanged(nameof(MuteIconForegroundResource));
         OnPropertyChanged(nameof(VolumePercentText));
         OnPropertyChanged(nameof(VolumeAreaOpacity));
+        OnPropertyChanged(nameof(ShowAccentTile));
+        OnPropertyChanged(nameof(ShowDefaultTile));
+        OnPropertyChanged(nameof(GlyphOnAccent));
+        OnPropertyChanged(nameof(GlyphMutedThemed));
+        OnPropertyChanged(nameof(GlyphNormalThemed));
     }
 
     partial void OnIsVolumeLockedByRuleChanged(bool value)
@@ -636,12 +719,16 @@ public partial class DeviceCard : ObservableObject
         OnPropertyChanged(nameof(IsVolumeEditable));
         OnPropertyChanged(nameof(IsVolumeLocked));
         OnPropertyChanged(nameof(VolumeLockedTooltip));
+        OnPropertyChanged(nameof(ShowAccentTile));
+        OnPropertyChanged(nameof(ShowDefaultTile));
+        OnPropertyChanged(nameof(GlyphOnAccent));
+        OnPropertyChanged(nameof(GlyphMutedThemed));
+        OnPropertyChanged(nameof(GlyphNormalThemed));
     }
 
     partial void OnIsRulesExpandedChanged(bool value)
     {
         OnPropertyChanged(nameof(IsLayoutCustomSized));
-        OnPropertyChanged(nameof(RulesExpandGlyph));
     }
 
     partial void OnPeakLevelChanged(float value)

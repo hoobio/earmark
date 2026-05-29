@@ -14,6 +14,8 @@ using Earmark.Core.WaveLink;
 using Microsoft.Extensions.Logging;
 using Microsoft.UI.Xaml;
 
+using Windows.UI;
+
 namespace Earmark.App.ViewModels;
 
 /// <summary>
@@ -44,7 +46,9 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     private readonly IRuleEvaluator _evaluator;
     private readonly ISettingsService _settings;
     private readonly IWaveLinkService _waveLink;
+    private readonly IWaveLinkVisualService _waveLinkVisuals;
     private readonly IDispatcherQueueProvider _dispatcher;
+    private WaveLinkChannelStyle? _lastAppliedStyle;
     private readonly INotificationService _notifications;
     private readonly ILogger<HomeViewModel> _logger;
     private readonly Dictionary<string, DateTime> _lastReconcileToast = new(StringComparer.OrdinalIgnoreCase);
@@ -71,6 +75,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         IRuleEvaluator evaluator,
         ISettingsService settings,
         IWaveLinkService waveLink,
+        IWaveLinkVisualService waveLinkVisuals,
         INotificationService notifications,
         IDispatcherQueueProvider dispatcher,
         ILogger<HomeViewModel> logger)
@@ -87,6 +92,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         _evaluator = evaluator ?? throw new ArgumentNullException(nameof(evaluator));
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
         _waveLink = waveLink ?? throw new ArgumentNullException(nameof(waveLink));
+        _waveLinkVisuals = waveLinkVisuals ?? throw new ArgumentNullException(nameof(waveLinkVisuals));
         _notifications = notifications ?? throw new ArgumentNullException(nameof(notifications));
         _dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -121,6 +127,10 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         // only consume WL data for card sort order (mix targets, virtual channels), which
         // only changes on connect/disconnect - covered by StateChanged.
         _waveLink.StateChanged += OnAnythingChanged;
+        // A Wave Link channel-style change only restyles existing cards - re-apply visuals in
+        // place rather than rebuilding the grid (a rebuild flashes the ItemsRepeater). Filtered
+        // to the style field so unrelated saves (hidden/pinned devices) don't trigger work.
+        _settings.SettingsChanged += OnSettingsChanged;
 
         IsInitializing = true;
         QueueRefresh();
@@ -479,8 +489,74 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             _allCards.AddRange(built);
             SyncVisibleDevices();
             SyncAllCardsApps();
+            _ = ApplyWaveLinkVisualsAsync(ct);
         });
     }
+
+    private void OnSettingsChanged(object? sender, EventArgs e)
+    {
+        _dispatcher.Enqueue(() =>
+        {
+            if (_settings.Current.WaveLinkChannelStyle == _lastAppliedStyle) return;
+            _ = ApplyWaveLinkVisualsAsync(CancellationToken.None);
+        });
+    }
+
+    /// <summary>
+    /// UI-thread pass that themes each card from its Wave Link channel per the selected style.
+    /// Off (or Wave Link disconnected) clears any theming. Accent colours and icon bitmaps are
+    /// cached by the visual service, so repeated calls only re-decode when artwork changes.
+    /// </summary>
+    private async Task ApplyWaveLinkVisualsAsync(CancellationToken ct)
+    {
+        var style = _settings.Current.WaveLinkChannelStyle;
+        _lastAppliedStyle = style;
+
+        if (style == WaveLinkChannelStyle.Off || !_waveLink.IsAvailable)
+        {
+            foreach (var card in _allCards) card.SetWaveLinkVisual(null, null, null);
+            return;
+        }
+
+        var combined = _endpoints.GetEndpoints(EndpointFlow.Render)
+            .Concat(_endpoints.GetEndpoints(EndpointFlow.Capture))
+            .ToList();
+        var channelMap = WaveLinkChannelMap.Build(_waveLink.LastSnapshot, combined);
+        var mixMap = WaveLinkChannelMap.BuildMixMap(_waveLink.LastSnapshot, combined);
+
+        foreach (var card in _allCards)
+        {
+            if (ct.IsCancellationRequested) return;
+
+            if (channelMap.TryGetValue(card.Endpoint.Id, out var channel))
+            {
+                if (style == WaveLinkChannelStyle.Icons)
+                {
+                    var icon = await _waveLinkVisuals.GetIconSourceAsync(channel.ImageData).ConfigureAwait(true);
+                    card.SetWaveLinkVisual(null, icon, null);
+                }
+                else
+                {
+                    var accent = await _waveLinkVisuals.GetAccentColourAsync(channel.ImageData).ConfigureAwait(true);
+                    card.SetWaveLinkVisual(accent, null, null);
+                }
+            }
+            else if (mixMap.TryGetValue(card.Endpoint.Id, out var mix))
+            {
+                // Mixes have no bitmap/colour - only a named icon. Render them on a white tile
+                // (matching Wave Link's monochrome icons) with the name mapped to a Fluent glyph.
+                // Same in both Colours and Icons since there's no bitmap to swap in.
+                var glyph = WaveLinkIconGlyphMapper.TryResolve(mix.IconName);
+                card.SetWaveLinkVisual(MixTileColour, null, glyph);
+            }
+            else
+            {
+                card.SetWaveLinkVisual(null, null, null);
+            }
+        }
+    }
+
+    private static readonly Color MixTileColour = Color.FromArgb(255, 255, 255, 255);
 
     /// <summary>UI-thread helper that re-reads the session/rule snapshot and reconciles each
     /// card's <c>Apps</c> collection in place. Called after a rebuild swaps cards and any time
@@ -814,6 +890,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         _routingApplier.RouteApplied -= OnRouteApplied;
         _waveLink.SnapshotChanged -= OnAnythingChanged;
         _waveLink.StateChanged -= OnAnythingChanged;
+        _settings.SettingsChanged -= OnSettingsChanged;
         if (_peakTimer is not null)
         {
             _peakTimer.Tick -= OnPeakTick;
