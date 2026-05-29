@@ -66,13 +66,17 @@ public partial class AppChip : ObservableObject
         return true;
     }
 
-    public AppChip(AudioSession session, string placementEndpointId, ISessionIconService iconService, RoutingRule? lockingRule)
+    public AppChip(AudioSession session, string placementEndpointId, ISessionIconService iconService, RoutingRule? lockingRule, bool startsActive = true)
     {
         Session = session ?? throw new ArgumentNullException(nameof(session));
         PlacementEndpointId = placementEndpointId ?? throw new ArgumentNullException(nameof(placementEndpointId));
         _iconService = iconService ?? throw new ArgumentNullException(nameof(iconService));
         LockingRule = lockingRule;
-        LastAudibleAt = DateTime.UtcNow;
+        // Audible chips start active with a fresh audible timestamp (drives the removal grace
+        // and full-strength brightness). Silent rule-pinned chips start idle and dimmed, with
+        // LastAudibleAt parked one active-window in the past so IsActive reads false at once.
+        IsActive = startsActive;
+        LastAudibleAt = startsActive ? DateTime.UtcNow : DateTime.UtcNow - ActiveWindow;
 
         // First call kicks the async load; subsequent calls (driven by the peak tick) pick
         // up the cached ImageSource once the load completes.
@@ -89,6 +93,23 @@ public partial class AppChip : ObservableObject
     /// <summary>Peak amplitude below which we treat the session as silent. -46 dBFS is comfortably
     /// below speech-noise but well above the digital-zero floor most clean exits land at.</summary>
     public const float AudibleAmplitudeThreshold = 0.005f;
+
+    /// <summary>Silence window after the last audible tick during which the chip still counts as
+    /// "active": full opacity and sorted first. Matches the 30s removal grace, so a chip dims at
+    /// the same moment an unpinned one would be pruned - "full while playing, dim after 30s of
+    /// silence". A brief track gap or pause keeps it bright.</summary>
+    public static readonly TimeSpan ActiveWindow = TimeSpan.FromSeconds(30);
+
+    /// <summary>True while the session produced audio on its card within <see cref="ActiveWindow"/>.
+    /// Drives brightness and sort order: active chips render full-strength and sort first; chips
+    /// silent past the window dim and sort last. Recomputed each peak tick from <see cref="LastAudibleAt"/>.</summary>
+    public bool IsActive { get; private set; }
+
+    /// <summary>Set during the debounced card sync: an enabled <c>ApplicationOutput</c> rule pins
+    /// this session to the owning card's endpoint. Keeps the chip on the card while the process
+    /// runs even when silent, and exempts it from the silence-grace prune.</summary>
+    [ObservableProperty]
+    public partial bool RulePinnedHere { get; set; }
 
     public AudioSession Session { get; }
     public RoutingRule? LockingRule { get; }
@@ -118,22 +139,17 @@ public partial class AppChip : ObservableObject
         }
     }
 
-    /// <summary>Tooltip body: display name + path; when rule-locked, the rule name as well.</summary>
+    /// <summary>Tooltip body: display name + path. The rule-lock explanation lives on the padlock
+    /// badge's own tooltip (<see cref="LockTooltip"/>), so it isn't repeated here.</summary>
     public string Tooltip
     {
         get
         {
             var name = Session.IsSystemSounds ? "System Sounds" : Session.DisplayName;
             var path = string.IsNullOrEmpty(Session.ExecutablePath) ? Session.ProcessName : Session.ExecutablePath;
-            var head = string.IsNullOrEmpty(path) || string.Equals(name, path, StringComparison.OrdinalIgnoreCase)
+            return string.IsNullOrEmpty(path) || string.Equals(name, path, StringComparison.OrdinalIgnoreCase)
                 ? name
                 : $"{name}\n{path}";
-            if (LockingRule is { } rule)
-            {
-                var ruleName = string.IsNullOrWhiteSpace(rule.Name) ? "Unnamed rule" : rule.Name;
-                return $"{head}\n\nPinned by rule \"{ruleName}\" - drag is disabled.";
-            }
-            return head;
         }
     }
 
@@ -152,10 +168,14 @@ public partial class AppChip : ObservableObject
     [ObservableProperty]
     public partial float PeakLevel { get; set; }
 
-    public double ChipOpacity => IsRuleLocked ? 0.72 : 1.0;
+    /// <summary>Full opacity while the app is producing (or recently produced) audio; dimmed once
+    /// it falls silent past <see cref="ActiveWindow"/>. Only rule-pinned chips survive silence long
+    /// enough to show the dim - unpinned chips are pruned at the same threshold.</summary>
+    public double ChipOpacity => IsActive ? 1.0 : 0.4;
 
-    /// <summary>Tick entry point. Updates peak and, if the icon hasn't arrived yet, re-queries
-    /// the cache (the icon service loads asynchronously on first request).</summary>
+    /// <summary>Tick entry point. Updates peak, refreshes the active/idle state from the clock,
+    /// and, if the icon hasn't arrived yet, re-queries the cache (the icon service loads
+    /// asynchronously on first request).</summary>
     public void Tick(float peak)
     {
         PeakLevel = MathF.Min(peak, 1f);
@@ -163,34 +183,31 @@ public partial class AppChip : ObservableObject
         {
             LastAudibleAt = DateTime.UtcNow;
         }
+        RefreshActivity();
         if (Icon is null && !string.IsNullOrEmpty(Session.ExecutablePath))
         {
             Icon = _iconService.TryGetIcon(Session.ProcessId, Session.ExecutablePath);
         }
     }
 
-    // Log-scaled bar position so the chip meter reads in dB the same way the device peak
-    // meter does. Linear amplitude pinned to a usable [-60, 0] dBFS window then mapped
-    // [0..1] for the bar width.
-    private const float PeakMinDb = -60f;
-
-    private static double DbBar(float amplitude)
+    /// <summary>Recomputes <see cref="IsActive"/> from <see cref="LastAudibleAt"/> and raises the
+    /// dependent change notifications when it flips, so the bound opacity updates live and the
+    /// owner can reorder the chip.</summary>
+    private void RefreshActivity()
     {
-        if (amplitude <= 0f) return 0;
-        var db = 20.0 * Math.Log10(amplitude);
-        if (db <= PeakMinDb) return 0;
-        return Math.Clamp((db - PeakMinDb) / -PeakMinDb, 0.0, 1.0);
+        var active = DateTime.UtcNow - LastAudibleAt < ActiveWindow;
+        if (active == IsActive) return;
+        IsActive = active;
+        OnPropertyChanged(nameof(IsActive));
+        OnPropertyChanged(nameof(ChipOpacity));
     }
 
-    public GridLength PeakBarLeftStars =>
-        new GridLength(Math.Max(DbBar(PeakLevel), 0.0001), GridUnitType.Star);
-
-    public GridLength PeakBarRightStars =>
-        new GridLength(Math.Max(1.0 - DbBar(PeakLevel), 0.0001), GridUnitType.Star);
+    /// <summary>Peak as a double for the chip's <see cref="Controls.ChannelPeakMeter"/> underbar:
+    /// a single colour-banded bar that reuses the device meter's dB / band maths.</summary>
+    public double PeakLevelScalar => PeakLevel;
 
     partial void OnPeakLevelChanged(float value)
     {
-        OnPropertyChanged(nameof(PeakBarLeftStars));
-        OnPropertyChanged(nameof(PeakBarRightStars));
+        OnPropertyChanged(nameof(PeakLevelScalar));
     }
 }

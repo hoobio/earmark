@@ -10,7 +10,7 @@ namespace Earmark.App.ViewModels;
 /// </summary>
 internal static class WaveLinkIconGlyphMapper
 {
-    // Codepoints verified against WaveLinkGlyphMapper (already render in this app).
+    // Codepoints verified against DeviceGlyphMapper (already render in this app).
     private const string Game = "";        // GameConsole
     private const string Chat = "";        // ChatBubbles
     private const string Music = "";       // MusicAlbum

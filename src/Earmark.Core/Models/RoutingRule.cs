@@ -39,6 +39,7 @@ public enum ActionType
     SetDeviceVolume,
     MuteDevice,
     UnmuteDevice,
+    RenameDevice,
 }
 
 public sealed class RuleCondition
@@ -60,6 +61,14 @@ public sealed class RuleCondition
     public bool IsValid => IsApplicationCondition
         ? !string.IsNullOrWhiteSpace(AppPattern)
         : !string.IsNullOrWhiteSpace(DevicePattern);
+
+    public RuleCondition Clone() => new()
+    {
+        Type = Type,
+        Flow = Flow,
+        DevicePattern = DevicePattern,
+        AppPattern = AppPattern,
+    };
 }
 
 public sealed class RuleAction
@@ -76,6 +85,9 @@ public sealed class RuleAction
 
     /// <summary>SetDeviceVolume only: target volume in [0, 1].</summary>
     public float Volume { get; set; } = 0.5f;
+
+    /// <summary>RenameDevice only: the literal FriendlyName to write to matching devices.</summary>
+    public string NewName { get; set; } = string.Empty;
 
     /// <summary>SetDefault* only: claim the device for the system "default" (Console + Multimedia) role.</summary>
     public bool SetsDefault { get; set; } = true;
@@ -123,7 +135,21 @@ public sealed class RuleAction
             !string.IsNullOrWhiteSpace(DevicePattern) && Volume is >= 0f and <= 1f,
         ActionType.MuteDevice or ActionType.UnmuteDevice =>
             !string.IsNullOrWhiteSpace(DevicePattern),
+        ActionType.RenameDevice =>
+            !string.IsNullOrWhiteSpace(DevicePattern) && !string.IsNullOrWhiteSpace(NewName),
         _ => false,
+    };
+
+    public RuleAction Clone() => new()
+    {
+        Type = Type,
+        AppPattern = AppPattern,
+        DevicePattern = DevicePattern,
+        MixPattern = MixPattern,
+        Volume = Volume,
+        NewName = NewName,
+        SetsDefault = SetsDefault,
+        SetsCommunications = SetsCommunications,
     };
 }
 
@@ -139,6 +165,36 @@ public sealed class RoutingRule
 
     public List<RuleAction> Actions { get; set; } = new();
 
+    /// <summary>
+    /// Actions that run when the rule's conditions are NOT met (the "otherwise" branch). Only
+    /// meaningful when the rule has at least one condition; with no conditions the rule is always
+    /// "met" so these never fire. Lets one rule cover both states (e.g. Bluetooth connected vs
+    /// disconnected) instead of needing a paired inverse rule.
+    /// </summary>
+    public List<RuleAction> ElseActions { get; set; } = new();
+
     [JsonIgnore]
-    public bool HasValidActions => Actions.Any(a => a.IsValid);
+    public bool HasValidActions => Actions.Any(a => a.IsValid) || ElseActions.Any(a => a.IsValid);
+
+    /// <summary>True when the rule defines an "otherwise" branch.</summary>
+    [JsonIgnore]
+    public bool HasElseActions => ElseActions.Count > 0;
+
+    /// <summary>
+    /// The action set that applies right now: the main <see cref="Actions"/> when conditions are
+    /// met (or absent), otherwise the <see cref="ElseActions"/>. Callers pass the result of
+    /// <c>ConditionsMet</c>. This is the single branch-selection point shared by the matcher,
+    /// resolver, applier, and evaluator so they never disagree about which branch is live.
+    /// </summary>
+    public IReadOnlyList<RuleAction> ActiveActions(bool conditionsMet) => conditionsMet ? Actions : ElseActions;
+
+    /// <summary>Deep copy with a fresh <see cref="Id"/> and the given name, for the duplicate command.</summary>
+    public RoutingRule CloneForDuplicate(string newName) => new()
+    {
+        Name = newName,
+        Enabled = Enabled,
+        Conditions = Conditions.Select(c => c.Clone()).ToList(),
+        Actions = Actions.Select(a => a.Clone()).ToList(),
+        ElseActions = ElseActions.Select(a => a.Clone()).ToList(),
+    };
 }

@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<UserControl
+    x:Class="Earmark.App.Controls.ChannelPeakMeter"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:Earmark.App.Controls">
+
+    <!-- Stacked, colour-banded peak bars (1 = mono, 2 = L/R, 3 = L/R/Centre+LFE) that butt
+         together with no gap so the stack reads as one block: the top bar rounds its top
+         corners, the bottom bar its bottom corners, the middle none. A single peak-hold line
+         (driven by the max across channels) overlays the whole stack. The bar template lives
+         here once and is reused for the app-chip underbar (one short bar). IsHitTestVisible is
+         off so the bars sit behind the volume slider without stealing its pointer. -->
+    <Grid VerticalAlignment="Center" IsHitTestVisible="False">
+        <ItemsControl ItemsSource="{x:Bind Bars}"
+                      HorizontalAlignment="Stretch"
+                      HorizontalContentAlignment="Stretch">
+            <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                    <StackPanel Spacing="0" />
+                </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemContainerStyle>
+                <Style TargetType="ContentPresenter">
+                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                </Style>
+            </ItemsControl.ItemContainerStyle>
+            <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="controls:MeterBar">
+                    <!-- Border clips the band children to its corner radius (WinUI Border
+                         behaviour), so the coloured fill keeps the block's rounded ends. -->
+                    <Border Height="{x:Bind BarHeight, Mode=OneWay}"
+                            CornerRadius="{x:Bind Corners, Mode=OneWay}"
+                            Background="{ThemeResource ControlAltFillColorTertiaryBrush}">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="{x:Bind GreenStars, Mode=OneWay}" />
+                                <ColumnDefinition Width="{x:Bind GreenYellowBlendStars, Mode=OneWay}" />
+                                <ColumnDefinition Width="{x:Bind YellowStars, Mode=OneWay}" />
+                                <ColumnDefinition Width="{x:Bind YellowRedBlendStars, Mode=OneWay}" />
+                                <ColumnDefinition Width="{x:Bind RedStars, Mode=OneWay}" />
+                                <ColumnDefinition Width="{x:Bind RemainderStars, Mode=OneWay}" />
+                            </Grid.ColumnDefinitions>
+                            <Border Grid.Column="0"
+                                    Background="{ThemeResource SystemFillColorSuccessBrush}" />
+                            <Border Grid.Column="1">
+                                <Border.Background>
+                                    <LinearGradientBrush StartPoint="0,0.5" EndPoint="1,0.5">
+                                        <GradientStop Color="{ThemeResource SystemFillColorSuccess}" Offset="0" />
+                                        <GradientStop Color="{ThemeResource SystemFillColorCaution}" Offset="1" />
+                                    </LinearGradientBrush>
+                                </Border.Background>
+                            </Border>
+                            <Border Grid.Column="2"
+                                    Background="{ThemeResource SystemFillColorCautionBrush}" />
+                            <Border Grid.Column="3">
+                                <Border.Background>
+                                    <LinearGradientBrush StartPoint="0,0.5" EndPoint="1,0.5">
+                                        <GradientStop Color="{ThemeResource SystemFillColorCaution}" Offset="0" />
+                                        <GradientStop Color="{ThemeResource SystemFillColorCritical}" Offset="1" />
+                                    </LinearGradientBrush>
+                                </Border.Background>
+                            </Border>
+                            <Border Grid.Column="4"
+                                    Background="{ThemeResource SystemFillColorCriticalBrush}" />
+                        </Grid>
+                    </Border>
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
+        </ItemsControl>
+
+        <!-- Single peak-hold tick spanning the full stack height, latched at the max across all
+             channels. HoldBar (a MeterBar driven by the max hold) owns the geometry. -->
+        <Grid Visibility="{x:Bind HoldBar.HoldVisibility, Mode=OneWay}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="{x:Bind HoldBar.HoldLeftStars, Mode=OneWay}" />
+                <ColumnDefinition Width="{x:Bind HoldBar.HoldRightStars, Mode=OneWay}" />
+            </Grid.ColumnDefinitions>
+            <!-- White below the red band; red once the held peak reaches it (potential clip).
+                 Two overlaid borders keep both colours {ThemeResource}; exactly one shows. -->
+            <Border Grid.Column="0"
+                    Width="2"
+                    HorizontalAlignment="Right"
+                    Background="{ThemeResource TextFillColorPrimaryBrush}"
+                    Visibility="{x:Bind HoldBar.HoldWhiteVisibility, Mode=OneWay}" />
+            <Border Grid.Column="0"
+                    Width="2"
+                    HorizontalAlignment="Right"
+                    Background="{ThemeResource SystemFillColorCriticalBrush}"
+                    Visibility="{x:Bind HoldBar.HoldRedVisibility, Mode=OneWay}" />
+        </Grid>
+    </Grid>
+</UserControl>

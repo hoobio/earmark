@@ -1,14 +1,13 @@
 namespace Earmark.App.ViewModels;
 
 /// <summary>
-/// Maps Wave Link default mix / input labels (plus common user renames and the generic
-/// "Speakers" / "Headphones" labels Windows hands out) to thematic Segoe Fluent glyphs so
-/// the device card icon reads at a glance instead of every endpoint sharing the speaker.
-/// Covers Wave Link 2.x factory defaults (System, Music, Browser, Voice Chat, SFX, Game,
-/// Aux N, Monitor Mix, Stream Mix, MicrophoneFX) and the 3.x mix-preset names (Personal
-/// Mix, Chat Mix, Stream Mix). See
-/// https://help.elgato.com/hc/en-us/articles/360045134091 and
-/// https://help.elgato.com/hc/en-us/articles/360045139191 for the source list.
+/// Maps an audio device's user-facing name to a thematic Segoe Fluent glyph so the device
+/// card icon reads at a glance instead of every endpoint sharing the speaker. Covers the
+/// generic "Speakers" / "Headphones" / "Earbuds" labels Windows hands out, plus Wave Link
+/// 2.x factory defaults (System, Music, Browser, Voice Chat, SFX, Game, Aux N, Monitor Mix,
+/// Stream Mix, MicrophoneFX) and the 3.x mix-preset names (Personal Mix, Chat Mix, Stream
+/// Mix). See https://help.elgato.com/hc/en-us/articles/360045134091 and
+/// https://help.elgato.com/hc/en-us/articles/360045139191 for the Wave Link source list.
 ///
 /// Match is word-prefix and case-insensitive so "comm" picks up Comms / Communications,
 /// "game" picks up Game / Gaming, "micro" picks up Microphone / MicrophoneFX. First match
@@ -18,7 +17,7 @@ namespace Earmark.App.ViewModels;
 /// Broadcast)") - matching against the bracketed driver/device suffix produces false
 /// positives like "Nvidia Broadcast" hitting the streaming pattern.
 /// </summary>
-internal static class WaveLinkGlyphMapper
+internal static class DeviceGlyphMapper
 {
     // Segoe Fluent Icons (Win11) codepoints. See
     // https://learn.microsoft.com/windows/apps/design/iconography/segoe-fluent-icons-font
@@ -29,6 +28,7 @@ internal static class WaveLinkGlyphMapper
     private const string Globe = "";      // Globe
     private const string Streaming = "";  // Streaming
     private const string Headphones = ""; // Headphone (canonical over-ear)
+    private const string Earbuds = "";    // Earbud (in-ear)
     private const string Speakers = "";   // Speakers (the device-picker icon)
     private const string Microphone = ""; // Microphone
 
@@ -42,7 +42,7 @@ internal static class WaveLinkGlyphMapper
         // Headphone-bound outputs: WL2 "Monitor Mix" and WL3 "Personal Mix", plus the
         // literal "Headphones" / "Earbuds" labels Windows assigns to Bluetooth headsets.
         ("headphone", Headphones),                  // Headphone(s)
-        ("earbud", Headphones),                     // Earbuds, Earbud
+        ("earbud", Earbuds),                        // Earbuds, Earbud
         ("monitor", Headphones),                    // Monitor Mix
         ("personal", Headphones),                   // Personal Mix
 

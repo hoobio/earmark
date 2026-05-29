@@ -71,11 +71,11 @@
                         <ToggleSwitch IsOn="{x:Bind ViewModel.EnableWaveLink, Mode=TwoWay}" />
                     </StackPanel>
                     <ctrl:SettingsExpander.Items>
-                        <ctrl:SettingsCard Header="Reconcile device names"
-                                           Description="Keep Windows device FriendlyName in sync with the label Wave Link uses for the same device. Rechecks on every Wave Link snapshot tick. Useful after a driver reinstall when names drift."
-                                           IsEnabled="{x:Bind ViewModel.EnableWaveLink, Mode=OneWay}">
-                            <ToggleSwitch IsOn="{x:Bind ViewModel.ReconcileWaveLinkNames, Mode=TwoWay}" />
-                        </ctrl:SettingsCard>
+                        <!-- "Reconcile device names" is hidden: it writes the Windows endpoint
+                             FriendlyName, which Windows blocks for clients (IPropertyStore SetValue
+                             returns E_ACCESSDENIED even elevated), so it can only ever no-op or fail.
+                             VM property / setting / WaveLinkNameReconciler are kept dormant for a
+                             future elevated registry-based revival. -->
                         <ctrl:SettingsCard Header="Channel style"
                                            Description="Borrow each Wave Link channel's look for its device card. Colours tints the icon tile with the channel's accent; Icons swaps in the channel's own Wave Link artwork in place of the Fluent glyph."
                                            IsEnabled="{x:Bind ViewModel.EnableWaveLink, Mode=OneWay}">

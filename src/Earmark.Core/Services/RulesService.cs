@@ -69,6 +69,27 @@ public sealed class RulesService : IRulesService, IDisposable
         RaiseChanged();
     }
 
+    public async Task InsertAsync(RoutingRule rule, int index, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(rule);
+
+        await _gate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var copy = new List<RoutingRule>(_rules);
+            var clamped = Math.Clamp(index, 0, copy.Count);
+            copy.Insert(clamped, rule);
+            _rules = copy;
+            await _store.SaveAsync(copy, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+
+        RaiseChanged();
+    }
+
     public async Task DeleteAsync(Guid ruleId, CancellationToken ct = default)
     {
         await _gate.WaitAsync(ct).ConfigureAwait(false);

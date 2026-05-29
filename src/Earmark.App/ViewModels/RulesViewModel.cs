@@ -133,13 +133,51 @@ public partial class RulesViewModel : ObservableObject, IDisposable
             return;
         }
 
-        // Cancel any pending debounced save before removing the rule, otherwise the save
-        // can fire after deletion and Upsert will re-add the rule.
-        row.CancelPendingSave();
         row.Dispose();
 
         await _rules.DeleteAsync(row.Id);
     }
+
+    [RelayCommand]
+    private async Task DuplicateAsync(RuleRow? row)
+    {
+        if (row is null)
+        {
+            return;
+        }
+
+        // Duplicate the persisted rule (last-saved state), not unsaved edits in the row, so the
+        // copy is predictable. Inserted directly below the original.
+        var rules = _rules.Rules;
+        var index = -1;
+        RoutingRule? source = null;
+        for (var i = 0; i < rules.Count; i++)
+        {
+            if (rules[i].Id == row.Id)
+            {
+                source = rules[i];
+                index = i;
+                break;
+            }
+        }
+        if (source is null)
+        {
+            return;
+        }
+
+        var clone = source.CloneForDuplicate(MakeCopyName(source.Name));
+        await _rules.InsertAsync(clone, index + 1);
+
+        var newRow = Items.FirstOrDefault(r => r.Id == clone.Id);
+        if (newRow is not null)
+        {
+            newRow.IsExpanded = true;
+            Selected = newRow;
+        }
+    }
+
+    private static string MakeCopyName(string name) =>
+        string.IsNullOrWhiteSpace(name) ? "New rule (copy)" : $"{name} (copy)";
 
     [RelayCommand]
     private async Task ReapplyAsync()
@@ -175,18 +213,42 @@ public partial class RulesViewModel : ObservableObject, IDisposable
                 return;
             }
 
+            // Structural change (add / delete / external reorder). Rebuild Items to match the
+            // store's set+order, but REUSE existing rows by Id so a sibling row's unsaved edits
+            // (and expanded state) survive - under the explicit-save model the rows hold edits
+            // the store doesn't have yet. Only genuinely new rules get a fresh row; removed rules
+            // get disposed.
             _suppressItemEvents = true;
             try
             {
-                foreach (var oldRow in Items)
+                var existing = Items.ToDictionary(r => r.Id);
+                var keep = new HashSet<Guid>();
+                var rebuilt = new List<RuleRow>(_rules.Rules.Count);
+                foreach (var rule in _rules.Rules)
                 {
-                    oldRow.Dispose();
+                    if (existing.TryGetValue(rule.Id, out var row))
+                    {
+                        rebuilt.Add(row);
+                        keep.Add(rule.Id);
+                    }
+                    else
+                    {
+                        rebuilt.Add(BuildRow(rule));
+                    }
+                }
+
+                foreach (var row in Items)
+                {
+                    if (!keep.Contains(row.Id))
+                    {
+                        row.Dispose();
+                    }
                 }
 
                 Items.Clear();
-                foreach (var rule in _rules.Rules)
+                foreach (var row in rebuilt)
                 {
-                    Items.Add(BuildRow(rule));
+                    Items.Add(row);
                 }
             }
             finally

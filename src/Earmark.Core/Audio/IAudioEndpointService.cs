@@ -31,6 +31,14 @@ public interface IAudioEndpointService
     /// <summary>Returns the current peak audio level (0-1), or null if unreachable. Cheap enough to call at 20-30Hz.</summary>
     float? GetPeakLevel(string id);
 
+    /// <summary>
+    /// Returns the current peak audio level grouped into Left / Right / Centre+LFE bands
+    /// (each 0-1), or null if unreachable. Channels are folded by canonical WASAPI order:
+    /// mono renders one bar, stereo two (L/R), surround three (L / R / Centre+LFE). Reads the
+    /// same background-sampled snapshot as <see cref="GetPeakLevel"/>; cheap at 20-30Hz.
+    /// </summary>
+    EndpointChannelPeaks? GetChannelPeaks(string id);
+
     event EventHandler? EndpointsChanged;
     event EventHandler? DefaultsChanged;
 
@@ -48,6 +56,15 @@ public interface IAudioEndpointService
     /// </summary>
     event EventHandler<EndpointVolumeChangedEventArgs>? ExternalVolumeChanged;
 }
+
+/// <summary>
+/// Device peak levels folded into up to three stacked meter bars. <see cref="ChannelCount"/> is
+/// the raw endpoint channel count and decides how many bars render (1 = mono using
+/// <see cref="Left"/>; 2 = <see cref="Left"/>/<see cref="Right"/>; 3+ adds
+/// <see cref="CentreLfe"/>). Each value is the max linear amplitude (0-1) across the channels
+/// folded into that band.
+/// </summary>
+public readonly record struct EndpointChannelPeaks(float Left, float Right, float CentreLfe, int ChannelCount);
 
 public sealed class EndpointMuteChangedEventArgs(string deviceId, bool muted) : EventArgs
 {

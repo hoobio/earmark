@@ -59,11 +59,11 @@ internal static class DeviceRulesSummary
 
         var summaries = new List<RuleSummary>();
         var combinedEndpoints = renderEndpoints.Concat(captureEndpoints).ToList();
-        var volumeLocked = false;
-        var muteLocked = false;
-        bool? ruleMutedTarget = null;
-        string? ruleMutedSource = null;
-        string? ruleVolumeSource = null;
+
+        // The lock state (which dimension is pinned, to what, by which rule) comes from the
+        // shared DeviceRuleResolver - the exact first-match-wins computation the routing applier
+        // uses to enforce these rules - so the lock icon and the enforcement can't disagree.
+        var targets = DeviceRuleResolver.Resolve(endpoint, rules, combinedEndpoints, sessions, matcher);
 
         foreach (var rule in rules)
         {
@@ -71,35 +71,12 @@ internal static class DeviceRulesSummary
 
             var name = string.IsNullOrWhiteSpace(rule.Name) ? "Unnamed rule" : rule.Name;
             var evaluation = evaluator.Evaluate(rule, rules, sessions, combinedEndpoints);
-            var matchSummary = BuildMatchSummary(rule, sessions, combinedEndpoints);
+            // Summarise the branch that's actually live so the count matches what's applied.
+            var met = matcher.ConditionsMet(rule, combinedEndpoints, sessions);
+            var matchSummary = BuildMatchSummary(rule.ActiveActions(met), sessions, combinedEndpoints);
 
             summaries.Add(new RuleSummary(
                 rule.Id, name, evaluation.Status, evaluation.Message, matchSummary));
-
-            // Only Active rules can lock controls. Highest-priority (first-listed) active rule
-            // wins the mute target; subsequent rules don't override it.
-            if (rule.Enabled && evaluation.Status == RuleStatus.Active)
-            {
-                foreach (var action in rule.Actions)
-                {
-                    if (!action.IsValid || !ActionTargetsEndpoint(action, endpoint)) continue;
-
-                    if (action.Type == ActionType.SetDeviceVolume)
-                    {
-                        volumeLocked = true;
-                        ruleVolumeSource ??= name;
-                    }
-                    if (action.Type is ActionType.MuteDevice or ActionType.UnmuteDevice)
-                    {
-                        muteLocked = true;
-                        if (ruleMutedTarget is null)
-                        {
-                            ruleMutedTarget = action.Type == ActionType.MuteDevice;
-                            ruleMutedSource = name;
-                        }
-                    }
-                }
-            }
         }
 
         // Active rules float to the top; everything else keeps its original priority order
@@ -108,12 +85,20 @@ internal static class DeviceRulesSummary
             .OrderByDescending(s => s.Status == RuleStatus.Active)
             .ToList();
 
-        return new Result(ordered, volumeLocked, muteLocked, ruleMutedTarget, ruleMutedSource, ruleVolumeSource);
+        return new Result(
+            ordered,
+            targets.Volume.HasValue,
+            targets.Muted.HasValue,
+            targets.Muted,
+            targets.MuteSource,
+            targets.VolumeSource);
     }
 
     private static bool RuleTargetsEndpoint(RoutingRule rule, AudioEndpoint endpoint)
     {
-        foreach (var action in rule.Actions)
+        // Either branch counts - the rule is "associated" with the device if it can act on it in
+        // any state. Its live status (and which branch wins) comes from the evaluator/resolver.
+        foreach (var action in rule.Actions.Concat(rule.ElseActions))
         {
             if (!action.IsValid || action.IsWaveLinkAction) continue;
             if (ActionTargetsEndpoint(action, endpoint)) return true;
@@ -141,18 +126,18 @@ internal static class DeviceRulesSummary
 
     /// <summary>
     /// Replicates the Rules page's "<i>X apps / Y devices</i>" line for this rule.
-    /// Counts unique PIDs across all SetApplication* actions, and unique endpoints across
-    /// actions that target a device.
+    /// Counts unique applications (by executable path, so an app's several processes count once)
+    /// across all SetApplication* actions, and unique endpoints across actions targeting a device.
     /// </summary>
     private static string BuildMatchSummary(
-        RoutingRule rule,
+        IReadOnlyList<RuleAction> actions,
         IReadOnlyList<AudioSession> sessions,
         IReadOnlyList<AudioEndpoint> endpoints)
     {
-        var seenPids = new HashSet<uint>();
+        var seenApps = new HashSet<string>(StringComparer.Ordinal);
         var deviceMatchActions = 0;
 
-        foreach (var action in rule.Actions)
+        foreach (var action in actions)
         {
             if (!action.IsValid) continue;
 
@@ -164,7 +149,7 @@ internal static class DeviceRulesSummary
                     if (RuleRow.MatchOrExact(action.AppPattern, session.ProcessName) ||
                         RuleRow.MatchOrExact(action.AppPattern, session.ExecutablePath))
                     {
-                        seenPids.Add(session.ProcessId);
+                        seenApps.Add(session.IdentityKey);
                     }
                 }
             }
@@ -179,9 +164,9 @@ internal static class DeviceRulesSummary
         }
 
         var parts = new List<string>();
-        if (seenPids.Count > 0)
+        if (seenApps.Count > 0)
         {
-            parts.Add(seenPids.Count == 1 ? "1 app" : $"{seenPids.Count} apps");
+            parts.Add(seenApps.Count == 1 ? "1 app" : $"{seenApps.Count} apps");
         }
         if (deviceMatchActions > 0)
         {
