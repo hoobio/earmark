@@ -94,15 +94,15 @@ public partial class AppChip : ObservableObject
     /// below speech-noise but well above the digital-zero floor most clean exits land at.</summary>
     public const float AudibleAmplitudeThreshold = 0.005f;
 
-    /// <summary>Window after the last audible tick during which the chip still counts as
-    /// "active" (currently producing audio). Far shorter than the removal grace - it only
-    /// governs brightness and sort position, so a brief track gap won't dim/reorder the chip,
-    /// but a deliberate pause settles it to the idle state within a couple of seconds.</summary>
-    public static readonly TimeSpan ActiveWindow = TimeSpan.FromSeconds(2);
+    /// <summary>Silence window after the last audible tick during which the chip still counts as
+    /// "active": full opacity and sorted first. Matches the 30s removal grace, so a chip dims at
+    /// the same moment an unpinned one would be pruned - "full while playing, dim after 30s of
+    /// silence". A brief track gap or pause keeps it bright.</summary>
+    public static readonly TimeSpan ActiveWindow = TimeSpan.FromSeconds(30);
 
     /// <summary>True while the session produced audio on its card within <see cref="ActiveWindow"/>.
-    /// Drives brightness and sort order: active chips render full-strength and sort first; idle
-    /// rule-pinned chips dim and sort last. Recomputed each peak tick from <see cref="LastAudibleAt"/>.</summary>
+    /// Drives brightness and sort order: active chips render full-strength and sort first; chips
+    /// silent past the window dim and sort last. Recomputed each peak tick from <see cref="LastAudibleAt"/>.</summary>
     public bool IsActive { get; private set; }
 
     /// <summary>Set during the debounced card sync: an enabled <c>ApplicationOutput</c> rule pins
@@ -110,11 +110,6 @@ public partial class AppChip : ObservableObject
     /// runs even when silent, and exempts it from the silence-grace prune.</summary>
     [ObservableProperty]
     public partial bool RulePinnedHere { get; set; }
-
-    partial void OnRulePinnedHereChanged(bool value)
-    {
-        OnPropertyChanged(nameof(ChipOpacity));
-    }
 
     public AudioSession Session { get; }
     public RoutingRule? LockingRule { get; }
@@ -173,7 +168,10 @@ public partial class AppChip : ObservableObject
     [ObservableProperty]
     public partial float PeakLevel { get; set; }
 
-    public double ChipOpacity => (RulePinnedHere && !IsActive) ? 0.4 : (IsRuleLocked ? 0.72 : 1.0);
+    /// <summary>Full opacity while the app is producing (or recently produced) audio; dimmed once
+    /// it falls silent past <see cref="ActiveWindow"/>. Only rule-pinned chips survive silence long
+    /// enough to show the dim - unpinned chips are pruned at the same threshold.</summary>
+    public double ChipOpacity => IsActive ? 1.0 : 0.4;
 
     /// <summary>Tick entry point. Updates peak, refreshes the active/idle state from the clock,
     /// and, if the icon hasn't arrived yet, re-queries the cache (the icon service loads
