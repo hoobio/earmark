@@ -73,7 +73,7 @@
             <NavigationView.MenuItems>
                 <NavigationViewItem Content="Devices" Tag="Home">
                     <NavigationViewItem.Icon>
-                        <FontIcon Glyph="&#xE767;" />
+                        <FontIcon Glyph="&#xF4C3;" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
                 <NavigationViewItem Content="Rules" Tag="Rules">
