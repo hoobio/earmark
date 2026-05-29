@@ -36,12 +36,13 @@ public sealed class RuleMatcher : IRuleMatcher
 
         foreach (var rule in rules)
         {
-            if (!rule.Enabled || !ConditionsMet(rule, endpoints, sessions))
+            if (!rule.Enabled)
             {
                 continue;
             }
 
-            foreach (var action in rule.Actions)
+            var met = ConditionsMet(rule, endpoints, sessions);
+            foreach (var action in rule.ActiveActions(met))
             {
                 if (action.Type != requiredType || !action.IsValid)
                 {
@@ -76,12 +77,13 @@ public sealed class RuleMatcher : IRuleMatcher
 
         foreach (var rule in rules)
         {
-            if (!rule.Enabled || !ConditionsMet(rule, endpoints, sessions))
+            if (!rule.Enabled)
             {
                 continue;
             }
 
-            foreach (var action in rule.Actions)
+            var met = ConditionsMet(rule, endpoints, sessions);
+            foreach (var action in rule.ActiveActions(met))
             {
                 if (action.Type != requiredType || !action.IsValid)
                 {

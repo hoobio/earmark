@@ -71,7 +71,9 @@ internal static class DeviceRulesSummary
 
             var name = string.IsNullOrWhiteSpace(rule.Name) ? "Unnamed rule" : rule.Name;
             var evaluation = evaluator.Evaluate(rule, rules, sessions, combinedEndpoints);
-            var matchSummary = BuildMatchSummary(rule, sessions, combinedEndpoints);
+            // Summarise the branch that's actually live so the count matches what's applied.
+            var met = matcher.ConditionsMet(rule, combinedEndpoints, sessions);
+            var matchSummary = BuildMatchSummary(rule.ActiveActions(met), sessions, combinedEndpoints);
 
             summaries.Add(new RuleSummary(
                 rule.Id, name, evaluation.Status, evaluation.Message, matchSummary));
@@ -94,7 +96,9 @@ internal static class DeviceRulesSummary
 
     private static bool RuleTargetsEndpoint(RoutingRule rule, AudioEndpoint endpoint)
     {
-        foreach (var action in rule.Actions)
+        // Either branch counts - the rule is "associated" with the device if it can act on it in
+        // any state. Its live status (and which branch wins) comes from the evaluator/resolver.
+        foreach (var action in rule.Actions.Concat(rule.ElseActions))
         {
             if (!action.IsValid || action.IsWaveLinkAction) continue;
             if (ActionTargetsEndpoint(action, endpoint)) return true;
@@ -126,14 +130,14 @@ internal static class DeviceRulesSummary
     /// across all SetApplication* actions, and unique endpoints across actions targeting a device.
     /// </summary>
     private static string BuildMatchSummary(
-        RoutingRule rule,
+        IReadOnlyList<RuleAction> actions,
         IReadOnlyList<AudioSession> sessions,
         IReadOnlyList<AudioEndpoint> endpoints)
     {
         var seenApps = new HashSet<string>(StringComparer.Ordinal);
         var deviceMatchActions = 0;
 
-        foreach (var action in rule.Actions)
+        foreach (var action in actions)
         {
             if (!action.IsValid) continue;
 

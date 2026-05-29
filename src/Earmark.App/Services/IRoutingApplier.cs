@@ -154,18 +154,11 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
             var ct = _cts?.Token ?? CancellationToken.None;
             await ApplyWaveLinkRulesAsync(ct).ConfigureAwait(false);
 
-            if (_settings.Current.EnableWaveLink && _settings.Current.ReconcileWaveLinkNames)
-            {
-                try
-                {
-                    await _reconciler.ReconcileAsync(ct).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException) { }
-                catch (Exception ex)
-                {
-                    _logger.LogDebug(ex, "Auto-reconcile Wave Link names failed");
-                }
-            }
+            // Wave Link name reconcile is disabled: it renames the Windows endpoint via
+            // IPropertyStore, which Windows blocks for clients (E_ACCESSDENIED even elevated), so
+            // it could only no-op or fail. The setting is hidden; the reconciler + settings stay
+            // wired but uncalled, revivable once an elevated registry-write path exists.
+            _ = (_reconciler, _settings);
         }
         finally
         {
@@ -264,7 +257,9 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
                 continue;
             }
 
-            foreach (var action in rule.Actions)
+            // Superset gate over both branches - whether each fires is decided condition-aware
+            // inside FindDefaultDevice; this just decides whether to bother running that flow.
+            foreach (var action in rule.Actions.Concat(rule.ElseActions))
             {
                 if (!action.IsValid)
                 {
@@ -432,7 +427,9 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
         foreach (var rule in _rules.Rules)
         {
             if (!rule.Enabled) continue;
-            foreach (var action in rule.Actions)
+            // Either branch may carry the volume/mute action - this only gates whether the
+            // reconcile timer arms; the resolver picks the live branch when it runs.
+            foreach (var action in rule.Actions.Concat(rule.ElseActions))
             {
                 if (action.IsValid && (action.IsVolumeAction || action.IsMuteAction)) return true;
             }
@@ -632,11 +629,11 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
         foreach (var rule in _rules.Rules)
         {
             if (!rule.Enabled) continue;
-            if (!_matcher.ConditionsMet(rule, renderEndpoints, sessions)) continue;
 
+            var met = _matcher.ConditionsMet(rule, renderEndpoints, sessions);
             var ruleLabel = string.IsNullOrEmpty(rule.Name) ? rule.Id.ToString() : rule.Name;
 
-            foreach (var action in rule.Actions)
+            foreach (var action in rule.ActiveActions(met))
             {
                 if (!action.IsValid || !action.IsWaveLinkAction) continue;
 

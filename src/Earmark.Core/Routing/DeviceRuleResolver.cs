@@ -43,11 +43,11 @@ public static class DeviceRuleResolver
         {
             if (volume.HasValue && muted.HasValue) break;
             if (!rule.Enabled) continue;
-            if (!matcher.ConditionsMet(rule, endpoints, sessions)) continue;
 
+            var met = matcher.ConditionsMet(rule, endpoints, sessions);
             var label = string.IsNullOrEmpty(rule.Name) ? rule.Id.ToString() : rule.Name;
 
-            foreach (var action in rule.Actions)
+            foreach (var action in rule.ActiveActions(met))
             {
                 if (volume.HasValue && muted.HasValue) break;
                 if (!action.IsValid) continue;

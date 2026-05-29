@@ -23,6 +23,14 @@ public sealed class AudioEndpointService : IAudioEndpointService, IMMNotificatio
     // watchdog is the actual hang signal.
     private const long RebuildSlowWarnMs = 5_000;
 
+    // PKEY format id shared by the device name/description properties (FriendlyName = pid 14,
+    // DeviceDesc = pid 2). A user renaming a device in Windows Sound fires OnPropertyValueChanged
+    // for one of these, so we rebuild to pick up the new name. Other property churn (formats,
+    // GUIDs, render flags) is ignored to keep the callback quiet.
+    private static readonly Guid DeviceNameFmtId = new("a45c254e-df1c-4efd-8020-67d146a850e0");
+    private const int FriendlyNamePid = 14;
+    private const int DeviceDescPid = 2;
+
     private readonly ILogger<AudioEndpointService> _logger;
     private readonly MMDeviceEnumerator _enumerator;
     private readonly Lock _rebuildGate = new();
@@ -711,7 +719,16 @@ public sealed class AudioEndpointService : IAudioEndpointService, IMMNotificatio
     void IMMNotificationClient.OnDeviceAdded(string pwstrDeviceId) => RaiseEndpointsChanged();
     void IMMNotificationClient.OnDeviceRemoved(string deviceId) => RaiseEndpointsChanged();
     void IMMNotificationClient.OnDefaultDeviceChanged(DataFlow flow, Role role, string defaultDeviceId) => RaiseDefaultsAndEndpointsChanged();
-    void IMMNotificationClient.OnPropertyValueChanged(string pwstrDeviceId, PropertyKey key) { }
+    void IMMNotificationClient.OnPropertyValueChanged(string pwstrDeviceId, NAudio.CoreAudioApi.PropertyKey key)
+    {
+        // Refresh on an external rename (Windows Sound "rename", a driver, another app) so the
+        // Devices / Rules UI reflects the new name without waiting for a structural event. Filter
+        // to the name/description PKEYs - everything else is property churn we don't care about.
+        if (key.formatId == DeviceNameFmtId && key.propertyId is FriendlyNamePid or DeviceDescPid)
+        {
+            RaiseEndpointsChanged();
+        }
+    }
 
     public void Dispose()
     {

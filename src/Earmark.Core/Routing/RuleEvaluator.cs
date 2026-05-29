@@ -53,26 +53,38 @@ public sealed class RuleEvaluator : IRuleEvaluator
             return new RuleEvaluation(RuleStatus.Incomplete, "No actions configured");
         }
 
-        if (!_matcher.ConditionsMet(rule, endpoints, sessions))
+        var met = _matcher.ConditionsMet(rule, endpoints, sessions);
+
+        // Conditions unmet with no "otherwise" branch: a classic conditional rule that's simply
+        // inactive right now. When the rule HAS an else branch we evaluate that branch below
+        // instead - it must NOT read as a dimmed "conditions not met" state.
+        if (!met && !rule.HasElseActions)
         {
             return new RuleEvaluation(RuleStatus.ConditionsNotMet, "Conditions not met");
         }
 
+        var activeActions = rule.ActiveActions(met);
+        var suffix = met ? string.Empty : " (else)";
+
+        if (!activeActions.Any(a => a.IsValid))
+        {
+            // The live branch has no valid action (the OTHER branch is what made the rule valid).
+            return new RuleEvaluation(RuleStatus.Idle,
+                met ? "No actions in the main branch" : "No actions in the otherwise branch");
+        }
+
         var (claimedDefault, claimedApp) = ClaimsBefore(rule, allRules, sessions, endpoints);
 
-        var anyValid = false;
         var anyActiveTarget = false;
         var anyShadowed = false;
         var anyIdle = false;
 
-        foreach (var action in rule.Actions)
+        foreach (var action in activeActions)
         {
             if (!action.IsValid)
             {
                 continue;
             }
-
-            anyValid = true;
 
             if (action.IsDefaultAction)
             {
@@ -136,14 +148,9 @@ public sealed class RuleEvaluator : IRuleEvaluator
             }
         }
 
-        if (!anyValid)
-        {
-            return new RuleEvaluation(RuleStatus.Incomplete, "No actions configured");
-        }
-
         if (anyActiveTarget)
         {
-            return new RuleEvaluation(RuleStatus.Active, "Active");
+            return new RuleEvaluation(RuleStatus.Active, $"Active{suffix}");
         }
 
         if (anyShadowed && !anyIdle)
@@ -156,7 +163,7 @@ public sealed class RuleEvaluator : IRuleEvaluator
             return new RuleEvaluation(RuleStatus.Shadowed, "Partially shadowed; no other matches");
         }
 
-        return new RuleEvaluation(RuleStatus.Idle, "No matches right now");
+        return new RuleEvaluation(RuleStatus.Idle, $"No matches right now{suffix}");
     }
 
     private (HashSet<(EndpointFlow, DefaultRoleKind)> defaults, HashSet<(EndpointFlow, uint)> apps) ClaimsBefore(
@@ -174,12 +181,13 @@ public sealed class RuleEvaluator : IRuleEvaluator
             {
                 break;
             }
-            if (!earlier.Enabled || !_matcher.ConditionsMet(earlier, endpoints, sessions))
+            if (!earlier.Enabled)
             {
                 continue;
             }
 
-            foreach (var action in earlier.Actions)
+            var earlierMet = _matcher.ConditionsMet(earlier, endpoints, sessions);
+            foreach (var action in earlier.ActiveActions(earlierMet))
             {
                 if (!action.IsValid)
                 {

@@ -93,6 +93,14 @@ public sealed partial class RulesPage : Page
         }
     }
 
+    private async void OnDuplicateRuleClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: RuleRow row })
+        {
+            await ViewModel.DuplicateCommand.ExecuteAsync(row);
+        }
+    }
+
     private void OnActionTypeChanged(object sender, SelectionChangedEventArgs e)
     {
         if (sender is ComboBox combo &&
@@ -131,7 +139,16 @@ public sealed partial class RulesPage : Page
         if (sender is FrameworkElement fe && fe.Tag is ActionRow row &&
             FindAncestorRuleRow(fe) is RuleRow rule)
         {
-            rule.RemoveActionCommand.Execute(row);
+            // The action template is shared between the main and "otherwise" lists; route the
+            // remove to whichever list this row belongs to.
+            if (rule.ElseActions.Contains(row))
+            {
+                rule.RemoveElseActionCommand.Execute(row);
+            }
+            else
+            {
+                rule.RemoveActionCommand.Execute(row);
+            }
         }
     }
 

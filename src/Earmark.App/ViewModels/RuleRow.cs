@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -13,11 +14,15 @@ namespace Earmark.App.ViewModels;
 
 public partial class RuleRow : ObservableObject, IDisposable
 {
-    private static readonly TimeSpan SaveDebounce = TimeSpan.FromMilliseconds(500);
+    // Explicit-save model: edits are buffered in the row and don't persist or apply until the
+    // user clicks Save. This prevents a half-typed pattern (e.g. a lone ".") from matching every
+    // device/app the instant a debounce fired. The Enabled toggle is the one exception - it's a
+    // discrete, safe action that commits immediately (see OnEnabledChanged).
+    private static readonly JsonSerializerOptions RuleJson = new();
 
     private readonly Func<RoutingRule, Task> _persistAsync;
-    private readonly Lock _saveGate = new();
-    private CancellationTokenSource? _saveCts;
+    private string _savedJson = string.Empty;
+    private RoutingRule _savedRule = null!; // set by SyncFromRule in the ctor before any use
     private bool _suppress;
     private volatile bool _disposed;
 
@@ -27,6 +32,7 @@ public partial class RuleRow : ObservableObject, IDisposable
         _persistAsync = persistAsync;
         Conditions = new ObservableCollection<ConditionRow>();
         Actions = new ObservableCollection<ActionRow>();
+        ElseActions = new ObservableCollection<ActionRow>();
         SyncFromRule(rule);
     }
 
@@ -34,6 +40,9 @@ public partial class RuleRow : ObservableObject, IDisposable
 
     public ObservableCollection<ConditionRow> Conditions { get; }
     public ObservableCollection<ActionRow> Actions { get; }
+
+    /// <summary>Actions for the "otherwise" branch - only shown/relevant when the rule has conditions.</summary>
+    public ObservableCollection<ActionRow> ElseActions { get; }
 
     [ObservableProperty]
     public partial bool IsExpanded { get; set; }
@@ -59,11 +68,23 @@ public partial class RuleRow : ObservableObject, IDisposable
     [ObservableProperty]
     public partial string Warning { get; set; } = string.Empty;
 
+    /// <summary>True when the row has edits not yet persisted via Save.</summary>
+    [ObservableProperty]
+    public partial bool IsDirty { get; set; }
+
+    [ObservableProperty]
+    public partial bool IsSaving { get; set; }
+
+    public bool CanSave => IsDirty && !IsSaving;
+
     public bool IsActive => Status == RuleStatus.Active;
     public bool IsDimmed => Status is RuleStatus.Off or RuleStatus.ConditionsNotMet or RuleStatus.Shadowed or RuleStatus.Idle or RuleStatus.Incomplete;
     public double CardOpacity => IsDimmed ? 0.55 : 1.0;
     public bool HasConditions => Conditions.Count > 0;
     public bool HasActions => Actions.Count > 0;
+    public bool HasElseActions => ElseActions.Count > 0;
+    /// <summary>The "otherwise" branch only makes sense when the rule has conditions to fail.</summary>
+    public bool ShowElse => HasConditions;
     public bool HasStatusMessage => !string.IsNullOrEmpty(StatusMessage);
     public bool HasMatchSummary => !string.IsNullOrEmpty(MatchSummary);
     public bool HasWarning => !string.IsNullOrEmpty(Warning);
@@ -100,6 +121,7 @@ public partial class RuleRow : ObservableObject, IDisposable
         Enabled = Enabled,
         Conditions = Conditions.Select(c => c.ToCondition()).ToList(),
         Actions = Actions.Select(a => a.ToAction()).ToList(),
+        ElseActions = ElseActions.Select(a => a.ToAction()).ToList(),
     };
 
     public void SyncFromRule(RoutingRule rule)
@@ -112,15 +134,36 @@ public partial class RuleRow : ObservableObject, IDisposable
 
             SyncList(Conditions, rule.Conditions, src => new ConditionRow(src, NotifyChildChanged));
             SyncList(Actions, rule.Actions, src => new ActionRow(src, NotifyChildChanged));
+            SyncList(ElseActions, rule.ElseActions, src => new ActionRow(src, NotifyChildChanged));
         }
         finally
         {
             _suppress = false;
         }
 
+        // This row now mirrors the persisted rule: reset the dirty baseline.
+        _savedRule = rule;
+        _savedJson = Serialize(rule);
+        IsDirty = false;
+
         OnPropertyChanged(nameof(DisplayName));
         OnPropertyChanged(nameof(HasConditions));
         OnPropertyChanged(nameof(HasActions));
+        OnPropertyChanged(nameof(HasElseActions));
+        OnPropertyChanged(nameof(ShowElse));
+    }
+
+    private static string Serialize(RoutingRule rule) => JsonSerializer.Serialize(rule, RuleJson);
+
+    private static RoutingRule Deserialize(string json) => JsonSerializer.Deserialize<RoutingRule>(json, RuleJson)!;
+
+    private void RecomputeDirty()
+    {
+        if (_suppress || _disposed)
+        {
+            return;
+        }
+        IsDirty = !string.Equals(_savedJson, Serialize(ToRule()), StringComparison.Ordinal);
     }
 
     private static void SyncList<TRow, TModel>(
@@ -162,6 +205,10 @@ public partial class RuleRow : ObservableObject, IDisposable
         {
             a.Recompute(sessions, endpoints, waveLinkSnapshot, waveLinkState);
         }
+        foreach (var a in ElseActions)
+        {
+            a.Recompute(sessions, endpoints, waveLinkSnapshot, waveLinkState);
+        }
 
         UpdateMatchSummary();
         UpdateWarning();
@@ -169,14 +216,15 @@ public partial class RuleRow : ObservableObject, IDisposable
 
     private void UpdateWarning()
     {
-        // Aggregate the first diagnostic from any enabled action; only relevant when the rule itself is on.
+        // Aggregate the first diagnostic from any enabled action (either branch); only relevant
+        // when the rule itself is on.
         if (!Enabled)
         {
             Warning = string.Empty;
             return;
         }
 
-        var first = Actions.FirstOrDefault(a => a.HasDiagnostic);
+        var first = Actions.Concat(ElseActions).FirstOrDefault(a => a.HasDiagnostic);
         Warning = first?.Diagnostic ?? string.Empty;
     }
 
@@ -189,9 +237,10 @@ public partial class RuleRow : ObservableObject, IDisposable
 
     private void UpdateMatchSummary()
     {
-        var totalApps = Actions.Where(a => a.RequiresAppPattern).Sum(a => a.AppMatchCount);
-        var deviceCount = Actions.Count(a => a.HasDeviceMatch);
-        var mixCount = Actions.Count(a => a.IsWaveLinkAction && a.HasMixMatch);
+        var all = Actions.Concat(ElseActions);
+        var totalApps = all.Where(a => a.RequiresAppPattern).Sum(a => a.AppMatchCount);
+        var deviceCount = all.Count(a => a.HasDeviceMatch);
+        var mixCount = all.Count(a => a.IsWaveLinkAction && a.HasMixMatch);
 
         if (totalApps == 0 && deviceCount == 0 && mixCount == 0)
         {
@@ -225,7 +274,8 @@ public partial class RuleRow : ObservableObject, IDisposable
         var row = new ConditionRow(new RuleCondition(), NotifyChildChanged);
         Conditions.Add(row);
         OnPropertyChanged(nameof(HasConditions));
-        QueueSave();
+        OnPropertyChanged(nameof(ShowElse));
+        RecomputeDirty();
     }
 
     [RelayCommand]
@@ -235,7 +285,8 @@ public partial class RuleRow : ObservableObject, IDisposable
         Conditions.Remove(row);
         row.Dispose();
         OnPropertyChanged(nameof(HasConditions));
-        QueueSave();
+        OnPropertyChanged(nameof(ShowElse));
+        RecomputeDirty();
     }
 
     [RelayCommand]
@@ -245,7 +296,7 @@ public partial class RuleRow : ObservableObject, IDisposable
         Actions.Add(row);
         OnPropertyChanged(nameof(HasActions));
         OnPropertyChanged(nameof(DisplayName));
-        QueueSave();
+        RecomputeDirty();
     }
 
     [RelayCommand]
@@ -256,36 +307,97 @@ public partial class RuleRow : ObservableObject, IDisposable
         row.Dispose();
         OnPropertyChanged(nameof(HasActions));
         OnPropertyChanged(nameof(DisplayName));
-        QueueSave();
+        RecomputeDirty();
     }
 
-    public void CancelPendingSave()
+    [RelayCommand]
+    private void AddElseAction()
     {
-        lock (_saveGate)
+        var row = new ActionRow(new RuleAction(), NotifyChildChanged);
+        ElseActions.Add(row);
+        OnPropertyChanged(nameof(HasElseActions));
+        RecomputeDirty();
+    }
+
+    [RelayCommand]
+    private void RemoveElseAction(ActionRow? row)
+    {
+        if (row is null) return;
+        ElseActions.Remove(row);
+        row.Dispose();
+        OnPropertyChanged(nameof(HasElseActions));
+        RecomputeDirty();
+    }
+
+    [RelayCommand]
+    private async Task Save()
+    {
+        if (!IsDirty || _disposed) return;
+        IsSaving = true;
+        try
         {
-            _saveCts?.Cancel();
+            var rule = ToRule();
+            await _persistAsync(rule);
+            _savedRule = rule;
+            _savedJson = Serialize(rule);
+            IsDirty = false;
         }
+        catch
+        {
+            // Persistence errors are surfaced via the unhandled-exception handler.
+        }
+        finally
+        {
+            IsSaving = false;
+        }
+    }
+
+    [RelayCommand]
+    private void Revert()
+    {
+        if (!IsDirty || _disposed) return;
+        SyncFromRule(_savedRule);
     }
 
     public void Dispose()
     {
-        CancelPendingSave();
-        _saveCts?.Dispose();
         foreach (var c in Conditions) c.Dispose();
         foreach (var a in Actions) a.Dispose();
+        foreach (var a in ElseActions) a.Dispose();
         _disposed = true;
     }
 
     partial void OnNameChanged(string value)
     {
         OnPropertyChanged(nameof(DisplayName));
-        QueueSave();
+        RecomputeDirty();
     }
 
+    // The enable/disable toggle commits immediately - it's a discrete, safe action, unlike typing
+    // a pattern. Persist only the enabled bit against the last-saved rule so flipping the switch
+    // never commits unsaved field edits buffered in this row.
     partial void OnEnabledChanged(bool value)
     {
         OnPropertyChanged(nameof(EnabledToggleLabel));
-        QueueSave();
+        if (_suppress || _disposed) return;
+        _ = CommitEnabledAsync(value);
+    }
+
+    private async Task CommitEnabledAsync(bool enabled)
+    {
+        var toPersist = Deserialize(_savedJson);
+        toPersist.Enabled = enabled;
+        try
+        {
+            await _persistAsync(toPersist);
+            _savedRule = toPersist;
+            _savedJson = Serialize(toPersist);
+        }
+        catch
+        {
+            // Persistence errors are surfaced via the unhandled-exception handler.
+        }
+        RecomputeDirty();
     }
 
     partial void OnStatusChanged(RuleStatus value)
@@ -301,59 +413,14 @@ public partial class RuleRow : ObservableObject, IDisposable
 
     partial void OnWarningChanged(string value) => OnPropertyChanged(nameof(HasWarning));
 
+    partial void OnIsDirtyChanged(bool value) => OnPropertyChanged(nameof(CanSave));
+
+    partial void OnIsSavingChanged(bool value) => OnPropertyChanged(nameof(CanSave));
+
     private void NotifyChildChanged()
     {
         OnPropertyChanged(nameof(DisplayName));
-        QueueSave();
-    }
-
-    private void QueueSave()
-    {
-        if (_suppress || _disposed)
-        {
-            return;
-        }
-
-        CancellationToken token;
-        lock (_saveGate)
-        {
-            if (_disposed)
-            {
-                return;
-            }
-
-            _saveCts?.Cancel();
-            _saveCts = new CancellationTokenSource();
-            token = _saveCts.Token;
-        }
-
-        _ = SaveAsync(token);
-    }
-
-    private async Task SaveAsync(CancellationToken ct)
-    {
-        try
-        {
-            await Task.Delay(SaveDebounce, ct).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            return;
-        }
-
-        if (_disposed || ct.IsCancellationRequested)
-        {
-            return;
-        }
-
-        try
-        {
-            await _persistAsync(ToRule()).ConfigureAwait(false);
-        }
-        catch
-        {
-            // Persistence errors are surfaced via the unhandled-exception handler.
-        }
+        RecomputeDirty();
     }
 
     internal static bool TryCompile(string pattern, out Regex? regex)
@@ -445,6 +512,10 @@ public partial class ActionRow : ObservableObject, IDisposable, ISyncable<RuleAc
         new ActionTypeOption(ActionType.SetDeviceVolume, "Pin device volume"),
         new ActionTypeOption(ActionType.MuteDevice, "Mute device"),
         new ActionTypeOption(ActionType.UnmuteDevice, "Unmute device"),
+        // RenameDevice is parked: it needs an elevated HKLM write (IPropertyStore is blocked even
+        // when elevated) and can't ship to the Store, so it's hidden from the picker. The enum,
+        // NewName field, and dormant ActionRow/XAML bits stay so existing rules still load and
+        // reviving it later (with a registry writer) is a one-line re-add here.
     };
 
 #pragma warning disable CA1822
@@ -465,6 +536,9 @@ public partial class ActionRow : ObservableObject, IDisposable, ISyncable<RuleAc
 
     [ObservableProperty]
     public partial float Volume { get; set; } = 0.5f;
+
+    [ObservableProperty]
+    public partial string NewName { get; set; } = string.Empty;
 
     [ObservableProperty]
     public partial bool SetsDefault { get; set; } = true;
@@ -506,6 +580,7 @@ public partial class ActionRow : ObservableObject, IDisposable, ISyncable<RuleAc
         ActionType.RemoveWaveLinkMixOutput or
         ActionType.SetWaveLinkMixOutput;
     public bool RequiresVolumeSlider => Type is ActionType.SetDeviceVolume;
+    public bool RequiresNewName => Type is ActionType.RenameDevice;
     public bool HasAppMatches => AppMatchCount > 0;
     public bool HasDeviceMatch => !string.IsNullOrEmpty(DeviceMatchSummary);
     public bool HasMixMatch => !string.IsNullOrEmpty(MixMatchSummary);
@@ -524,6 +599,7 @@ public partial class ActionRow : ObservableObject, IDisposable, ISyncable<RuleAc
         ActionType.SetDeviceVolume => "Pin volume",
         ActionType.MuteDevice => "Mute",
         ActionType.UnmuteDevice => "Unmute",
+        ActionType.RenameDevice => "Rename",
         _ => Type.ToString(),
     };
 
@@ -546,6 +622,7 @@ public partial class ActionRow : ObservableObject, IDisposable, ISyncable<RuleAc
         DevicePattern = DevicePattern,
         MixPattern = MixPattern,
         Volume = Volume,
+        NewName = NewName,
         SetsDefault = SetsDefault,
         SetsCommunications = SetsCommunications,
     };
@@ -561,6 +638,7 @@ public partial class ActionRow : ObservableObject, IDisposable, ISyncable<RuleAc
             DevicePattern = action.DevicePattern;
             MixPattern = action.MixPattern;
             Volume = action.Volume;
+            NewName = action.NewName;
             SetsDefault = action.SetsDefault;
             SetsCommunications = action.SetsCommunications;
         }
@@ -639,6 +717,10 @@ public partial class ActionRow : ObservableObject, IDisposable, ISyncable<RuleAc
         {
             return $"Device pattern '{DevicePattern}' is not valid regex";
         }
+        if (RequiresNewName && !string.IsNullOrWhiteSpace(DevicePattern) && string.IsNullOrWhiteSpace(NewName))
+        {
+            return "Enter the new device name to apply";
+        }
         return string.Empty;
     }
 
@@ -646,7 +728,7 @@ public partial class ActionRow : ObservableObject, IDisposable, ISyncable<RuleAc
     {
         ActionType.SetApplicationOutput or ActionType.SetDefaultOutput => EndpointFlow.Render,
         ActionType.SetApplicationInput or ActionType.SetDefaultInput => EndpointFlow.Capture,
-        ActionType.SetDeviceVolume or ActionType.MuteDevice or ActionType.UnmuteDevice => null,
+        ActionType.SetDeviceVolume or ActionType.MuteDevice or ActionType.UnmuteDevice or ActionType.RenameDevice => null,
         _ => EndpointFlow.Render,
     };
 
@@ -810,6 +892,7 @@ public partial class ActionRow : ObservableObject, IDisposable, ISyncable<RuleAc
         OnPropertyChanged(nameof(IsDefaultAction));
         OnPropertyChanged(nameof(IsWaveLinkAction));
         OnPropertyChanged(nameof(RequiresVolumeSlider));
+        OnPropertyChanged(nameof(RequiresNewName));
         OnPropertyChanged(nameof(SelectedTypeOption));
         Notify();
     }
@@ -818,6 +901,7 @@ public partial class ActionRow : ObservableObject, IDisposable, ISyncable<RuleAc
     partial void OnDevicePatternChanged(string value) => Notify();
     partial void OnMixPatternChanged(string value) => Notify();
     partial void OnVolumeChanged(float value) => Notify();
+    partial void OnNewNameChanged(string value) => Notify();
     partial void OnSetsDefaultChanged(bool value) => Notify();
     partial void OnSetsCommunicationsChanged(bool value) => Notify();
     partial void OnAppMatchCountChanged(int value)
