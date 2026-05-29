@@ -76,10 +76,18 @@
                 <ColumnDefinition Width="{x:Bind HoldBar.HoldLeftStars, Mode=OneWay}" />
                 <ColumnDefinition Width="{x:Bind HoldBar.HoldRightStars, Mode=OneWay}" />
             </Grid.ColumnDefinitions>
+            <!-- White below the red band; red once the held peak reaches it (potential clip).
+                 Two overlaid borders keep both colours {ThemeResource}; exactly one shows. -->
             <Border Grid.Column="0"
                     Width="2"
                     HorizontalAlignment="Right"
-                    Background="{ThemeResource TextFillColorPrimaryBrush}" />
+                    Background="{ThemeResource TextFillColorPrimaryBrush}"
+                    Visibility="{x:Bind HoldBar.HoldWhiteVisibility, Mode=OneWay}" />
+            <Border Grid.Column="0"
+                    Width="2"
+                    HorizontalAlignment="Right"
+                    Background="{ThemeResource SystemFillColorCriticalBrush}"
+                    Visibility="{x:Bind HoldBar.HoldRedVisibility, Mode=OneWay}" />
         </Grid>
     </Grid>
 </UserControl>

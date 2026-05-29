@@ -90,6 +90,16 @@ public partial class MeterBar : ObservableObject
     public Visibility HoldVisibility =>
         ShowHold && Hold > 0.001 ? Visibility.Visible : Visibility.Collapsed;
 
+    /// <summary>The held peak has reached the red (clipping) band - flags a potential clip.
+    /// Volume cancels out (the marker and the red band scale together), so this is a pure dB
+    /// threshold on the held signal; it clears itself as the hold decays back below the band.</summary>
+    public bool HoldInRed => DbBar(Hold) >= RedStart;
+
+    /// <summary>The hold tick is white below the red band and red once it reaches it. Driven by
+    /// two overlaid borders (not a code-resolved brush) so both colours stay theme-correct.</summary>
+    public Visibility HoldWhiteVisibility => HoldInRed ? Visibility.Collapsed : Visibility.Visible;
+    public Visibility HoldRedVisibility => HoldInRed ? Visibility.Visible : Visibility.Collapsed;
+
     partial void OnLevelChanged(double value) => NotifyBands();
     partial void OnVolumeChanged(double value) => NotifyBands();
     partial void OnShowHoldChanged(bool value) => OnPropertyChanged(nameof(HoldVisibility));
@@ -99,6 +109,9 @@ public partial class MeterBar : ObservableObject
         OnPropertyChanged(nameof(HoldLeftStars));
         OnPropertyChanged(nameof(HoldRightStars));
         OnPropertyChanged(nameof(HoldVisibility));
+        OnPropertyChanged(nameof(HoldInRed));
+        OnPropertyChanged(nameof(HoldWhiteVisibility));
+        OnPropertyChanged(nameof(HoldRedVisibility));
     }
 
     private void NotifyBands()
