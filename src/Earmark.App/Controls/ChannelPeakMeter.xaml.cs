@@ -15,11 +15,10 @@ namespace Earmark.App.Controls;
 /// </summary>
 public sealed partial class ChannelPeakMeter : UserControl
 {
-    // Auto bar thickness by channel count. Bars butt together (no gap), so the stack total lands
-    // on the ~20px Slider thumb height the meter is meant to match.
-    private const double MonoBarHeight = 20.0;
-    private const double StereoBarHeight = 10.0;
-    private const double SurroundBarHeight = 7.0;
+    // The stacked bars butt together (no gap) and always fill this fixed total height (~the
+    // Slider thumb size), so each bar is total/count thick - 20 / 10 / 6.67 for mono / stereo /
+    // surround - and the whole block is the same height regardless of channel count.
+    private const double TotalMeterHeight = 20.0;
 
     public ChannelPeakMeter()
     {
@@ -145,7 +144,7 @@ public sealed partial class ChannelPeakMeter : UserControl
 
         var barHeight = BarHeightOverride > 0
             ? BarHeightOverride
-            : count switch { 1 => MonoBarHeight, 2 => StereoBarHeight, _ => SurroundBarHeight };
+            : TotalMeterHeight / count;
 
         // Rounded ends on the outer corners only so the stack reads as one block; radius =
         // half the stack height for pill ends matching the old single bar.
