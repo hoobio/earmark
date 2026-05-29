@@ -23,7 +23,7 @@
                     Opacity="{x:Bind Opacity}"
                     Click="OnRuleChipClicked"
                     ToolTipService.ToolTip="Open in Rules">
-                <StackPanel Spacing="2">
+                <StackPanel Spacing="{StaticResource SpacingXXSmall}">
                     <TextBlock Text="{x:Bind Name}"
                                Style="{StaticResource BodyStrongTextBlockStyle}"
                                TextTrimming="CharacterEllipsis"
@@ -46,20 +46,20 @@
         </DataTemplate>
     </Page.Resources>
 
-    <Grid Padding="{StaticResource PagePadding}" RowSpacing="16">
+    <Grid Padding="{StaticResource PagePadding}" RowSpacing="{StaticResource SpacingLarge}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
         <!-- Page header -->
-        <Grid Grid.Row="0" ColumnSpacing="12">
+        <Grid Grid.Row="0" ColumnSpacing="{StaticResource SpacingMedium}">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
 
-            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="{StaticResource SpacingSmall}" VerticalAlignment="Center">
                 <TextBlock Text="Devices" Style="{StaticResource PageHeaderTextStyle}" />
                 <FontIcon Glyph="&#xE946;" FontSize="14"
                           Foreground="{ThemeResource TextFillColorTertiaryBrush}"
@@ -82,7 +82,7 @@
             <Border Style="{StaticResource SectionCardStyle}"
                     Padding="32"
                     Visibility="{x:Bind ViewModel.ShowLoadingState, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
-                <StackPanel Spacing="12" HorizontalAlignment="Center" VerticalAlignment="Center">
+                <StackPanel Spacing="{StaticResource SpacingMedium}" HorizontalAlignment="Center" VerticalAlignment="Center">
                     <ProgressRing IsActive="{x:Bind ViewModel.ShowLoadingState, Mode=OneWay}"
                                   Width="32" Height="32" HorizontalAlignment="Center" />
                     <TextBlock Text="Loading devices…"
@@ -95,7 +95,7 @@
             <Border Style="{StaticResource SectionCardStyle}"
                     Padding="32"
                     Visibility="{x:Bind ViewModel.ShowEmptyState, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
-                <StackPanel Spacing="12" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="420">
+                <StackPanel Spacing="{StaticResource SpacingMedium}" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="420">
                     <FontIcon Glyph="&#xE767;" FontSize="40"
                               Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                               HorizontalAlignment="Center" />
@@ -117,25 +117,44 @@
                                VerticalAlignment="Top">
                     <ItemsRepeater.Layout>
                         <controls:WrapByRowLayout MinItemWidth="320"
-                                                  ColumnSpacing="12"
-                                                  RowSpacing="12" />
+                                                  ColumnSpacing="{StaticResource SpacingMedium}"
+                                                  RowSpacing="{StaticResource SpacingMedium}" />
                     </ItemsRepeater.Layout>
                     <ItemsRepeater.ItemTemplate>
                         <DataTemplate x:DataType="vm:DeviceCard">
                             <Border Style="{StaticResource SectionCardStyle}"
+                                    Padding="0"
                                     Opacity="{x:Bind CardOpacity, Mode=OneWay}"
                                     controls:WrapByRowLayout.IsCustomSized="{x:Bind IsLayoutCustomSized, Mode=OneWay}"
                                     AllowDrop="True"
                                     Tag="{x:Bind}"
                                     DragOver="OnDeviceCardDragOver"
                                     Drop="OnDeviceCardDrop">
-                                <StackPanel Spacing="12">
-                                    <!-- Header: mute toggle (icon) + name + chips + hide toggle -->
-                                    <Grid ColumnSpacing="12">
+                                <!-- Right-click to show / hide the device. Replaces the always-on
+                                     eye button that used to sit top-right of every card. -->
+                                <Border.ContextFlyout>
+                                    <MenuFlyout>
+                                        <MenuFlyoutItem Text="{x:Bind HideToggleTooltip, Mode=OneWay}"
+                                                        Command="{x:Bind ToggleUserVisibilityCommand}">
+                                            <MenuFlyoutItem.Icon>
+                                                <FontIcon Glyph="{x:Bind HideToggleGlyph, Mode=OneWay}" />
+                                            </MenuFlyoutItem.Icon>
+                                        </MenuFlyoutItem>
+                                    </MenuFlyout>
+                                </Border.ContextFlyout>
+                                <Grid>
+                                    <!-- Muted tint fills the whole card. {ThemeResource} so it tracks
+                                         light/dark; shown only when muted, otherwise the card's own
+                                         LayerFill (from SectionCardStyle) shows through. -->
+                                    <Border Background="{ThemeResource SystemFillColorCriticalBackgroundBrush}"
+                                            CornerRadius="{StaticResource CardCornerRadius}"
+                                            Visibility="{x:Bind IsMuted, Mode=OneWay}" />
+                                <StackPanel Spacing="{StaticResource SpacingMedium}" Margin="{StaticResource SectionPadding}">
+                                    <!-- Header: mute toggle (icon) + name + chips -->
+                                    <Grid ColumnSpacing="{StaticResource SpacingMedium}">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="Auto" />
                                             <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
 
                                         <!-- The Border wrapper carries ToolTipService.ToolTip so the lock-reason
@@ -145,29 +164,68 @@
                                         <Border Grid.Column="0"
                                                 Background="Transparent"
                                                 ToolTipService.ToolTip="{x:Bind MuteTooltip, Mode=OneWay}">
-                                            <Button Width="56" Height="56"
-                                                    Padding="0"
-                                                    Background="{x:Bind IsMuteLockedByRule, Mode=OneWay, Converter={StaticResource MuteLockedBackgroundConverter}}"
-                                                    BorderBrush="Transparent"
-                                                    CornerRadius="10"
-                                                    Tag="{x:Bind}"
-                                                    IsEnabled="{x:Bind IsMuteToggleEnabled, Mode=OneWay}"
-                                                    Click="OnMuteToggleClicked"
-                                                    ToolTipService.ToolTip="{x:Bind MuteTooltip, Mode=OneWay}">
-                                                <!-- Disabled-state theme brushes paint over the Background binding when
-                                                     IsEnabled is false (i.e. rule-locked). Override them so a locked
-                                                     icon reads as "not interactive" rather than a dimmed chip. -->
-                                                <Button.Resources>
-                                                    <SolidColorBrush x:Key="ButtonBackgroundDisabled" Color="Transparent" />
-                                                    <SolidColorBrush x:Key="ButtonBorderBrushDisabled" Color="Transparent" />
-                                                </Button.Resources>
-                                                <FontIcon Glyph="{x:Bind Glyph, Mode=OneWay}"
-                                                          FontSize="28"
-                                                          Foreground="{x:Bind IsMuted, Mode=OneWay, Converter={StaticResource MutedBrushConverter}}" />
-                                            </Button>
+                                            <!-- Accent / colour lives on a Border behind the button so the button's
+                                                 pointer-over / pressed states composite a subtle overlay *over* the
+                                                 accent, instead of the default theme grey replacing it (which reads as
+                                                 a jarring flash on a coloured tile). -->
+                                            <Grid Width="56" Height="56">
+                                                <!-- Default tile uses {ThemeResource} so it tracks light/dark;
+                                                     the accent tile is an absolute Wave Link colour (or white for
+                                                     a mix) and is deliberately theme-independent. -->
+                                                <Border CornerRadius="{StaticResource CardCornerRadius}"
+                                                        Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                                                        Visibility="{x:Bind ShowDefaultTile, Mode=OneWay}" />
+                                                <Border CornerRadius="{StaticResource CardCornerRadius}"
+                                                        Background="{x:Bind WaveLinkTileBrush, Mode=OneWay}"
+                                                        Visibility="{x:Bind ShowAccentTile, Mode=OneWay}" />
+                                                <Button Width="56" Height="56"
+                                                        Padding="0"
+                                                        Background="Transparent"
+                                                        BorderBrush="Transparent"
+                                                        CornerRadius="{StaticResource CardCornerRadius}"
+                                                        Tag="{x:Bind}"
+                                                        IsEnabled="{x:Bind IsMuteToggleEnabled, Mode=OneWay}"
+                                                        Click="OnMuteToggleClicked"
+                                                        ToolTipService.ToolTip="{x:Bind MuteTooltip, Mode=OneWay}">
+                                                    <!-- Transparent in every state but hover/press, where a faint white
+                                                         overlay lifts whatever colour sits behind. Disabled stays
+                                                         transparent so a rule-locked tile reads as non-interactive. -->
+                                                    <Button.Resources>
+                                                        <SolidColorBrush x:Key="ButtonBackground" Color="Transparent" />
+                                                        <SolidColorBrush x:Key="ButtonBackgroundDisabled" Color="Transparent" />
+                                                        <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#20FFFFFF" />
+                                                        <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="#33FFFFFF" />
+                                                        <SolidColorBrush x:Key="ButtonBorderBrushDisabled" Color="Transparent" />
+                                                        <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="Transparent" />
+                                                        <SolidColorBrush x:Key="ButtonBorderBrushPressed" Color="Transparent" />
+                                                    </Button.Resources>
+                                                    <!-- Fluent glyph by default; a Wave Link channel icon replaces it
+                                                         (not alongside) when the Icons style is selected. Three glyph
+                                                         variants so the two theme-dependent colours stay {ThemeResource}
+                                                         (which repaints on a light/dark switch); the accent-tile glyph
+                                                         is an absolute contrast colour. Exactly one is ever visible. -->
+                                                    <Grid>
+                                                        <FontIcon Glyph="{x:Bind Glyph, Mode=OneWay}"
+                                                                  FontSize="28"
+                                                                  Visibility="{x:Bind GlyphOnAccent, Mode=OneWay}"
+                                                                  Foreground="{x:Bind GlyphContrastBrush, Mode=OneWay}" />
+                                                        <FontIcon Glyph="{x:Bind Glyph, Mode=OneWay}"
+                                                                  FontSize="28"
+                                                                  Visibility="{x:Bind GlyphNormalThemed, Mode=OneWay}"
+                                                                  Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                                                        <FontIcon Glyph="{x:Bind Glyph, Mode=OneWay}"
+                                                                  FontSize="28"
+                                                                  Visibility="{x:Bind GlyphMutedThemed, Mode=OneWay}"
+                                                                  Foreground="{ThemeResource SystemFillColorCriticalBrush}" />
+                                                        <Image Source="{x:Bind WaveLinkIconSource, Mode=OneWay}"
+                                                               Width="40" Height="40"
+                                                               Visibility="{x:Bind ShowWaveLinkIcon, Mode=OneWay}" />
+                                                    </Grid>
+                                                </Button>
+                                            </Grid>
                                         </Border>
 
-                                        <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                                        <StackPanel Grid.Column="1" Spacing="{StaticResource SpacingXXSmall}" VerticalAlignment="Center">
                                             <TextBlock Text="{x:Bind DeviceNameOnly}"
                                                        Style="{StaticResource BodyStrongTextBlockStyle}"
                                                        TextWrapping="NoWrap"
@@ -205,19 +263,10 @@
                                                 </Border>
                                             </StackPanel>
                                         </StackPanel>
-
-                                        <Button Grid.Column="2"
-                                                Style="{StaticResource GhostIconButtonStyle}"
-                                                Command="{x:Bind ToggleUserVisibilityCommand}"
-                                                VerticalAlignment="Top"
-                                                ToolTipService.ToolTip="{x:Bind HideToggleTooltip, Mode=OneWay}">
-                                            <FontIcon Glyph="{x:Bind HideToggleGlyph, Mode=OneWay}"
-                                                      FontSize="14" />
-                                        </Button>
                                     </Grid>
 
                                     <!-- Volume row -->
-                                    <Grid ColumnSpacing="10">
+                                    <Grid ColumnSpacing="{StaticResource SpacingSmall}">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="Auto" />
@@ -346,33 +395,29 @@
                                          multiple rules the chip has an inline chevron on the right that
                                          toggles a panel beneath with the additional rules. Saves the
                                          vertical space a separate "N more rules" Expander would consume. -->
-                                    <StackPanel Spacing="4" Visibility="{x:Bind HasRules}">
+                                    <StackPanel Spacing="{StaticResource SpacingXSmall}" Visibility="{x:Bind HasRules}">
                                         <TextBlock Text="Rules"
                                                    Style="{StaticResource CaptionTextBlockStyle}"
                                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
 
-                                        <!-- First rule chip: full-width chip-styled Border that
-                                             fills the card. Left: chip body (opens in Rules).
-                                             Right: chevron button (toggles the additional-rules
-                                             panel), shown only when there's more than one rule.
-                                             (A WinUI Expander can't stretch its header content to
-                                             fill, so the rules section stays this chip layout.) -->
-                                        <Border Background="{ThemeResource SubtleFillColorTertiaryBrush}"
-                                                CornerRadius="4"
-                                                Margin="0,2,0,0">
-                                            <Grid>
-                                                <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="*" />
-                                                    <ColumnDefinition Width="Auto" />
-                                                </Grid.ColumnDefinitions>
-                                                <Button Grid.Column="0"
-                                                        Style="{StaticResource SubtleRuleChipButtonStyle}"
+                                        <!-- First rule chip + chevron, as one ExpanderPill (the
+                                             shared expander control, also used on the Rules page).
+                                             Body opens the rule in Rules (ToggleOnBodyTap=False);
+                                             the chevron toggles the additional-rules panel and is
+                                             shown only when there's more than one rule. -->
+                                        <controls:ExpanderPill Margin="0,2,0,0"
+                                                               IsExpanded="{x:Bind IsRulesExpanded, Mode=TwoWay}"
+                                                               ChevronVisible="{x:Bind HasMultipleRules, Mode=OneWay}"
+                                                               ToggleTooltip="{x:Bind AdditionalRulesLabel}"
+                                                               ToggleOnBodyTap="False">
+                                            <controls:ExpanderPill.PillContent>
+                                                <Button Style="{StaticResource SubtleRuleChipButtonStyle}"
                                                         Background="Transparent"
                                                         Opacity="{x:Bind FirstRule.Opacity, FallbackValue=1.0, Mode=OneWay}"
                                                         DataContext="{x:Bind FirstRule, Mode=OneWay}"
                                                         Click="OnRuleChipClicked"
                                                         ToolTipService.ToolTip="Open in Rules">
-                                                    <StackPanel Spacing="2">
+                                                    <StackPanel Spacing="{StaticResource SpacingXXSmall}">
                                                         <TextBlock Text="{x:Bind FirstRule.Name, Mode=OneWay, FallbackValue=''}"
                                                                    Style="{StaticResource BodyStrongTextBlockStyle}"
                                                                    TextTrimming="CharacterEllipsis"
@@ -392,21 +437,8 @@
                                                         </StackPanel>
                                                     </StackPanel>
                                                 </Button>
-                                                <Button Grid.Column="1"
-                                                        Background="Transparent"
-                                                        BorderBrush="Transparent"
-                                                        Padding="10,0"
-                                                        VerticalAlignment="Stretch"
-                                                        Tag="{x:Bind}"
-                                                        Click="OnRulesExpandToggle"
-                                                        Visibility="{x:Bind HasMultipleRules, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
-                                                        ToolTipService.ToolTip="{x:Bind AdditionalRulesLabel}">
-                                                    <FontIcon Glyph="{x:Bind RulesExpandGlyph, Mode=OneWay}"
-                                                              FontSize="12"
-                                                              Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                                </Button>
-                                            </Grid>
-                                        </Border>
+                                            </controls:ExpanderPill.PillContent>
+                                        </controls:ExpanderPill>
 
                                         <!-- Additional rules, shown only when expanded. -->
                                         <ItemsControl ItemsSource="{x:Bind AdditionalRules}"
@@ -444,10 +476,10 @@
                                          receive the chip; the chip itself is a drag source (when not
                                          rule-locked) and carries PID + source endpoint id in the DataPackage
                                          Text payload. -->
-                                    <StackPanel x:Name="AppsSection" Spacing="4" Visibility="{x:Bind HasApps, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                    <StackPanel x:Name="AppsSection" Spacing="{StaticResource SpacingXSmall}" Visibility="{x:Bind HasApps, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
                                         <ItemsRepeater ItemsSource="{x:Bind Apps}">
                                             <ItemsRepeater.Layout>
-                                                <controls:WrapByRowLayout MinItemWidth="32" ColumnSpacing="4" RowSpacing="6" />
+                                                <controls:WrapByRowLayout MinItemWidth="32" ColumnSpacing="{StaticResource SpacingXSmall}" RowSpacing="6" />
                                             </ItemsRepeater.Layout>
                                             <ItemsRepeater.ItemTemplate>
                                                 <DataTemplate x:DataType="vm:AppChip">
@@ -518,6 +550,7 @@
                                         </ItemsRepeater>
                                     </StackPanel>
                                 </StackPanel>
+                                </Grid>
                             </Border>
                         </DataTemplate>
                     </ItemsRepeater.ItemTemplate>

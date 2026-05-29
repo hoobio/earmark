@@ -16,39 +16,54 @@
         <TextBlock Text="Settings" Style="{StaticResource PageHeaderTextStyle}" Margin="0,12,0,16" />
 
         <ScrollViewer Grid.Row="1" Padding="0,0,16,0">
-            <StackPanel Spacing="6" MaxWidth="720" HorizontalAlignment="Stretch">
+            <StackPanel Spacing="{StaticResource SpacingSmall}" MaxWidth="720" HorizontalAlignment="Stretch">
 
+                <TextBlock Text="General" Style="{StaticResource BodyStrongTextBlockStyle}" />
                 <ctrl:SettingsCard Header="Launch on startup" Description="Start Earmark automatically when you sign in to Windows.">
                     <ToggleSwitch IsOn="{x:Bind ViewModel.LaunchOnStartup, Mode=TwoWay}" />
                 </ctrl:SettingsCard>
 
-                <ctrl:SettingsCard Header="Show tray icon" Description="Display the Earmark icon in the Windows notification area.">
+                <TextBlock Text="Appearance" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,12,0,0" />
+                <ctrl:SettingsCard Header="Theme" Description="Choose a light or dark appearance, or follow the Windows setting.">
+                    <ComboBox SelectedIndex="{x:Bind ViewModel.AppThemeIndex, Mode=TwoWay}" MinWidth="140">
+                        <ComboBoxItem Content="System" />
+                        <ComboBoxItem Content="Light" />
+                        <ComboBoxItem Content="Dark" />
+                    </ComboBox>
+                </ctrl:SettingsCard>
+
+                <TextBlock Text="System tray" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,12,0,0" />
+                <ctrl:SettingsExpander Header="Show tray icon"
+                                       Description="Display the Earmark icon in the Windows notification area. The behaviours below need it on."
+                                       IsExpanded="{x:Bind ViewModel.ShowTrayIcon, Mode=OneWay}">
                     <ToggleSwitch IsOn="{x:Bind ViewModel.ShowTrayIcon, Mode=TwoWay}" />
-                </ctrl:SettingsCard>
+                    <ctrl:SettingsExpander.Items>
+                        <ctrl:SettingsCard Header="Minimize to tray"
+                                           Description="Minimizing the window hides it to the tray instead of the taskbar."
+                                           IsEnabled="{x:Bind ViewModel.ShowTrayIcon, Mode=OneWay}">
+                            <ToggleSwitch IsOn="{x:Bind ViewModel.MinimizeToTray, Mode=TwoWay}" />
+                        </ctrl:SettingsCard>
+                        <ctrl:SettingsCard Header="Close to tray"
+                                           Description="Closing the window keeps Earmark running in the tray. Use the tray menu to quit."
+                                           IsEnabled="{x:Bind ViewModel.ShowTrayIcon, Mode=OneWay}">
+                            <ToggleSwitch IsOn="{x:Bind ViewModel.CloseToTray, Mode=TwoWay}" />
+                        </ctrl:SettingsCard>
+                        <ctrl:SettingsCard Header="Launch to tray"
+                                           Description="Skip showing the window on startup and run silently in the tray."
+                                           IsEnabled="{x:Bind ViewModel.ShowTrayIcon, Mode=OneWay}">
+                            <ToggleSwitch IsOn="{x:Bind ViewModel.LaunchToTray, Mode=TwoWay}" />
+                        </ctrl:SettingsCard>
+                    </ctrl:SettingsExpander.Items>
+                </ctrl:SettingsExpander>
 
-                <ctrl:SettingsCard Header="Minimize to tray" Description="Minimizing the window hides it to the tray instead of the taskbar.">
-                    <ToggleSwitch IsOn="{x:Bind ViewModel.MinimizeToTray, Mode=TwoWay}" />
-                </ctrl:SettingsCard>
-
-                <ctrl:SettingsCard Header="Close to tray" Description="Closing the window keeps Earmark running in the tray. Use the tray menu to quit.">
-                    <ToggleSwitch IsOn="{x:Bind ViewModel.CloseToTray, Mode=TwoWay}" />
-                </ctrl:SettingsCard>
-
-                <ctrl:SettingsCard Header="Launch to tray" Description="Skip showing the window on startup and run silently in the tray.">
-                    <ToggleSwitch IsOn="{x:Bind ViewModel.LaunchToTray, Mode=TwoWay}" />
-                </ctrl:SettingsCard>
-
-                <ctrl:SettingsCard Header="Verbose logging" Description="Write debug-level diagnostics to the log file. Leave off for normal use.">
-                    <ToggleSwitch IsOn="{x:Bind ViewModel.VerboseLogging, Mode=TwoWay}" />
-                </ctrl:SettingsCard>
-
+                <TextBlock Text="Wave Link" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,12,0,0" />
                 <ctrl:SettingsExpander Header="Wave Link integration"
                                        Description="Route Wave Link mix outputs from rules. Earmark connects to Wave Link's local WebSocket while the integration is on."
                                        IsExpanded="{x:Bind ViewModel.EnableWaveLink, Mode=OneWay}">
                     <ctrl:SettingsExpander.HeaderIcon>
                         <FontIcon Glyph="&#xE767;" />
                     </ctrl:SettingsExpander.HeaderIcon>
-                    <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal" Spacing="{StaticResource SpacingMedium}" VerticalAlignment="Center">
                         <Ellipse Width="10" Height="10"
                                  Fill="{x:Bind ViewModel.WaveLinkState, Mode=OneWay, Converter={StaticResource WaveLinkStateBrushConverter}}"
                                  VerticalAlignment="Center"
@@ -61,8 +76,23 @@
                                            IsEnabled="{x:Bind ViewModel.EnableWaveLink, Mode=OneWay}">
                             <ToggleSwitch IsOn="{x:Bind ViewModel.ReconcileWaveLinkNames, Mode=TwoWay}" />
                         </ctrl:SettingsCard>
+                        <ctrl:SettingsCard Header="Channel style"
+                                           Description="Borrow each Wave Link channel's look for its device card. Colours tints the icon tile with the channel's accent; Icons swaps in the channel's own Wave Link artwork in place of the Fluent glyph."
+                                           IsEnabled="{x:Bind ViewModel.EnableWaveLink, Mode=OneWay}">
+                            <ComboBox SelectedIndex="{x:Bind ViewModel.WaveLinkChannelStyleIndex, Mode=TwoWay}"
+                                      MinWidth="140">
+                                <ComboBoxItem Content="Off" />
+                                <ComboBoxItem Content="Colours" />
+                                <ComboBoxItem Content="Icons" />
+                            </ComboBox>
+                        </ctrl:SettingsCard>
                     </ctrl:SettingsExpander.Items>
                 </ctrl:SettingsExpander>
+
+                <TextBlock Text="Diagnostics" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,12,0,0" />
+                <ctrl:SettingsCard Header="Verbose logging" Description="Write debug-level diagnostics to the log file. Leave off for normal use.">
+                    <ToggleSwitch IsOn="{x:Bind ViewModel.VerboseLogging, Mode=TwoWay}" />
+                </ctrl:SettingsCard>
 
             </StackPanel>
         </ScrollViewer>

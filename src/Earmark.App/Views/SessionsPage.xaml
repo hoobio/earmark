@@ -6,14 +6,14 @@
     xmlns:vm="using:Earmark.App.ViewModels"
     Background="Transparent">
 
-    <Grid Padding="{StaticResource PagePadding}" RowSpacing="16">
+    <Grid Padding="{StaticResource PagePadding}" RowSpacing="{StaticResource SpacingLarge}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
         <!-- Page header -->
-        <Grid Grid.Row="0" ColumnSpacing="12">
+        <Grid Grid.Row="0" ColumnSpacing="{StaticResource SpacingMedium}">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
@@ -21,7 +21,7 @@
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
 
-            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="{StaticResource SpacingSmall}" VerticalAlignment="Center">
                 <TextBlock Text="Sessions" Style="{StaticResource PageHeaderTextStyle}" />
                 <FontIcon Glyph="&#xE946;" FontSize="14"
                           Foreground="{ThemeResource TextFillColorTertiaryBrush}"
@@ -38,7 +38,7 @@
                     Command="{x:Bind ViewModel.RefreshCommand}"
                     VerticalAlignment="Center"
                     ToolTipService.ToolTip="Refresh">
-                <StackPanel Orientation="Horizontal" Spacing="8">
+                <StackPanel Orientation="Horizontal" Spacing="{StaticResource SpacingSmall}">
                     <FontIcon Glyph="&#xE72C;" FontSize="14" />
                     <TextBlock Text="Refresh" />
                 </StackPanel>
@@ -47,7 +47,7 @@
             <Button Grid.Column="3"
                     Command="{x:Bind ViewModel.ReapplyAllCommand}"
                     VerticalAlignment="Center">
-                <StackPanel Orientation="Horizontal" Spacing="8">
+                <StackPanel Orientation="Horizontal" Spacing="{StaticResource SpacingSmall}">
                     <FontIcon Glyph="&#xE768;" FontSize="14" />
                     <TextBlock Text="Reapply rules" />
                 </StackPanel>
@@ -56,7 +56,7 @@
 
         <Grid Grid.Row="1">
             <!-- Loading -->
-            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="12"
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="{StaticResource SpacingMedium}"
                         Visibility="{x:Bind ViewModel.IsLoading, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
                 <ProgressRing IsActive="True" Width="36" Height="36" />
                 <TextBlock Text="Discovering audio sessions..."
@@ -68,7 +68,7 @@
             <Border Style="{StaticResource SectionCardStyle}"
                     Padding="32"
                     Visibility="{x:Bind ViewModel.IsEmpty, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
-                <StackPanel Spacing="12" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="420">
+                <StackPanel Spacing="{StaticResource SpacingMedium}" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="420">
                     <FontIcon Glyph="&#xE7F4;" FontSize="40"
                               Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                               HorizontalAlignment="Center" />
@@ -86,12 +86,12 @@
             <ScrollViewer Visibility="{x:Bind ViewModel.HasItems, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
                 <ItemsRepeater ItemsSource="{x:Bind ViewModel.Items}">
                     <ItemsRepeater.Layout>
-                        <StackLayout Spacing="8" />
+                        <StackLayout Spacing="{StaticResource SpacingSmall}" />
                     </ItemsRepeater.Layout>
                     <ItemsRepeater.ItemTemplate>
                         <DataTemplate x:DataType="vm:SessionRow">
                             <Border Style="{StaticResource SectionCardStyle}">
-                                <Grid ColumnSpacing="14">
+                                <Grid ColumnSpacing="{StaticResource SpacingLarge}">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="*" />
@@ -100,13 +100,13 @@
                                     <Ellipse Width="10" Height="10" VerticalAlignment="Center"
                                              Fill="{ThemeResource SystemFillColorSuccessBrush}"
                                              Visibility="{x:Bind IsActive}" />
-                                    <StackPanel Grid.Column="1" Spacing="2">
+                                    <StackPanel Grid.Column="1" Spacing="{StaticResource SpacingXXSmall}">
                                         <TextBlock Text="{x:Bind Title}" Style="{StaticResource BodyStrongTextBlockStyle}" />
                                         <TextBlock Text="{x:Bind Subtitle}"
                                                    Style="{StaticResource CaptionTextBlockStyle}"
                                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                     </StackPanel>
-                                    <StackPanel Grid.Column="2" HorizontalAlignment="Right" Spacing="2">
+                                    <StackPanel Grid.Column="2" HorizontalAlignment="Right" Spacing="{StaticResource SpacingXXSmall}">
                                         <TextBlock Text="Routed to"
                                                    Style="{StaticResource CaptionTextBlockStyle}"
                                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"

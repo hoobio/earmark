@@ -36,12 +36,23 @@
             <converters:MuteLockedBackgroundConverter x:Key="MuteLockedBackgroundConverter" />
             <converters:PeakLevelToBrushConverter x:Key="PeakLevelToBrushConverter" />
 
-            <!-- Fluent 2 spacing scale (4px grid). -->
+            <!-- Fluent 2 spacing scale (4px grid). size20/40/80/120/160/200/240/320. -->
+            <x:Double x:Key="SpacingXXSmall">2</x:Double>
             <x:Double x:Key="SpacingXSmall">4</x:Double>
             <x:Double x:Key="SpacingSmall">8</x:Double>
             <x:Double x:Key="SpacingMedium">12</x:Double>
             <x:Double x:Key="SpacingLarge">16</x:Double>
             <x:Double x:Key="SpacingXLarge">24</x:Double>
+            <x:Double x:Key="SpacingXXLarge">32</x:Double>
+
+            <!-- Fluent 2 corner radii: 4 for inset controls/chips, 8 for cards/containers/tiles.
+                 ControlCornerRadius (4) is a built-in WinUI theme resource; CardCornerRadius is
+                 ours so card/tile rounding reads from one place. -->
+            <CornerRadius x:Key="CardCornerRadius">8</CornerRadius>
+
+            <!-- Caps line length on wide monitors instead of stretching content edge-to-edge
+                 (Fluent 2 layout). Pages centre their content within this. -->
+            <x:Double x:Key="ContentMaxWidth">1120</x:Double>
 
             <Thickness x:Key="PagePadding">28,8,28,20</Thickness>
             <Thickness x:Key="SectionPadding">16</Thickness>
@@ -67,14 +78,14 @@
             <Style x:Key="SectionCardStyle" TargetType="Border">
                 <Setter Property="Background" Value="{ThemeResource LayerFillColorDefaultBrush}" />
                 <Setter Property="BorderThickness" Value="0" />
-                <Setter Property="CornerRadius" Value="8" />
+                <Setter Property="CornerRadius" Value="{StaticResource CardCornerRadius}" />
                 <Setter Property="Padding" Value="{StaticResource SectionPadding}" />
             </Style>
 
             <Style x:Key="SubtleCardStyle" TargetType="Border">
                 <Setter Property="Background" Value="{ThemeResource SubtleFillColorTertiaryBrush}" />
                 <Setter Property="BorderThickness" Value="0" />
-                <Setter Property="CornerRadius" Value="4" />
+                <Setter Property="CornerRadius" Value="{ThemeResource ControlCornerRadius}" />
                 <Setter Property="Padding" Value="{StaticResource SubtleCardPadding}" />
             </Style>
 
@@ -86,7 +97,7 @@
             <Style x:Key="ChipBorderStyle" TargetType="Border">
                 <Setter Property="Background" Value="{ThemeResource ControlFillColorTertiaryBrush}" />
                 <Setter Property="BorderThickness" Value="0" />
-                <Setter Property="CornerRadius" Value="10" />
+                <Setter Property="CornerRadius" Value="{StaticResource CardCornerRadius}" />
                 <Setter Property="Padding" Value="8,2" />
             </Style>
 
@@ -109,7 +120,7 @@
             <Style x:Key="SubtleRuleChipButtonStyle" TargetType="Button">
                 <Setter Property="Background" Value="{ThemeResource SubtleFillColorTertiaryBrush}" />
                 <Setter Property="BorderThickness" Value="0" />
-                <Setter Property="CornerRadius" Value="4" />
+                <Setter Property="CornerRadius" Value="{ThemeResource ControlCornerRadius}" />
                 <Setter Property="Padding" Value="{StaticResource SubtleCardPadding}" />
                 <Setter Property="HorizontalAlignment" Value="Stretch" />
                 <Setter Property="HorizontalContentAlignment" Value="Stretch" />
