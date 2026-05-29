@@ -127,9 +127,20 @@
                                     Opacity="{x:Bind CardOpacity, Mode=OneWay}"
                                     controls:WrapByRowLayout.IsCustomSized="{x:Bind IsLayoutCustomSized, Mode=OneWay}"
                                     AllowDrop="True"
+                                    CanDrag="True"
                                     Tag="{x:Bind}"
+                                    RenderTransformOrigin="0.5,0.5"
+                                    DragStarting="OnDeviceCardDragStarting"
+                                    DropCompleted="OnDeviceCardDropCompleted"
                                     DragOver="OnDeviceCardDragOver"
                                     Drop="OnDeviceCardDrop">
+                                <!-- Shrinks slightly while another card is being dragged for reorder,
+                                     giving the dragged card a lifted look. RenderTransform doesn't
+                                     affect layout, so cards keep their grid slots. -->
+                                <Border.RenderTransform>
+                                    <ScaleTransform ScaleX="{x:Bind ReorderScaleFactor, Mode=OneWay}"
+                                                    ScaleY="{x:Bind ReorderScaleFactor, Mode=OneWay}" />
+                                </Border.RenderTransform>
                                 <!-- Right-click to show / hide the device. Replaces the always-on
                                      eye button that used to sit top-right of every card. -->
                                 <Border.ContextFlyout>
@@ -456,7 +467,6 @@
                                                     <Border Width="32" Height="40"
                                                             Background="Transparent"
                                                             Padding="0"
-                                                            Opacity="{x:Bind ChipOpacity}"
                                                             CanDrag="{x:Bind CanDrag}"
                                                             Tag="{x:Bind}"
                                                             DragStarting="OnAppChipDragStarting"
@@ -468,7 +478,11 @@
                                                         <animations:Implicit.HideAnimations>
                                                             <animations:OpacityAnimation Duration="0:0:0.14" From="1" To="0" />
                                                         </animations:Implicit.HideAnimations>
-                                                        <Grid RowSpacing="2">
+                                                        <!-- Dim lives on the content, not the Border: the Border's implicit
+                                                             show animation animates its Opacity to 1 and pins it there, which
+                                                             would override a dim bound on the Border. Binding the inner Grid
+                                                             instead lets the fade-in and the idle/locked dim compose. -->
+                                                        <Grid RowSpacing="2" Opacity="{x:Bind ChipOpacity, Mode=OneWay}">
                                                             <Grid.RowDefinitions>
                                                                 <RowDefinition Height="*" />
                                                                 <RowDefinition Height="Auto" />
@@ -516,6 +530,23 @@
                                         </ItemsRepeater>
                                     </StackPanel>
                                 </StackPanel>
+
+                                    <!-- Reorder drop indicators: a thin accent rule on the edge the
+                                         dragged card would land against. Non-hit-testable so they
+                                         never interfere with the drag; collapsed unless the page lights
+                                         one up during a card-reorder DragOver. -->
+                                    <Border Width="3"
+                                            HorizontalAlignment="Left"
+                                            CornerRadius="{StaticResource CardCornerRadius}"
+                                            Background="{ThemeResource AccentFillColorDefaultBrush}"
+                                            IsHitTestVisible="False"
+                                            Visibility="{x:Bind ShowInsertBefore, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                    <Border Width="3"
+                                            HorizontalAlignment="Right"
+                                            CornerRadius="{StaticResource CardCornerRadius}"
+                                            Background="{ThemeResource AccentFillColorDefaultBrush}"
+                                            IsHitTestVisible="False"
+                                            Visibility="{x:Bind ShowInsertAfter, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
                                 </Grid>
                             </Border>
                         </DataTemplate>

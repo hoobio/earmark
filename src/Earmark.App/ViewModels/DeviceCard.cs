@@ -204,6 +204,30 @@ public partial class DeviceCard : ObservableObject
     [ObservableProperty]
     public partial bool IsPinnedByUser { get; set; }
 
+    // ---- Reorder drag indicator ----
+    //
+    // Driven by the Home page during a card-reorder DragOver: exactly one edge of the card the
+    // pointer is over lights up to show where the dragged card would land. Both clear on drop /
+    // drag-end. Bound to two thin, non-hit-testable accent rules on the card's left/right edges.
+
+    /// <summary>Show the accent rule on the card's left edge (the dragged card lands before this one).</summary>
+    [ObservableProperty]
+    public partial bool ShowInsertBefore { get; set; }
+
+    /// <summary>Show the accent rule on the card's right edge (the dragged card lands after this one).</summary>
+    [ObservableProperty]
+    public partial bool ShowInsertAfter { get; set; }
+
+    /// <summary>True while a reorder drag is in flight on another card: this card shrinks slightly
+    /// to give the dragged card a "lifted" look. The dragged card itself is excluded.</summary>
+    [ObservableProperty]
+    public partial bool ShrinkForReorder { get; set; }
+
+    /// <summary>Scale applied to the card while another card is being dragged for reorder.</summary>
+    public double ReorderScaleFactor => ShrinkForReorder ? 0.96 : 1.0;
+
+    partial void OnShrinkForReorderChanged(bool value) => OnPropertyChanged(nameof(ReorderScaleFactor));
+
     /// <summary>
     /// Resolves visibility per the spec:
     ///   - User-hidden    -> hidden (force)

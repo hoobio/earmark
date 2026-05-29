@@ -44,6 +44,14 @@ public sealed class AppSettings
     /// </summary>
     public List<string> PinnedDeviceIds { get; set; } = new();
 
+    /// <summary>
+    /// Manual device-card order (endpoint ids, top-to-bottom across the grid). Empty until the
+    /// user first drags a card to reorder, which snapshots the entire current order; thereafter
+    /// the user rearranges freely. Lists every card, visible or hidden, so a hidden device keeps
+    /// its slot. A device not in this list slots into its default-sort position among the rest.
+    /// </summary>
+    public List<string> DeviceOrder { get; set; } = new();
+
     /// <summary>Persisted window size in physical pixels. Null until the user has resized
     /// at least once (so first launch picks the WinUI default).</summary>
     public int? WindowWidth { get; set; }

@@ -1,3 +1,5 @@
+using System.Runtime.InteropServices.WindowsRuntime;
+
 using Earmark.App.ViewModels;
 using Earmark.Core.Models;
 
@@ -7,9 +9,12 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Imaging;
 
 using Windows.ApplicationModel.DataTransfer;
+using Windows.Graphics.Imaging;
 using Windows.System;
+using Windows.UI;
 
 namespace Earmark.App.Views;
 
@@ -155,6 +160,12 @@ public sealed partial class HomePage : Page
     // target, or dropping back on the source card). No custom cursor work needed.
 
     private const string DragPayloadPrefix = "earmark:chip:";
+    private const string DragPayloadCardPrefix = "earmark:card:";
+
+    /// <summary>The card currently showing a reorder insertion rule. The page lights exactly
+    /// one card at a time during a card drag; this tracks it so each new DragOver / Drop /
+    /// DropCompleted can clear the previous one without scanning every card.</summary>
+    private DeviceCard? _reorderHighlightCard;
 
     private void OnAppChipDragStarting(UIElement sender, DragStartingEventArgs args)
     {
@@ -179,9 +190,106 @@ public sealed partial class HomePage : Page
         // affordances (e.g. flash the source card on a successful move) have a place to land.
     }
 
+    // ---- Device card reorder drag ----
+    //
+    // The card Border is both a drag source (reorder) and a drop target (app chips + reorder).
+    // CanDrag="True" yields the drag to interactive children that capture the pointer (slider,
+    // mute button, app chips, rule chips) while a grab on the card background / labels starts a
+    // reorder. Payload is "earmark:card:{endpointId}"; the Drop handler disambiguates strictly
+    // by prefix against the chip payload above.
+
+    private async void OnDeviceCardDragStarting(UIElement sender, DragStartingEventArgs args)
+    {
+        if (sender is not FrameworkElement { Tag: DeviceCard card } element) return;
+        args.Data.SetText($"{DragPayloadCardPrefix}{card.Endpoint.Id}");
+        args.Data.RequestedOperation = DataPackageOperation.Move;
+
+        // Shrink every other card so the dragged one reads as "lifted".
+        ViewModel.SetReorderInProgress(true, card.Endpoint.Id);
+
+        // The default drag bitmap is translucent: the card fill is a semi-transparent layer brush
+        // meant to sit over Mica, so lifted off the backdrop it reads as see-through. Render an
+        // opaque snapshot and use that as the drag visual instead.
+        var deferral = args.GetDeferral();
+        try
+        {
+            var bitmap = await RenderCardOpaqueAsync(element);
+            if (bitmap is not null)
+            {
+                args.DragUI.SetContentFromSoftwareBitmap(bitmap);
+            }
+        }
+        catch
+        {
+            // Keep the default (translucent) visual if the snapshot fails.
+        }
+        finally
+        {
+            deferral.Complete();
+        }
+    }
+
+    private void OnDeviceCardDropCompleted(UIElement sender, DropCompletedEventArgs args)
+    {
+        // Drag finished (dropped on a card, dropped on empty space, or cancelled) - drop any
+        // lingering insertion rule and un-shrink the other cards. The Drop handler also clears the
+        // rule, but a cancelled drag never reaches it, so this is the catch-all.
+        ClearReorderHighlight();
+        ViewModel.SetReorderInProgress(false);
+    }
+
+    /// <summary>Renders the card to an opaque bitmap for use as the drag visual. The card's own
+    /// fill is a translucent layer brush, so each premultiplied pixel is composited over the
+    /// theme's solid background colour to make the lifted card read as solid.</summary>
+    private static async Task<SoftwareBitmap?> RenderCardOpaqueAsync(FrameworkElement element)
+    {
+        var rtb = new RenderTargetBitmap();
+        await rtb.RenderAsync(element);
+        if (rtb.PixelWidth <= 0 || rtb.PixelHeight <= 0) return null;
+
+        var bytes = (await rtb.GetPixelsAsync()).ToArray();   // BGRA8, premultiplied alpha
+        var baseColor = element.ActualTheme == ElementTheme.Light
+            ? Color.FromArgb(255, 0xF3, 0xF3, 0xF3)           // SolidBackgroundFillColorBase (light)
+            : Color.FromArgb(255, 0x20, 0x20, 0x20);          // SolidBackgroundFillColorBase (dark)
+
+        for (var i = 0; i + 3 < bytes.Length; i += 4)
+        {
+            var a = bytes[i + 3];
+            if (a == 255) continue;
+            var inv = 255 - a;
+            bytes[i + 0] = (byte)(bytes[i + 0] + (baseColor.B * inv / 255));
+            bytes[i + 1] = (byte)(bytes[i + 1] + (baseColor.G * inv / 255));
+            bytes[i + 2] = (byte)(bytes[i + 2] + (baseColor.R * inv / 255));
+            bytes[i + 3] = 255;
+        }
+
+        var bitmap = new SoftwareBitmap(BitmapPixelFormat.Bgra8, rtb.PixelWidth, rtb.PixelHeight, BitmapAlphaMode.Premultiplied);
+        bitmap.CopyFromBuffer(bytes.AsBuffer());
+        return bitmap;
+    }
+
+    private void SetReorderHighlight(DeviceCard card, bool insertAfter)
+    {
+        if (!ReferenceEquals(_reorderHighlightCard, card))
+        {
+            ClearReorderHighlight();
+            _reorderHighlightCard = card;
+        }
+        card.ShowInsertBefore = !insertAfter;
+        card.ShowInsertAfter = insertAfter;
+    }
+
+    private void ClearReorderHighlight()
+    {
+        if (_reorderHighlightCard is null) return;
+        _reorderHighlightCard.ShowInsertBefore = false;
+        _reorderHighlightCard.ShowInsertAfter = false;
+        _reorderHighlightCard = null;
+    }
+
     private void OnDeviceCardDragOver(object sender, DragEventArgs e)
     {
-        if (sender is not FrameworkElement { Tag: DeviceCard card }) return;
+        if (sender is not FrameworkElement { Tag: DeviceCard card } border) return;
 
         // Bail early when the drag isn't ours. Other drags (file drops onto the window, etc.)
         // shouldn't get our acceptance.
@@ -191,7 +299,35 @@ public sealed partial class HomePage : Page
             return;
         }
 
-        if (TryReadPayload(e.DataView, out var pid, out var sourceEndpointId))
+        // Read the payload once, then branch on prefix: card-reorder vs app-chip move.
+        var text = TryReadText(e.DataView);
+        if (text is null)
+        {
+            e.AcceptedOperation = DataPackageOperation.None;
+            return;
+        }
+
+        if (text.StartsWith(DragPayloadCardPrefix, StringComparison.Ordinal))
+        {
+            var sourceId = text.Substring(DragPayloadCardPrefix.Length);
+            // Dropping a card on itself is a no-op; no insertion rule.
+            if (string.Equals(card.Endpoint.Id, sourceId, StringComparison.OrdinalIgnoreCase))
+            {
+                ClearReorderHighlight();
+                e.AcceptedOperation = DataPackageOperation.None;
+            }
+            else
+            {
+                // Insert side = which half of the card the pointer is over.
+                var insertAfter = e.GetPosition(border).X > border.ActualWidth / 2;
+                SetReorderHighlight(card, insertAfter);
+                e.AcceptedOperation = DataPackageOperation.Move;
+            }
+            e.Handled = true;
+            return;
+        }
+
+        if (TryParseChipPayload(text, out var pid, out var sourceEndpointId))
         {
             _ = pid;
             // Capture endpoint -> cursor shows slashed circle. Same goes for dropping on the
@@ -215,9 +351,28 @@ public sealed partial class HomePage : Page
 
     private void OnDeviceCardDrop(object sender, DragEventArgs e)
     {
-        if (sender is not FrameworkElement { Tag: DeviceCard card }) return;
+        if (sender is not FrameworkElement { Tag: DeviceCard card } border) return;
+
+        var text = TryReadText(e.DataView);
+        if (text is null) return;
+
+        if (text.StartsWith(DragPayloadCardPrefix, StringComparison.Ordinal))
+        {
+            ClearReorderHighlight();
+            var sourceId = text.Substring(DragPayloadCardPrefix.Length);
+            if (string.Equals(card.Endpoint.Id, sourceId, StringComparison.OrdinalIgnoreCase)) return;
+
+            var insertAfter = e.GetPosition(border).X > border.ActualWidth / 2;
+            _logger?.LogInformation(
+                "Reorder: {Source} -> {Target} (after={After})",
+                sourceId, card.Endpoint.Id, insertAfter);
+            ViewModel.ReorderDevice(sourceId, card, insertAfter);
+            e.Handled = true;
+            return;
+        }
+
         if (card.IsCapture) return;
-        if (!TryReadPayload(e.DataView, out var pid, out var sourceEndpointId)) return;
+        if (!TryParseChipPayload(text, out var pid, out var sourceEndpointId)) return;
         if (string.Equals(card.Endpoint.Id, sourceEndpointId, StringComparison.OrdinalIgnoreCase)) return;
 
         var chip = FindChipByPid(pid);
@@ -246,24 +401,27 @@ public sealed partial class HomePage : Page
         return null;
     }
 
-    private static bool TryReadPayload(DataPackageView view, out uint pid, out string sourceEndpointId)
+    /// <summary>Reads the in-process drag payload text once. GetTextAsync is async; the
+    /// DragOver/Drop handlers can't await without losing the synchronous accept decision, so we
+    /// block on it - the DataPackage source is in-process and already resolved. Returns null when
+    /// there's no text or it can't be read.</summary>
+    private static string? TryReadText(DataPackageView view)
     {
-        pid = 0;
-        sourceEndpointId = string.Empty;
-        if (!view.Contains(StandardDataFormats.Text)) return false;
-
-        // GetTextAsync is async; the DragOver/Drop handlers can't await without losing the
-        // synchronous accept decision. Block on the async via GetResults - the source of
-        // this DataPackage is in-process so it's already resolved.
-        string text;
+        if (!view.Contains(StandardDataFormats.Text)) return null;
         try
         {
-            text = view.GetTextAsync().AsTask().GetAwaiter().GetResult();
+            return view.GetTextAsync().AsTask().GetAwaiter().GetResult();
         }
         catch
         {
-            return false;
+            return null;
         }
+    }
+
+    private static bool TryParseChipPayload(string text, out uint pid, out string sourceEndpointId)
+    {
+        pid = 0;
+        sourceEndpointId = string.Empty;
         if (string.IsNullOrEmpty(text) || !text.StartsWith(DragPayloadPrefix, StringComparison.Ordinal)) return false;
 
         var body = text.Substring(DragPayloadPrefix.Length);

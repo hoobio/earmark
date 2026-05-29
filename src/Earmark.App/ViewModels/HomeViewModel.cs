@@ -237,14 +237,36 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         var rulesSnapshot = _rules.Rules;
         List<AudioEndpoint>? combinedEndpointsCache = null;
 
+        // Group every showable session's pid by app identity (executable path). One chip stands
+        // in for an app's several processes, so its meter must reflect the loudest sibling - this
+        // map lets Phase 1 take the max peak across them without a nested per-tick scan.
+        var pidsByAppKey = new Dictionary<string, List<uint>>(StringComparer.Ordinal);
+        foreach (var session in sessionsSnapshot)
+        {
+            if (!AppChip.ShouldShowAsAppChip(session)) continue;
+            if (!pidsByAppKey.TryGetValue(session.IdentityKey, out var pids))
+            {
+                pids = new List<uint>();
+                pidsByAppKey[session.IdentityKey] = pids;
+            }
+            pids.Add(session.ProcessId);
+        }
+
         foreach (var card in Devices)
         {
-            // Phase 1: update peaks on existing chips, keeping LastAudibleAt fresh.
+            // Phase 1: update peaks on existing chips, keeping LastAudibleAt fresh. Each chip's
+            // peak is the max across all processes of its app on this endpoint. Track whether any
+            // chip's active/idle state flipped this tick; if so, re-sort the card so newly active
+            // chips rise to the front and freshly-idle ones settle to the back (dimmed).
+            var activityFlipped = false;
             foreach (var chip in card.Apps)
             {
-                var peak = _sessionMeters.GetPeak(chip.ProcessId, card.Endpoint.Id) ?? 0f;
+                var peak = MaxPeakForApp(chip, card.Endpoint.Id, pidsByAppKey);
+                var wasActive = chip.IsActive;
                 chip.Tick(peak);
+                if (chip.IsActive != wasActive) activityFlipped = true;
             }
+            if (activityFlipped) ResortCardApps(card);
 
             // Phase 2: place chips on cards where audio is currently flowing for that PID.
             // PEAK-DRIVEN PLACEMENT. We ignore session.CurrentEndpointId entirely - that
@@ -254,13 +276,16 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             // the chip on the wrong card. Live peak is the truth.
             if (card.Endpoint.Flow == EndpointFlow.Render)
             {
-                var seenPidsOnThisCard = new HashSet<uint>();
-                foreach (var chip in card.Apps) seenPidsOnThisCard.Add(chip.ProcessId);
+                // Track app identities (not pids) already on the card: one chip stands in for an
+                // app's several processes, so a second process of an app already shown must not
+                // spawn a duplicate chip.
+                var seenAppsOnThisCard = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var chip in card.Apps) seenAppsOnThisCard.Add(chip.Session.IdentityKey);
 
                 foreach (var session in sessionsSnapshot)
                 {
                     if (!AppChip.ShouldShowAsAppChip(session)) continue;
-                    if (seenPidsOnThisCard.Contains(session.ProcessId)) continue;
+                    if (seenAppsOnThisCard.Contains(session.IdentityKey)) continue;
 
                     var livePeak = _sessionMeters.GetPeak(session.ProcessId, card.Endpoint.Id) ?? 0f;
                     if (livePeak < AppChip.AudibleAmplitudeThreshold) continue;
@@ -269,30 +294,37 @@ public partial class HomeViewModel : ObservableObject, IDisposable
                         .Concat(_endpoints.GetEndpoints(EndpointFlow.Capture))
                         .ToList();
                     var match = _matcher.FindAppRoute(session, EndpointFlow.Render, rulesSnapshot, combinedEndpointsCache, sessionsSnapshot);
-                    var revivedChip = new AppChip(session, card.Endpoint.Id, _iconService, match?.Rule);
+                    var revivedChip = new AppChip(session, card.Endpoint.Id, _iconService, match?.Rule)
+                    {
+                        RulePinnedHere = match is not null &&
+                            string.Equals(match.Endpoint.Id, card.Endpoint.Id, StringComparison.OrdinalIgnoreCase),
+                    };
                     InsertChipSorted(card.Apps, revivedChip);
                     card.NotifyAppsChanged();
-                    seenPidsOnThisCard.Add(session.ProcessId);
+                    seenAppsOnThisCard.Add(session.IdentityKey);
                     var sessionEndpointMatchesCard = string.Equals(session.CurrentEndpointId, card.Endpoint.Id, StringComparison.OrdinalIgnoreCase);
                     _logger.LogInformation(
                         "Chip placed via peak: pid={Pid} name='{Name}' card='{Card}' cardEndpoint={CardEp} peak={Peak:0.000} sessionEndpoint={SessEp} match={Match}",
                         session.ProcessId, session.ProcessName, card.Endpoint.DisplayName,
                         card.Endpoint.Id, livePeak, session.CurrentEndpointId, sessionEndpointMatchesCard);
 
-                    // Migration: drop the same PID's chip from any OTHER card where it's
-                    // no longer audible. Without this, a per-app-default change (rule or
-                    // drag-drop) leaves the chip on the previous card for the full silence
-                    // grace window before the prune catches up. Multi-endpoint same-PID
-                    // case (e.g. Edge playing through two devices) is preserved because we
-                    // only remove from cards whose peak for this PID is currently silent.
+                    // Migration: drop this app's chip from any OTHER card where it's no longer
+                    // audible. Without this, a per-app-default change (rule or drag-drop) leaves
+                    // the chip on the previous card for the full silence grace before the prune
+                    // catches up. Match by app identity (the other chip may be a different process
+                    // of the same app); rule-pinned chips stay (the rule still pins it there);
+                    // multi-endpoint apps (e.g. Edge on two devices) survive because we only drop
+                    // cards where this app is currently silent.
                     foreach (var otherCard in Devices)
                     {
                         if (ReferenceEquals(otherCard, card)) continue;
                         if (otherCard.Endpoint.Flow != EndpointFlow.Render) continue;
                         for (var oi = otherCard.Apps.Count - 1; oi >= 0; oi--)
                         {
-                            if (otherCard.Apps[oi].ProcessId != session.ProcessId) continue;
-                            var otherPeak = _sessionMeters.GetPeak(session.ProcessId, otherCard.Endpoint.Id) ?? 0f;
+                            var otherChip = otherCard.Apps[oi];
+                            if (!string.Equals(otherChip.Session.IdentityKey, session.IdentityKey, StringComparison.Ordinal)) continue;
+                            if (otherChip.RulePinnedHere) continue;
+                            var otherPeak = MaxPeakForApp(otherChip, otherCard.Endpoint.Id, pidsByAppKey);
                             if (otherPeak < AppChip.AudibleAmplitudeThreshold)
                             {
                                 otherCard.Apps.RemoveAt(oi);
@@ -309,6 +341,10 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             // but quiet" case - long-running app idle for a sustained stretch.
             for (var i = card.Apps.Count - 1; i >= 0; i--)
             {
+                // Rule-pinned chips persist while the process runs (removal is left to
+                // SessionRemoved). When a rule stops pinning, the next SyncCardApps flips the
+                // cached flag false and the now-silent chip ages out here via the grace.
+                if (card.Apps[i].RulePinnedHere) continue;
                 if (now - card.Apps[i].LastAudibleAt > AppChipAudibleGrace)
                 {
                     _logger.LogInformation("Chip prune: pid={Pid} silent past grace", card.Apps[i].ProcessId);
@@ -479,9 +515,12 @@ public partial class HomeViewModel : ObservableObject, IDisposable
 
         var hiddenIds = new HashSet<string>(_settings.Current.HiddenDeviceIds, StringComparer.OrdinalIgnoreCase);
         var pinnedIds = new HashSet<string>(_settings.Current.PinnedDeviceIds, StringComparer.OrdinalIgnoreCase);
+        // Snapshot the manual order on the UI thread so the background BuildCards reads a stable
+        // copy (a concurrent ReorderDevice replaces the list reference rather than mutating it).
+        var deviceOrder = new List<string>(_settings.Current.DeviceOrder);
         var showHidden = ShowHiddenDevices;
 
-        var built = await Task.Run(() => BuildCards(hiddenIds, pinnedIds, showHidden), ct).ConfigureAwait(false);
+        var built = await Task.Run(() => BuildCards(hiddenIds, pinnedIds, deviceOrder, showHidden), ct).ConfigureAwait(false);
 
         if (ct.IsCancellationRequested) return;
 
@@ -571,13 +610,26 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         var renderEndpoints = _endpoints.GetEndpoints(EndpointFlow.Render);
         var captureEndpoints = _endpoints.GetEndpoints(EndpointFlow.Capture);
         var combined = renderEndpoints.Concat(captureEndpoints).ToList();
+
+        // Resolve each visible session's rule-pinned render route ONCE here, on the debounced
+        // path. The matcher loops rules x actions x regex; the route doesn't depend on the
+        // card, so computing it per card would multiply that cost needlessly. Phase 2 / Phase 3
+        // in the 20Hz tick never call the matcher - they read the cached chip flag instead.
+        var routeByPid = new Dictionary<uint, AppRouteMatch?>();
+        foreach (var session in sessions)
+        {
+            if (!AppChip.ShouldShowAsAppChip(session)) continue;
+            if (routeByPid.ContainsKey(session.ProcessId)) continue;
+            routeByPid[session.ProcessId] = _matcher.FindAppRoute(session, EndpointFlow.Render, rules, combined, sessions);
+        }
+
         foreach (var card in _allCards)
         {
-            SyncCardApps(card, sessions, rules, combined);
+            SyncCardApps(card, sessions, routeByPid);
         }
     }
 
-    private List<DeviceCard> BuildCards(HashSet<string> hiddenIds, HashSet<string> pinnedIds, bool showHidden)
+    private List<DeviceCard> BuildCards(HashSet<string> hiddenIds, HashSet<string> pinnedIds, List<string> deviceOrder, bool showHidden)
     {
         var renderEndpoints = _endpoints.GetEndpoints(EndpointFlow.Render);
         var captureEndpoints = _endpoints.GetEndpoints(EndpointFlow.Capture);
@@ -605,6 +657,13 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             .ThenBy(e => e.Flow)
             .ThenBy(e => e.FriendlyName, StringComparer.OrdinalIgnoreCase)
             .ToList();
+
+        // A manual order, once set, wins: lay the persisted endpoints out first, then slot any
+        // device not in that list into its default-sort position among the rest.
+        if (deviceOrder.Count > 0)
+        {
+            ordered = ApplyManualOrder(ordered, deviceOrder);
+        }
 
         var cards = new List<DeviceCard>(ordered.Count);
         foreach (var endpoint in ordered)
@@ -639,6 +698,68 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
+    /// Merges the persisted manual order with the freshly computed default sort. Endpoints listed
+    /// in <paramref name="deviceOrder"/> that still exist lead, in that order; each endpoint NOT in
+    /// the list slots into its default-sort position by sitting after its nearest already-placed
+    /// predecessor (else before its nearest already-placed successor, else last). So a device that
+    /// appears after the order was frozen lands where the default sort would have put it among the
+    /// devices around it, then keeps that slot.
+    /// </summary>
+    private static List<AudioEndpoint> ApplyManualOrder(List<AudioEndpoint> ordered, List<string> deviceOrder)
+    {
+        var byId = new Dictionary<string, AudioEndpoint>(StringComparer.OrdinalIgnoreCase);
+        foreach (var endpoint in ordered) byId.TryAdd(endpoint.Id, endpoint);
+
+        var placed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var result = new List<AudioEndpoint>(ordered.Count);
+        foreach (var id in deviceOrder)
+        {
+            if (byId.TryGetValue(id, out var endpoint) && placed.Add(endpoint.Id))
+            {
+                result.Add(endpoint);
+            }
+        }
+
+        for (var i = 0; i < ordered.Count; i++)
+        {
+            var endpoint = ordered[i];
+            if (placed.Contains(endpoint.Id)) continue;
+
+            // Nearest already-placed predecessor in the default sort -> insert just after it.
+            var insertAt = -1;
+            for (var p = i - 1; p >= 0; p--)
+            {
+                var idx = IndexOfId(result, ordered[p].Id);
+                if (idx >= 0) { insertAt = idx + 1; break; }
+            }
+            // Else nearest already-placed successor -> insert just before it. Else append.
+            if (insertAt < 0)
+            {
+                for (var s = i + 1; s < ordered.Count; s++)
+                {
+                    var idx = IndexOfId(result, ordered[s].Id);
+                    if (idx >= 0) { insertAt = idx; break; }
+                }
+            }
+            if (insertAt < 0) insertAt = result.Count;
+
+            result.Insert(insertAt, endpoint);
+            placed.Add(endpoint.Id);
+        }
+
+        return result;
+    }
+
+    private static int IndexOfId(List<AudioEndpoint> list, string id)
+    {
+        for (var i = 0; i < list.Count; i++)
+        {
+            if (string.Equals(list[i].Id, id, StringComparison.OrdinalIgnoreCase)) return i;
+        }
+        return -1;
+    }
+
+    /// <summary>
     /// Reconciles the card's <see cref="DeviceCard.Apps"/> collection with the current
     /// session snapshot. Mutates in place (Add / Remove on the ObservableCollection) so the
     /// XAML implicit animations fire per chip; replacing the collection wholesale tears down
@@ -648,8 +769,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     private void SyncCardApps(
         DeviceCard card,
         IReadOnlyList<AudioSession> sessions,
-        IReadOnlyList<RoutingRule> rules,
-        IReadOnlyList<AudioEndpoint> combinedEndpoints)
+        Dictionary<uint, AppRouteMatch?> routeByPid)
     {
         if (card.Endpoint.Flow != EndpointFlow.Render)
         {
@@ -661,63 +781,161 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             return;
         }
 
-        // PEAK-DRIVEN PLACEMENT. session.CurrentEndpointId is unreliable for chip placement
-        // (it captures where the session was created, not where audio currently flows).
-        // For each session in the global snapshot, ask the meter cache "is this PID audible
-        // ON THIS CARD'S ENDPOINT right now?" - if yes, it belongs here.
-        var activePids = new Dictionary<uint, AudioSession>();
-        var presentPidsAnyState = new HashSet<uint>();
+        // Collapse any pre-existing duplicate chips for the same app (an app spawns several
+        // processes), keeping the loudest so the survivor's meter reflects real output. One chip
+        // per app remains, keyed by executable path.
+        var existingByApp = new Dictionary<string, AppChip>(StringComparer.Ordinal);
+        for (var i = card.Apps.Count - 1; i >= 0; i--)
+        {
+            var chip = card.Apps[i];
+            var key = chip.Session.IdentityKey;
+            if (existingByApp.TryGetValue(key, out var kept))
+            {
+                var keptPeak = _sessionMeters.GetPeak(kept.ProcessId, card.Endpoint.Id) ?? 0f;
+                var thisPeak = _sessionMeters.GetPeak(chip.ProcessId, card.Endpoint.Id) ?? 0f;
+                if (thisPeak > keptPeak)
+                {
+                    var keptIndex = card.Apps.IndexOf(kept);
+                    if (keptIndex >= 0) card.Apps.RemoveAt(keptIndex);
+                    existingByApp[key] = chip;
+                }
+                else
+                {
+                    card.Apps.RemoveAt(i);
+                }
+            }
+            else
+            {
+                existingByApp[key] = chip;
+            }
+        }
+
+        // A session belongs on this render card when EITHER it's audible here now OR an enabled
+        // ApplicationOutput rule pins it to this endpoint (and the process is running, i.e. it's
+        // in the snapshot). Audibility uses the live peak cache; rule-pinning uses the pre-resolved
+        // route map (no matcher calls here). Silent-but-pinned apps still get a chip so a running
+        // app shows under its device before it makes a sound. Processes of one app collapse to a
+        // single chip, keyed by executable path.
+        var rulePinnedApps = new HashSet<string>(StringComparer.Ordinal);
+        var additions = new Dictionary<string, (AudioSession Session, bool Audible, RoutingRule? Rule, bool PinnedHere)>(StringComparer.Ordinal);
         foreach (var session in sessions)
         {
             if (!AppChip.ShouldShowAsAppChip(session)) continue;
 
+            var key = session.IdentityKey;
+            routeByPid.TryGetValue(session.ProcessId, out var match);
+            var pinnedHere = match is not null &&
+                string.Equals(match.Endpoint.Id, card.Endpoint.Id, StringComparison.OrdinalIgnoreCase);
+            if (pinnedHere) rulePinnedApps.Add(key);
+
+            if (existingByApp.ContainsKey(key)) continue;
+
             var livePeak = _sessionMeters.GetPeak(session.ProcessId, card.Endpoint.Id) ?? 0f;
-            if (livePeak >= AppChip.AudibleAmplitudeThreshold)
+            var audible = livePeak >= AppChip.AudibleAmplitudeThreshold;
+            if (!audible && !pinnedHere) continue;
+
+            // One addition per app, preferring an audible representative (so its meter shows real
+            // audio) and carrying any rule match for the lock badge.
+            if (additions.TryGetValue(key, out var cur))
             {
-                presentPidsAnyState.Add(session.ProcessId);
-                activePids.TryAdd(session.ProcessId, session);
+                var rep = (audible && !cur.Audible) ? session : cur.Session;
+                additions[key] = (rep, cur.Audible || audible, cur.Rule ?? match?.Rule, cur.PinnedHere || pinnedHere);
+            }
+            else
+            {
+                additions[key] = (session, audible, match?.Rule, pinnedHere);
             }
         }
 
-        // SyncCardApps does ADDITIONS only. Removals live on two paths:
-        //   - event-driven: SessionRemoved when a process exits / session is disposed
-        //   - polled: Phase 3 in TickAppMeters when LastAudibleAt > grace
-        // Tying removal to "peak says it's not audible right this instant" loses chips
-        // during brief silent stretches (track gaps, pause/resume) - that's the grace
-        // window's job and it correctly tolerates a few seconds of quiet.
-        _ = presentPidsAnyState;
-
-        var presentPids = new HashSet<uint>();
-        foreach (var chip in card.Apps) presentPids.Add(chip.ProcessId);
-
-        // Add chips for newly-present sessions, in alphabetical position.
-        var additions = activePids.Values
-            .Where(s => !presentPids.Contains(s.ProcessId))
-            .OrderBy(s => s.IsSystemSounds ? "System Sounds" : s.DisplayName, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-        foreach (var session in additions)
+        // SyncCardApps does ADDITIONS only (plus the rule-pin flag refresh below). Removals live
+        // on two paths: event-driven SessionRemoved when a process exits, and the Phase 3 prune
+        // for live-but-silent sessions (which skips rule-pinned chips). Tying removal to "peak
+        // says silent right now" would lose chips during brief gaps (track changes, pause).
+        foreach (var add in additions.Values
+            .OrderBy(a => a.Session.IsSystemSounds ? "System Sounds" : a.Session.DisplayName, StringComparer.OrdinalIgnoreCase))
         {
-            var match = _matcher.FindAppRoute(session, EndpointFlow.Render, rules, combinedEndpoints, sessions);
-            var chip = new AppChip(session, card.Endpoint.Id, _iconService, match?.Rule);
+            var chip = new AppChip(add.Session, card.Endpoint.Id, _iconService, add.Rule, startsActive: add.Audible)
+            {
+                RulePinnedHere = add.PinnedHere,
+            };
             InsertChipSorted(card.Apps, chip);
+            if (add.PinnedHere && !add.Audible)
+            {
+                _logger.LogInformation(
+                    "Chip placed via rule-pin (silent): pid={Pid} name='{Name}' card='{Card}'",
+                    add.Session.ProcessId, add.Session.ProcessName, card.Endpoint.DisplayName);
+            }
+        }
+
+        // Refresh the cached rule-pin flag on every surviving chip: a rule may have started or
+        // stopped pinning this app since the chip was created. When it flips false the now-silent
+        // chip becomes eligible for the Phase 3 grace prune again.
+        foreach (var chip in card.Apps)
+        {
+            chip.RulePinnedHere = rulePinnedApps.Contains(chip.Session.IdentityKey);
         }
 
         card.NotifyAppsChanged();
     }
 
+    /// <summary>Peak for the chip's app on an endpoint: the max live peak across every process of
+    /// that app (one chip stands in for them all). Falls back to the chip's own pid if the app
+    /// isn't in the grouped snapshot.</summary>
+    private float MaxPeakForApp(AppChip chip, string endpointId, Dictionary<string, List<uint>> pidsByAppKey)
+    {
+        if (pidsByAppKey.TryGetValue(chip.Session.IdentityKey, out var pids))
+        {
+            var best = 0f;
+            foreach (var pid in pids)
+            {
+                var p = _sessionMeters.GetPeak(pid, endpointId) ?? 0f;
+                if (p > best) best = p;
+            }
+            return best;
+        }
+        return _sessionMeters.GetPeak(chip.ProcessId, endpointId) ?? 0f;
+    }
+
+    /// <summary>Sort key: active (audible/recent) chips first, then idle chips (dimmed
+    /// rule-pinned or aging-out), each tier alphabetical by display name.</summary>
+    private static int CompareChips(AppChip a, AppChip b)
+    {
+        var rank = (a.IsActive ? 0 : 1).CompareTo(b.IsActive ? 0 : 1);
+        if (rank != 0) return rank;
+        var an = a.Session.IsSystemSounds ? "System Sounds" : a.Session.DisplayName;
+        var bn = b.Session.IsSystemSounds ? "System Sounds" : b.Session.DisplayName;
+        return string.Compare(an, bn, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static void InsertChipSorted(ObservableCollection<AppChip> chips, AppChip chip)
     {
-        var name = chip.Session.IsSystemSounds ? "System Sounds" : chip.Session.DisplayName;
         for (var i = 0; i < chips.Count; i++)
         {
-            var existing = chips[i].Session.IsSystemSounds ? "System Sounds" : chips[i].Session.DisplayName;
-            if (string.Compare(name, existing, StringComparison.OrdinalIgnoreCase) < 0)
+            if (CompareChips(chip, chips[i]) < 0)
             {
                 chips.Insert(i, chip);
                 return;
             }
         }
         chips.Add(chip);
+    }
+
+    /// <summary>Reorders a card's chips in place (selection sort via <see cref="ObservableCollection{T}.Move"/>)
+    /// so each chip keeps its instance identity - bindings and fade animations survive. Chip
+    /// counts per card are tiny, so O(n^2) with Move is cheap; only called when an IsActive flip
+    /// actually changes the order.</summary>
+    private static void ResortCardApps(DeviceCard card)
+    {
+        var chips = card.Apps;
+        for (var i = 0; i < chips.Count - 1; i++)
+        {
+            var best = i;
+            for (var j = i + 1; j < chips.Count; j++)
+            {
+                if (CompareChips(chips[j], chips[best]) < 0) best = j;
+            }
+            if (best != i) chips.Move(best, i);
+        }
     }
 
     /// <summary>
@@ -743,6 +961,59 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         catch
         {
             // Errors surface via the logger inside the policy service.
+        }
+    }
+
+    /// <summary>
+    /// Moves the dragged card next to <paramref name="targetCard"/> in <see cref="_allCards"/>
+    /// (the single source of truth) and persists the resulting full order. The first reorder
+    /// snapshots the entire current order into <see cref="AppSettings.DeviceOrder"/>; thereafter
+    /// the setting just mirrors <c>_allCards</c>. <paramref name="insertAfter"/> places the source
+    /// on the target's right. Hidden cards stay in <c>_allCards</c>, so the persisted list keeps
+    /// every device's slot, visible or not. Runs on the UI thread (drag/drop handler).
+    /// </summary>
+    public void ReorderDevice(string sourceId, DeviceCard targetCard, bool insertAfter)
+    {
+        ArgumentNullException.ThrowIfNull(targetCard);
+        if (string.IsNullOrEmpty(sourceId)) return;
+
+        var sourceIndex = _allCards.FindIndex(c =>
+            string.Equals(c.Endpoint.Id, sourceId, StringComparison.OrdinalIgnoreCase));
+        if (sourceIndex < 0) return;
+
+        var source = _allCards[sourceIndex];
+        if (ReferenceEquals(source, targetCard)) return;
+
+        _allCards.RemoveAt(sourceIndex);
+
+        // Recompute the target index after the removal so the insert lands relative to the
+        // post-removal list (removing a source that sat before the target shifts it left by one).
+        var targetIndex = _allCards.IndexOf(targetCard);
+        if (targetIndex < 0)
+        {
+            // Target vanished mid-drag - put the source back where it was and bail.
+            _allCards.Insert(Math.Min(sourceIndex, _allCards.Count), source);
+            return;
+        }
+
+        var insertIndex = insertAfter ? targetIndex + 1 : targetIndex;
+        _allCards.Insert(insertIndex, source);
+
+        _settings.Current.DeviceOrder = _allCards.Select(c => c.Endpoint.Id).ToList();
+        QueueSettingsSave();
+        SyncVisibleDevices();
+    }
+
+    /// <summary>
+    /// Toggles the reorder "lift" affordance: every card except the one being dragged shrinks
+    /// slightly while a card-reorder drag is in flight. Called by the page on drag start / end.
+    /// </summary>
+    public void SetReorderInProgress(bool active, string? draggedId = null)
+    {
+        foreach (var card in _allCards)
+        {
+            card.ShrinkForReorder = active &&
+                !string.Equals(card.Endpoint.Id, draggedId, StringComparison.OrdinalIgnoreCase);
         }
     }
 
@@ -802,7 +1073,12 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             }
             else if (currentIndex != i)
             {
-                Devices.Move(currentIndex, i);
+                // Remove + Insert rather than Move: ItemsRepeater under a custom VirtualizingLayout
+                // doesn't re-arrange realized elements on a Move notification (the data moves but the
+                // tile stays put), which is what froze drag-reorder visually. Remove/Add forces the
+                // layout to re-realize the element at its new index.
+                Devices.RemoveAt(currentIndex);
+                Devices.Insert(i, card);
             }
         }
 
