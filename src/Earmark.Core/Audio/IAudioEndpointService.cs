@@ -40,10 +40,23 @@ public interface IAudioEndpointService
     /// before touching XAML.
     /// </summary>
     event EventHandler<EndpointMuteChangedEventArgs>? ExternalMuteChanged;
+
+    /// <summary>
+    /// Fires when a device's master volume changes externally (Windows volume flyout, hardware
+    /// keys, another app). Raised on a COM callback thread - marshal to the UI thread before
+    /// touching XAML.
+    /// </summary>
+    event EventHandler<EndpointVolumeChangedEventArgs>? ExternalVolumeChanged;
 }
 
 public sealed class EndpointMuteChangedEventArgs(string deviceId, bool muted) : EventArgs
 {
     public string DeviceId { get; } = deviceId;
     public bool Muted { get; } = muted;
+}
+
+public sealed class EndpointVolumeChangedEventArgs(string deviceId, float volume) : EventArgs
+{
+    public string DeviceId { get; } = deviceId;
+    public float Volume { get; } = volume;
 }

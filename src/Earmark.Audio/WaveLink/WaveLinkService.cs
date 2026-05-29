@@ -14,14 +14,15 @@ internal sealed class WaveLinkService : IWaveLinkService, IAsyncDisposable
     private readonly Lock _stateGate = new();
 
     private WaveLinkClient? _client;
-    private bool _clientFailed;
-    private bool _disposed;
+    private volatile bool _clientFailed;
+    private volatile bool _disposed;
 
-    private bool _isEnabled;
+    private volatile bool _isEnabled;
     private WaveLinkConnectionState _state = WaveLinkConnectionState.Disabled;
     private WaveLinkSnapshot? _lastSnapshot;
     private CancellationTokenSource? _pollCts;
     private Task? _pollTask;
+    private Task? _disableTask;
 
     public WaveLinkService(ILogger<WaveLinkService> logger, ILogger<WaveLinkClient> clientLogger)
     {
@@ -50,7 +51,7 @@ internal sealed class WaveLinkService : IWaveLinkService, IAsyncDisposable
             {
                 _logger.LogInformation("Wave Link integration disabled");
                 StopPolling();
-                _ = Task.Run(async () =>
+                _disableTask = Task.Run(async () =>
                 {
                     await _gate.WaitAsync().ConfigureAwait(false);
                     try { await DisposeClientLockedAsync().ConfigureAwait(false); }
@@ -442,6 +443,15 @@ internal sealed class WaveLinkService : IWaveLinkService, IAsyncDisposable
         {
             _gate.Release();
         }
+
+        // Drain a disable-triggered disposal task (if any) so it can't WaitAsync on the
+        // semaphore after we've disposed it.
+        var disable = _disableTask;
+        if (disable is not null)
+        {
+            try { await disable.ConfigureAwait(false); } catch { }
+        }
+
         _gate.Dispose();
     }
 }

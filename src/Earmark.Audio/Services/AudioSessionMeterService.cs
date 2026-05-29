@@ -31,7 +31,27 @@ public sealed class AudioSessionMeterService : IAudioSessionMeterService, IDispo
     private readonly Dictionary<(uint Pid, string Endpoint), List<AudioSessionControl>> _byKey = new();
     private readonly List<MMDevice> _devices = new();
     private readonly System.Threading.Timer _safetyRebuild;
+    private readonly System.Threading.Timer _peakSampler;
     private bool _disposed;
+    private int _sampling;
+    private long _lastQueryTicks;
+    private readonly Lock _rebuildGate = new();
+    private bool _rebuildRunning;
+    private bool _rebuildPending;
+
+    private static readonly TimeSpan PeakSampleInterval = TimeSpan.FromMilliseconds(50);
+    // Stop doing COM reads if nothing has called GetPeak for this long - i.e. the Devices page
+    // isn't visible. The timer keeps ticking but each pass is a no-op until a read resumes.
+    private const long IdleSampleStopMs = 1000;
+
+    // Published by the background sampler, read lock-free by GetPeak on the UI thread. The
+    // sampler does every COM MasterPeakValue read off the UI thread; the UI just looks up the
+    // latest snapshot, so the 20Hz meter poll no longer stalls the dispatcher (and the UI
+    // never touches a COM control, which also removes the rebuild-vs-read use-after-dispose
+    // race on the meter handles).
+    // Treated as immutable once published: the sampler only ever swaps in a fully-built dict,
+    // readers only TryGetValue. Concrete type (not IReadOnlyDictionary) per CA1859.
+    private volatile Dictionary<(uint Pid, string Endpoint), float> _peakSnapshot = new();
 
     public AudioSessionMeterService(
         ILogger<AudioSessionMeterService> logger,
@@ -43,64 +63,131 @@ public sealed class AudioSessionMeterService : IAudioSessionMeterService, IDispo
         _sessions = sessions ?? throw new ArgumentNullException(nameof(sessions));
         _enumerator = new MMDeviceEnumerator();
 
-        // SessionsChanged carries every meaningful lifecycle event: add, remove, state
-        // change (including pause / resume / format-change reattach via the SessionWatcher
-        // state subscription), and SessionDisconnected. Rebuilding the meter cache off this
-        // event is sufficient - no periodic safety net needed.
-        _sessions.SessionsChanged += OnSessionsChanged;
-        _endpoints.EndpointsChanged += OnSessionsChanged;
+        // Build the initial snapshot synchronously, THEN subscribe - so a session event can't
+        // start a concurrent rebuild while this first one runs.
         Rebuild();
 
-        // Safety-net rebuild. SessionsChanged is the primary path; this catches the cases
-        // where NAudio's state events drop on the floor (an IAudioSessionControl going
-        // stale without firing OnStateChanged, leaving the cached handle reading 0 peak
-        // forever even though the underlying session is emitting audio). 10s gives a
-        // visible "stuck meter" enough time to self-heal well inside the chip prune
-        // grace window. The full enumeration is cheap (~10ms typical).
-        _safetyRebuild = new System.Threading.Timer(_ =>
-        {
-            try { Rebuild(); }
-            catch (Exception ex) { _logger.LogDebug(ex, "Safety meter rebuild failed"); }
-        }, null, TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(3));
+        // SessionsChanged carries every meaningful lifecycle event (add, remove, state change,
+        // disconnect). It fires from NAudio's session-event COM callback thread and can burst
+        // hard (mpv seeking spams OnStateChanged), so rebuilds are coalesced onto a single
+        // background worker rather than run synchronously on the callback thread.
+        _sessions.SessionsChanged += OnSessionsChanged;
+        _endpoints.EndpointsChanged += OnSessionsChanged;
+
+        // Safety-net rebuild for state events NAudio drops (a stale IAudioSessionControl that
+        // stops firing OnStateChanged, leaving a cached handle reading 0 forever). Coalesced
+        // through the same worker so it can't overlap an event-driven rebuild.
+        _safetyRebuild = new System.Threading.Timer(
+            _ => QueueRebuild(),
+            null, TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(3));
+
+        // Sample peaks off the UI thread into the snapshot GetPeak reads.
+        _peakSampler = new System.Threading.Timer(
+            _ => { try { SamplePeaks(); } catch (Exception ex) { _logger.LogDebug(ex, "Peak sample failed"); } },
+            null, PeakSampleInterval, PeakSampleInterval);
     }
 
     public float? GetPeak(uint processId, string endpointId)
     {
         if (string.IsNullOrEmpty(endpointId)) return null;
-        List<AudioSessionControl>? controls;
-        lock (_gate)
-        {
-            _byKey.TryGetValue((processId, endpointId.ToLowerInvariant()), out controls);
-        }
-        if (controls is null || controls.Count == 0) return null;
-
-        // Take the loudest sibling on this endpoint - if Edge has two tabs playing audio
-        // through the same device under the same PID, the chip meter reflects the louder
-        // of the two. Different endpoints are separate cache entries entirely so a stale
-        // sibling on a different output doesn't drown the live one here.
-        float? best = null;
-        for (var i = 0; i < controls.Count; i++)
-        {
-            var control = controls[i];
-            try
-            {
-                var peak = control.AudioMeterInformation.MasterPeakValue;
-                if (best is null || peak > best) best = peak;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(ex, "GetPeak({Pid},{Endpoint}) sibling failed; will reconcile on next rebuild", processId, endpointId);
-            }
-        }
-        return best;
+        _lastQueryTicks = Environment.TickCount64;
+        // Lock-free read of the background-sampled snapshot - no COM, no lock. Returns null for
+        // an endpoint with no session for this pid (so the UI can place the chip elsewhere).
+        return _peakSnapshot.TryGetValue((processId, endpointId.ToLowerInvariant()), out var peak)
+            ? peak
+            : null;
     }
 
-    private void OnSessionsChanged(object? sender, EventArgs e) => Rebuild();
-
-    public void Refresh()
+    // Reads MasterPeakValue for every tracked (pid, endpoint) control on a background thread
+    // and publishes an immutable snapshot. Holds _gate for the pass so it can't race Rebuild's
+    // swap+dispose; the UI's GetPeak never holds _gate or touches COM. A re-entrancy guard
+    // drops overlapping passes if a read run ever outlasts the interval.
+    private void SamplePeaks()
     {
-        try { Rebuild(); }
-        catch (Exception ex) { _logger.LogDebug(ex, "External meter refresh failed"); }
+        if (_disposed) return;
+        // Skip the COM work entirely when no one is reading peaks (Devices page not visible).
+        if (Environment.TickCount64 - _lastQueryTicks > IdleSampleStopMs) return;
+        if (Interlocked.Exchange(ref _sampling, 1) == 1) return;
+        try
+        {
+            var fresh = new Dictionary<(uint Pid, string Endpoint), float>();
+            lock (_gate)
+            {
+                foreach (var kv in _byKey)
+                {
+                    var best = 0f;
+                    var controls = kv.Value;
+                    for (var i = 0; i < controls.Count; i++)
+                    {
+                        try
+                        {
+                            var peak = controls[i].AudioMeterInformation.MasterPeakValue;
+                            if (peak > best) best = peak;
+                        }
+                        catch
+                        {
+                            // Stale sibling; reconciled on the next rebuild.
+                        }
+                    }
+                    fresh[kv.Key] = best;
+                }
+            }
+            _peakSnapshot = fresh;
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _sampling, 0);
+        }
+    }
+
+    private void OnSessionsChanged(object? sender, EventArgs e) => QueueRebuild();
+
+    public void Refresh() => QueueRebuild();
+
+    // Coalesces rebuilds onto a single background worker: a burst of session events collapses
+    // into the in-flight rebuild plus at most one more pass, and never runs the COM enumeration
+    // synchronously on the (callback / timer) thread that requested it.
+    private void QueueRebuild()
+    {
+        if (_disposed) return;
+        lock (_rebuildGate)
+        {
+            if (_rebuildRunning)
+            {
+                _rebuildPending = true;
+                return;
+            }
+            _rebuildRunning = true;
+        }
+        _ = Task.Run(RebuildLoop);
+    }
+
+    private void RebuildLoop()
+    {
+        try
+        {
+            while (true)
+            {
+                lock (_rebuildGate) { _rebuildPending = false; }
+                if (_disposed) return;
+
+                try { Rebuild(); }
+                catch (Exception ex) { _logger.LogDebug(ex, "Meter rebuild failed"); }
+
+                lock (_rebuildGate)
+                {
+                    if (!_rebuildPending || _disposed)
+                    {
+                        _rebuildRunning = false;
+                        return;
+                    }
+                }
+            }
+        }
+        catch
+        {
+            lock (_rebuildGate) { _rebuildRunning = false; }
+        }
     }
 
     private static NAudio.CoreAudioApi.Interfaces.AudioSessionState SafeReadState(AudioSessionControl control)
@@ -209,6 +296,7 @@ public sealed class AudioSessionMeterService : IAudioSessionMeterService, IDispo
         if (_disposed) return;
         _disposed = true;
         _safetyRebuild.Dispose();
+        _peakSampler.Dispose();
         _sessions.SessionsChanged -= OnSessionsChanged;
         _endpoints.EndpointsChanged -= OnSessionsChanged;
 

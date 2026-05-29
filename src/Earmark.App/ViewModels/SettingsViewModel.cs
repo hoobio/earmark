@@ -123,7 +123,8 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         }
 
         mutate(_settings.Current);
-        await _settings.SaveAsync();
+        try { await _settings.SaveAsync(); }
+        catch { /* SettingsService logs/retries internally; a save failure must not crash the UI thread (async void). */ }
     }
 
     public void Dispose()

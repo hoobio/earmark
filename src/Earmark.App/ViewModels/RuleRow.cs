@@ -13,16 +13,13 @@ namespace Earmark.App.ViewModels;
 
 public partial class RuleRow : ObservableObject, IDisposable
 {
-    private static readonly RegexOptions Options =
-        RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase;
-
     private static readonly TimeSpan SaveDebounce = TimeSpan.FromMilliseconds(500);
 
     private readonly Func<RoutingRule, Task> _persistAsync;
     private readonly Lock _saveGate = new();
     private CancellationTokenSource? _saveCts;
     private bool _suppress;
-    private bool _disposed;
+    private volatile bool _disposed;
 
     public RuleRow(RoutingRule rule, Func<RoutingRule, Task> persistAsync)
     {
@@ -40,6 +37,11 @@ public partial class RuleRow : ObservableObject, IDisposable
 
     [ObservableProperty]
     public partial bool IsExpanded { get; set; }
+
+    /// <summary>Chevron glyph for the row header: down (collapsed) / up (expanded).</summary>
+    public string ExpandGlyph => IsExpanded ? new string((char)0xE70E, 1) : new string((char)0xE70D, 1);
+
+    partial void OnIsExpandedChanged(bool value) => OnPropertyChanged(nameof(ExpandGlyph));
 
     [ObservableProperty]
     public partial string Name { get; set; } = string.Empty;
@@ -357,15 +359,10 @@ public partial class RuleRow : ObservableObject, IDisposable
             return false;
         }
 
-        try
-        {
-            regex = new Regex(pattern, Options, TimeSpan.FromMilliseconds(250));
-            return true;
-        }
-        catch (ArgumentException)
-        {
-            return false;
-        }
+        // Reuse the shared compile cache (same options + 250ms timeout) instead of emitting a
+        // fresh Compiled regex on every match call - the recompute path hits this per session
+        // and per endpoint while the user is typing a pattern.
+        return RegexCache.TryGet(pattern, out regex);
     }
 
     internal static bool MatchSafe(Regex regex, string input)

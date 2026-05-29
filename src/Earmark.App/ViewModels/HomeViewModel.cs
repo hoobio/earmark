@@ -25,24 +25,12 @@ public partial class HomeViewModel : ObservableObject, IDisposable
 {
     private static readonly TimeSpan DebounceWindow = TimeSpan.FromMilliseconds(250);
     private static readonly TimeSpan PeakTickInterval = TimeSpan.FromMilliseconds(50);
-    private const int MutePollEveryNthTick = 5;
 
     // How long a chip lingers on a card after its session goes silent. Process-exit takes
     // an immediate-remove path; this grace only kicks in for processes that are still
     // running but quiet (paused video, app open but not playing). Generous window means a
     // pause / scrub / inter-track gap doesn't make the chip pop in and out.
     private static readonly TimeSpan AppChipAudibleGrace = TimeSpan.FromSeconds(30);
-
-    // Per-session peak metering measures itself each tick. If the moving average pushes
-    // past <see cref="AppMeterBudgetMs"/> the metering goes into a "too many sessions"
-    // safe mode that holds peak levels flat (chips still draw, just without animation).
-    // The next sustained period under budget re-enables the meters.
-    private const double AppMeterBudgetMs = 8.0;
-    private const int AppMeterTripSamples = 6;     // ~300ms above budget before tripping
-    private const int AppMeterRecoverSamples = 40; // ~2s under budget before recovering
-    private double _appMeterAvgMs;
-    private int _appMeterOverBudget;
-    private int _appMeterUnderBudget;
 
     private readonly IRulesService _rules;
     private readonly IAudioEndpointService _endpoints;
@@ -69,7 +57,6 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     private CancellationTokenSource? _sessionsSyncCts;
     private static readonly TimeSpan SessionsInPlaceDebounce = TimeSpan.FromMilliseconds(200);
     private DispatcherTimer? _peakTimer;
-    private int _muteTickCounter;
 
     public HomeViewModel(
         IRulesService rules,
@@ -110,6 +97,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         _endpoints.EndpointsChanged += OnAnythingChanged;
         _endpoints.DefaultsChanged += OnAnythingChanged;
         _endpoints.ExternalMuteChanged += OnExternalMuteChanged;
+        _endpoints.ExternalVolumeChanged += OnExternalVolumeChanged;
         // CRITICAL: SessionsChanged must NOT trigger the full card rebuild. mpv seeking
         // spams OnStateChanged on every position update; a full rebuild clears _allCards,
         // creates new DeviceCard instances, and the Devices ObservableCollection swap makes
@@ -134,6 +122,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         // only changes on connect/disconnect - covered by StateChanged.
         _waveLink.StateChanged += OnAnythingChanged;
 
+        IsInitializing = true;
         QueueRefresh();
         StartPeakPolling();
     }
@@ -143,16 +132,23 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     public bool HasItems => Devices.Count > 0;
     public bool IsEmpty => Devices.Count == 0;
 
+    /// <summary>True until the first card rebuild completes. Lets the page show a loading
+    /// placeholder during the initial enumeration instead of the misleading "Nothing to show"
+    /// empty state.</summary>
+    [ObservableProperty]
+    public partial bool IsInitializing { get; set; }
+
+    public bool ShowLoadingState => IsInitializing;
+    public bool ShowEmptyState => !IsInitializing && IsEmpty;
+
+    partial void OnIsInitializingChanged(bool value)
+    {
+        OnPropertyChanged(nameof(ShowLoadingState));
+        OnPropertyChanged(nameof(ShowEmptyState));
+    }
+
     [ObservableProperty]
     public partial bool ShowHiddenDevices { get; set; }
-
-    /// <summary>
-    /// True while per-app metering is in safe mode because the per-tick read budget was
-    /// blown - typically a system with many simultaneous sessions. Chips still render, but
-    /// their peak indicator stops animating until the load drops.
-    /// </summary>
-    [ObservableProperty]
-    public partial bool AppMetersThrottled { get; set; }
 
     partial void OnShowHiddenDevicesChanged(bool value)
     {
@@ -191,24 +187,24 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         _peakTimer.Start();
     }
 
+    /// <summary>Stops the 20Hz peak/meter poll. Called when the Home page leaves the visual
+    /// tree so its per-tick UI-thread COM reads don't starve the page-transition animation
+    /// (the tiles otherwise linger ~500ms on navigate-away) or burn CPU while it's off-screen.</summary>
+    public void PausePeakPolling() => _peakTimer?.Stop();
+
+    /// <summary>Resumes peak polling when the Home page is shown again.</summary>
+    public void ResumePeakPolling() => _peakTimer?.Start();
+
     private void OnPeakTick(object? sender, object e)
     {
-        // Event-driven mute notifications (AudioEndpointService.ExternalMuteChanged) handle
-        // the fast path; this poll is the fallback safety net for any miss. Runs every ~250ms.
-        var pollMute = ++_muteTickCounter % MutePollEveryNthTick == 0;
+        // UI thread: read cached peak snapshots ONLY - never live CoreAudio COM here. A COM
+        // call on the dispatcher cross-apartment-marshals to the MTA audio threads and can
+        // deadlock the UI (that's what made the app stop responding). External mute/volume are
+        // reflected event-driven via ExternalMuteChanged / ExternalVolumeChanged - no poll.
         foreach (var card in Devices)
         {
             var level = _endpoints.GetPeakLevel(card.Endpoint.Id) ?? 0f;
             card.UpdatePeak(level, PeakTickInterval);
-
-            if (pollMute)
-            {
-                var muted = _endpoints.GetMuted(card.Endpoint.Id);
-                if (muted.HasValue)
-                {
-                    ApplyExternalMute(card, muted.Value);
-                }
-            }
         }
 
         TickAppMeters();
@@ -217,51 +213,12 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     /// <summary>
     /// Per-session peak update for every chip on every <i>visible</i> card. Cards filtered
     /// out by the visibility logic (no rules + not default + not Show-hidden) aren't in
-    /// <see cref="Devices"/>, so their chips don't get touched here. The tick is timed and
-    /// trips into a throttled mode if the running average crosses
-    /// <see cref="AppMeterBudgetMs"/>; in throttled mode peak writes are skipped (chips
-    /// stay rendered, just frozen at zero / their last value).
+    /// <see cref="Devices"/>, so their chips don't get touched here. Peak reads are cheap
+    /// lock-free lookups into the meter service's background-sampled snapshot, so this no
+    /// longer needs the self-throttling it used to when it did COM on the UI thread.
     /// </summary>
     private void TickAppMeters()
     {
-        if (AppMetersThrottled)
-        {
-            // Cheap probe so we can recover. Walk the chip count without reading peak data.
-            var probeChipCount = 0;
-            foreach (var card in Devices) probeChipCount += card.Apps.Count;
-            if (probeChipCount == 0)
-            {
-                AppMetersThrottled = false;
-                _appMeterOverBudget = 0;
-                _appMeterUnderBudget = 0;
-                _appMeterAvgMs = 0;
-                return;
-            }
-
-            // Run a single timed pass to test recovery. If still over budget, drop back out
-            // without committing the peak writes (chips re-freeze). Under budget enough
-            // ticks in a row -> recover.
-            var probeStart = System.Diagnostics.Stopwatch.GetTimestamp();
-            foreach (var card in Devices)
-            {
-                foreach (var chip in card.Apps)
-                {
-                    _ = _sessionMeters.GetPeak(chip.ProcessId, card.Endpoint.Id);
-                }
-            }
-            var probeMs = ElapsedMs(probeStart);
-            UpdateBudgetCounters(probeMs);
-            if (_appMeterUnderBudget >= AppMeterRecoverSamples)
-            {
-                AppMetersThrottled = false;
-                _appMeterOverBudget = 0;
-                _appMeterUnderBudget = 0;
-                _appMeterAvgMs = 0;
-            }
-            return;
-        }
-
-        var start = System.Diagnostics.Stopwatch.GetTimestamp();
         var now = DateTime.UtcNow;
         var sessionsSnapshot = _sessions.GetSessions();
         var rulesSnapshot = _rules.Rules;
@@ -347,38 +304,6 @@ public partial class HomeViewModel : ObservableObject, IDisposable
                 }
             }
         }
-        var ms = ElapsedMs(start);
-        UpdateBudgetCounters(ms);
-
-        if (_appMeterOverBudget >= AppMeterTripSamples)
-        {
-            AppMetersThrottled = true;
-            _appMeterOverBudget = 0;
-            _appMeterUnderBudget = 0;
-        }
-    }
-
-    private static double ElapsedMs(long startTicks)
-    {
-        var delta = System.Diagnostics.Stopwatch.GetTimestamp() - startTicks;
-        return delta * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
-    }
-
-
-    private void UpdateBudgetCounters(double sampleMs)
-    {
-        // EMA so a single hiccup doesn't trip the throttle. ~20-sample window.
-        _appMeterAvgMs = _appMeterAvgMs == 0 ? sampleMs : (_appMeterAvgMs * 0.9 + sampleMs * 0.1);
-        if (_appMeterAvgMs > AppMeterBudgetMs)
-        {
-            _appMeterOverBudget++;
-            _appMeterUnderBudget = 0;
-        }
-        else
-        {
-            _appMeterUnderBudget++;
-            _appMeterOverBudget = 0;
-        }
     }
 
     private void OnExternalMuteChanged(object? sender, EndpointMuteChangedEventArgs e)
@@ -395,6 +320,20 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         });
     }
 
+    private void OnExternalVolumeChanged(object? sender, EndpointVolumeChangedEventArgs e)
+    {
+        // Event-driven primary path for external volume (the OnPeakTick poll is the fallback).
+        // Arrives on a COM thread; marshal to the UI thread before touching the card.
+        var deviceId = e.DeviceId;
+        var volume = e.Volume;
+        _dispatcher.Enqueue(() =>
+        {
+            var card = _allCards.FirstOrDefault(c =>
+                string.Equals(c.Endpoint.Id, deviceId, StringComparison.OrdinalIgnoreCase));
+            card?.SyncVolumeFromDevice(volume);
+        });
+    }
+
     /// <summary>
     /// Updates the card's cached mute state to match what the OS reports, then snaps it back
     /// to the rule-pinned target if that target disagrees (rule wins over external changes).
@@ -407,7 +346,9 @@ public partial class HomeViewModel : ObservableObject, IDisposable
 
         if (card.RuleMutedTarget is not bool target || actualMuted == target) return;
 
-        _endpoints.SetMuted(card.Endpoint.Id, target);
+        // Reconcile off the UI thread: SetMuted does CoreAudio COM that must not run on the
+        // dispatcher (cross-apartment marshalling can deadlock it).
+        _ = Task.Run(() => _endpoints.SetMuted(card.Endpoint.Id, target));
         card.SyncMutedFromDevice(target);
         NotifyReconciled(card, target);
     }
@@ -788,6 +729,10 @@ public partial class HomeViewModel : ObservableObject, IDisposable
 
         OnPropertyChanged(nameof(HasItems));
         OnPropertyChanged(nameof(IsEmpty));
+        // First rebuild completed: drop the loading placeholder so the real content (or the
+        // genuine empty state) shows. Idempotent on later rebuilds.
+        IsInitializing = false;
+        OnPropertyChanged(nameof(ShowEmptyState));
     }
 
     private void OnCardVisibilityToggled(DeviceCard card, DeviceCard.VisibilityState prev)
@@ -862,6 +807,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         _endpoints.EndpointsChanged -= OnAnythingChanged;
         _endpoints.DefaultsChanged -= OnAnythingChanged;
         _endpoints.ExternalMuteChanged -= OnExternalMuteChanged;
+        _endpoints.ExternalVolumeChanged -= OnExternalVolumeChanged;
         _sessions.SessionsChanged -= OnSessionsChangedInPlace;
         _sessions.SessionRemoved -= OnSessionRemoved;
         _sessions.SessionAdded -= OnSessionAdded;

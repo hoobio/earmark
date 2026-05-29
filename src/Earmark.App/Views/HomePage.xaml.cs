@@ -34,6 +34,13 @@ public sealed partial class HomePage : Page
         _mainWindow = mainWindow;
         InitializeComponent();
         _logger = App.Current.Services.GetService<ILogger<HomePage>>();
+
+        // The page + VM are singletons, so the 20Hz peak/meter poll would otherwise run for the
+        // whole app lifetime. Only run it while the page is in the visual tree: this keeps its
+        // UI-thread COM reads from starving the navigate-away transition and from burning CPU
+        // on other pages. Loaded/Unloaded fire on every Frame content swap.
+        Loaded += (_, _) => ViewModel.ResumePeakPolling();
+        Unloaded += (_, _) => ViewModel.PausePeakPolling();
     }
 
     public HomeViewModel ViewModel { get; }
@@ -64,14 +71,6 @@ public sealed partial class HomePage : Page
 
         _rulesViewModel.RequestFocusRule(summary.RuleId);
         _mainWindow.NavigateByTag("Rules");
-    }
-
-    private void OnRulesExpandToggle(object sender, RoutedEventArgs e)
-    {
-        // ItemsRepeater doesn't propagate DataContext into x:Bind templates, so the button
-        // carries the DeviceCard reference via Tag="{x:Bind}" instead.
-        if (sender is not FrameworkElement { Tag: DeviceCard card }) return;
-        card.IsRulesExpanded = !card.IsRulesExpanded;
     }
 
     // CA1822 suppressed: XAML event hookup requires instance methods even when the body

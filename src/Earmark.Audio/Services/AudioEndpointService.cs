@@ -15,34 +15,80 @@ namespace Earmark.Audio.Services;
 public sealed class AudioEndpointService : IAudioEndpointService, IMMNotificationClient, IDisposable
 {
     private static readonly TimeSpan SafetyRefreshInterval = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan WatchdogInterval = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan PeakSampleInterval = TimeSpan.FromMilliseconds(50);
+    private const long RebuildStallWarnMs = 10_000;
+    // A full DeviceState.All enumeration is legitimately multi-second on machines with many
+    // phantom (NotPresent/Unplugged) endpoints, so only warn well above that; the 10s stall
+    // watchdog is the actual hang signal.
+    private const long RebuildSlowWarnMs = 5_000;
 
     private readonly ILogger<AudioEndpointService> _logger;
     private readonly MMDeviceEnumerator _enumerator;
     private readonly Lock _rebuildGate = new();
     private readonly Lock _muteSubGate = new();
+    private readonly Lock _scheduleGate = new();
     private readonly Dictionary<string, MuteSubscription> _muteSubs =
         new(StringComparer.OrdinalIgnoreCase);
     private readonly Timer _safetyTimer;
+    private readonly Timer _watchdogTimer;
+    private readonly Timer _peakSampler;
     private readonly CancellationTokenSource _shutdownCts = new();
 
     private Snapshot _snapshot = Snapshot.Empty;
     private bool _registered;
     private bool _disposed;
 
+    // Rebuild coalescing state, all guarded by _scheduleGate. A device-change storm
+    // (Bluetooth headset reconnecting, Wave Link virtual endpoints churning) used to
+    // fan out one Task.Run rebuild per callback; dozens then contended for the COM
+    // enumerator on the STA thread and wedged. Now a single worker drains a dirty flag.
+    private bool _rebuildRunning;
+    private bool _rebuildPending;
+    private bool _pendingRaiseEndpoints;
+    private bool _pendingRaiseDefaults;
+
+    // Environment.TickCount64 when the current rebuild pass started; 0 when idle.
+    // Read by the watchdog timer to detect a wedged rebuild worker.
+    private long _rebuildStartedTicks;
+
+    private int _peakSampling;
+    private long _lastPeakQueryTicks;
+    // Stop sampling when nothing has read a peak for this long (Devices page not visible).
+    private const long IdlePeakSampleStopMs = 1000;
+    // Per-endpoint peak levels sampled off the UI thread; GetPeakLevel reads this snapshot so
+    // the 20Hz per-card poll doesn't do COM on the dispatcher. Treated as immutable once
+    // published (sampler swaps in a fully-built dict; readers only TryGetValue).
+    private volatile Dictionary<string, float> _peakSnapshot = new(StringComparer.OrdinalIgnoreCase);
+
     public AudioEndpointService(ILogger<AudioEndpointService> logger)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _enumerator = new MMDeviceEnumerator();
 
-        TryRebuild();
+        // Cold start: enumerate Active devices only. That's the set the UI renders as cards,
+        // and it's far faster than DeviceState.All, which also walks Disabled/Unplugged/
+        // NotPresent phantom endpoints whose property-store reads dominate startup. The full
+        // set (needed by the Rules page) is filled into _snapshot by the background QueueRebuild
+        // below. It doesn't raise EndpointsChanged: the visible cards (Active) are unchanged, so
+        // forcing a card-grid rebuild would only flash the UI; consumers read the richer
+        // snapshot on their next natural refresh, and the mute subscriptions wire up there too.
+        try { RebuildSnapshot(DeviceState.Active); }
+        catch (Exception ex) { _logger.LogWarning(ex, "Initial endpoint snapshot failed; serving empty until first event"); }
         _enumerator.RegisterEndpointNotificationCallback(this);
         _registered = true;
         _safetyTimer = new Timer(OnSafetyTick, null, SafetyRefreshInterval, SafetyRefreshInterval);
+        _watchdogTimer = new Timer(OnWatchdogTick, null, WatchdogInterval, WatchdogInterval);
+        _peakSampler = new Timer(
+            _ => { try { SampleEndpointPeaks(); } catch (Exception ex) { _logger.LogDebug(ex, "Endpoint peak sample failed"); } },
+            null, PeakSampleInterval, PeakSampleInterval);
+        QueueRebuild(raiseEndpoints: false, raiseDefaults: false);
     }
 
     public event EventHandler? EndpointsChanged;
     public event EventHandler? DefaultsChanged;
     public event EventHandler<EndpointMuteChangedEventArgs>? ExternalMuteChanged;
+    public event EventHandler<EndpointVolumeChangedEventArgs>? ExternalVolumeChanged;
 
     public IReadOnlyList<AudioEndpoint> GetEndpoints(EndpointFlow flow = EndpointFlow.Render)
     {
@@ -204,8 +250,9 @@ public sealed class AudioEndpointService : IAudioEndpointService, IMMNotificatio
         _logger.LogInformation("SetFriendlyName({Id}) -> '{Name}'", id, friendlyName);
         // Property writes don't fire IMMNotificationClient.OnPropertyValueChanged for
         // FriendlyName through some drivers, so kick a rebuild so the cached snapshot reflects
-        // the new name without waiting on the safety timer.
-        QueueRebuild(raiseDefaults: false);
+        // the new name without waiting on the safety timer. Raise EndpointsChanged so the UI
+        // picks up the new name.
+        QueueRebuild(raiseEndpoints: true, raiseDefaults: false);
         return true;
     }
 
@@ -213,28 +260,44 @@ public sealed class AudioEndpointService : IAudioEndpointService, IMMNotificatio
     {
         ArgumentException.ThrowIfNullOrEmpty(id);
 
-        // Reuse the long-lived MMDevice held by the mute subscription so we don't pay a fresh
-        // COM activation per poll (the Devices page calls this at ~20Hz per visible card).
-        MuteSubscription? sub;
-        lock (_muteSubGate)
-        {
-            _muteSubs.TryGetValue(id, out sub);
-        }
-        if (sub is not null)
-        {
-            var cached = sub.TryReadPeakLevel();
-            if (cached.HasValue) return cached;
-        }
+        _lastPeakQueryTicks = Environment.TickCount64;
+        // Cache-only: the background sampler does all the COM. NEVER read COM here - this is
+        // called on the UI thread at ~20Hz per card, and a cross-apartment COM call/release
+        // on the dispatcher can deadlock the app. A not-yet-sampled id just reads 0 for a tick
+        // or two until the sampler (woken by this query) publishes it.
+        return _peakSnapshot.TryGetValue(id, out var sampled) ? sampled : null;
+    }
 
+    // Reads the cached MMDevice peak for every active mute subscription on a background thread
+    // and publishes an immutable snapshot that GetPeakLevel reads lock-free. A re-entrancy
+    // guard drops overlapping passes.
+    private void SampleEndpointPeaks()
+    {
+        if (_disposed) return;
+        if (Environment.TickCount64 - _lastPeakQueryTicks > IdlePeakSampleStopMs) return;
+        if (Interlocked.Exchange(ref _peakSampling, 1) == 1) return;
         try
         {
-            using var device = _enumerator.GetDevice(id);
-            return device.AudioMeterInformation.MasterPeakValue;
+            KeyValuePair<string, MuteSubscription>[] entries;
+            lock (_muteSubGate)
+            {
+                entries = [.. _muteSubs];
+            }
+
+            var fresh = new Dictionary<string, float>(entries.Length, StringComparer.OrdinalIgnoreCase);
+            foreach (var entry in entries)
+            {
+                var peak = entry.Value.TryReadPeakLevel();
+                if (peak.HasValue)
+                {
+                    fresh[entry.Key] = peak.Value;
+                }
+            }
+            _peakSnapshot = fresh;
         }
-        catch (Exception ex)
+        finally
         {
-            _logger.LogDebug(ex, "GetPeakLevel({Id}) failed", id);
-            return null;
+            Interlocked.Exchange(ref _peakSampling, 0);
         }
     }
 
@@ -252,6 +315,21 @@ public sealed class AudioEndpointService : IAudioEndpointService, IMMNotificatio
 
     private void Rebuild()
     {
+        // Steady-state / background rebuilds enumerate the complete device set.
+        RebuildSnapshot(DeviceState.All);
+
+        // After the snapshot settles, refresh our long-lived mute subscriptions so that
+        // external mute changes surface as events (not just by the periodic poller).
+        RefreshMuteSubscriptions();
+    }
+
+    // The endpoint enumeration the UI needs to render cards. Kept separate from the (much
+    // slower) mute-subscription wiring so cold start can build this synchronously and defer
+    // the subscriptions to the background worker. <paramref name="states"/> lets cold start
+    // enumerate Active-only (fast, what the cards show) and the background pass fill in the
+    // complete set (Disabled/Unplugged/NotPresent) that the Rules page references.
+    private void RebuildSnapshot(DeviceState states)
+    {
         lock (_rebuildGate)
         {
             if (_disposed)
@@ -259,8 +337,8 @@ public sealed class AudioEndpointService : IAudioEndpointService, IMMNotificatio
                 return;
             }
 
-            var render = BuildList(DataFlow.Render);
-            var capture = BuildList(DataFlow.Capture);
+            var render = BuildList(DataFlow.Render, states);
+            var capture = BuildList(DataFlow.Capture, states);
             var byId = new Dictionary<string, AudioEndpoint>(StringComparer.OrdinalIgnoreCase);
             foreach (var e in render)
             {
@@ -273,10 +351,6 @@ public sealed class AudioEndpointService : IAudioEndpointService, IMMNotificatio
 
             Volatile.Write(ref _snapshot, new Snapshot(render, capture, byId));
         }
-
-        // After the snapshot settles, refresh our long-lived mute subscriptions so that
-        // external mute changes surface as events (not just by the periodic poller).
-        RefreshMuteSubscriptions();
     }
 
     /// <summary>
@@ -289,33 +363,84 @@ public sealed class AudioEndpointService : IAudioEndpointService, IMMNotificatio
         var snap = Volatile.Read(ref _snapshot);
         var current = new HashSet<string>(snap.ById.Keys, StringComparer.OrdinalIgnoreCase);
 
+        // Decide add/remove under the lock, but do every COM call OUTSIDE it.
+        // MuteSubscription.Dispose -> Marshal.ReleaseComObject, _enumerator.GetDevice,
+        // and OnVolumeNotification += all marshal to the STA thread that created the
+        // enumerator and can block there. Holding _muteSubGate across them deadlocks the
+        // UI thread (GetPeakLevel / AcquireDevice take this same gate) against the rebuild
+        // worker - which is exactly the hang a device-change storm used to trigger.
+        List<MuteSubscription>? toDispose = null;
+        List<string>? toAdd = null;
+
         lock (_muteSubGate)
         {
-            // Remove subs for endpoints that disappeared.
             foreach (var existingId in _muteSubs.Keys.ToArray())
             {
                 if (!current.Contains(existingId))
                 {
-                    _muteSubs[existingId].Dispose();
+                    (toDispose ??= []).Add(_muteSubs[existingId]);
                     _muteSubs.Remove(existingId);
                 }
             }
 
-            // Add subs for newly-seen endpoints.
             foreach (var id in current)
             {
-                if (_muteSubs.ContainsKey(id)) continue;
+                if (!_muteSubs.ContainsKey(id))
+                {
+                    (toAdd ??= []).Add(id);
+                }
+            }
+        }
+
+        if (toDispose is not null)
+        {
+            foreach (var sub in toDispose)
+            {
+                sub.Dispose();
+            }
+        }
+
+        if (toAdd is not null)
+        {
+            foreach (var id in toAdd)
+            {
+                MuteSubscription sub;
                 try
                 {
                     var device = _enumerator.GetDevice(id);
-                    var sub = new MuteSubscription(device, id, OnExternalMuteCallback, _logger);
-                    _muteSubs[id] = sub;
+                    sub = new MuteSubscription(device, id, OnExternalMuteCallback, OnExternalVolumeCallback, _logger);
                 }
                 catch (Exception ex)
                 {
                     _logger.LogDebug(ex, "Mute subscription: failed to attach to {Id}", id);
+                    continue;
+                }
+
+                bool inserted;
+                lock (_muteSubGate)
+                {
+                    if (_disposed || _muteSubs.ContainsKey(id))
+                    {
+                        inserted = false;
+                    }
+                    else
+                    {
+                        _muteSubs[id] = sub;
+                        inserted = true;
+                    }
+                }
+                if (!inserted)
+                {
+                    sub.Dispose();
                 }
             }
+        }
+
+        var added = toAdd?.Count ?? 0;
+        var removed = toDispose?.Count ?? 0;
+        if (added + removed > 0)
+        {
+            _logger.LogDebug("Mute subscriptions refreshed: +{Added} -{Removed}", added, removed);
         }
     }
 
@@ -332,14 +457,27 @@ public sealed class AudioEndpointService : IAudioEndpointService, IMMNotificatio
         }
     }
 
-    private List<AudioEndpoint> BuildList(DataFlow dataFlow)
+    private void OnExternalVolumeCallback(string deviceId, float volume)
+    {
+        if (_disposed) return;
+        try
+        {
+            ExternalVolumeChanged?.Invoke(this, new EndpointVolumeChangedEventArgs(deviceId, volume));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "ExternalVolumeChanged subscriber threw for {Id}", deviceId);
+        }
+    }
+
+    private List<AudioEndpoint> BuildList(DataFlow dataFlow, DeviceState states)
     {
         var defaultMultimedia = TryGetDefault(dataFlow, Role.Multimedia);
         var defaultComms = TryGetDefault(dataFlow, Role.Communications);
 
         var list = new List<AudioEndpoint>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var device in _enumerator.EnumerateAudioEndPoints(dataFlow, DeviceState.All))
+        foreach (var device in _enumerator.EnumerateAudioEndPoints(dataFlow, states))
         {
             try
             {
@@ -398,7 +536,28 @@ public sealed class AudioEndpointService : IAudioEndpointService, IMMNotificatio
             IsDefaultCommunications: defaultCommsId is not null && string.Equals(device.ID, defaultCommsId, StringComparison.OrdinalIgnoreCase));
     }
 
-    private void OnSafetyTick(object? state) => TryRebuild();
+    // Drift-correction only: refresh the cached snapshot silently. It must NOT raise
+    // EndpointsChanged (that fans out to a meter rebuild + session refresh + device-card
+    // UI rebuild + rule-match refresh); firing those every 5 min with nothing changed is
+    // pure churn. Still routed through the coalescing worker so it can't race an
+    // event-driven rebuild.
+    private void OnSafetyTick(object? state) => QueueRebuild(raiseEndpoints: false, raiseDefaults: false);
+
+    private void OnWatchdogTick(object? state)
+    {
+        if (_disposed) return;
+        var started = Interlocked.Read(ref _rebuildStartedTicks);
+        if (started == 0) return;
+
+        var elapsedMs = Environment.TickCount64 - started;
+        if (elapsedMs >= RebuildStallWarnMs)
+        {
+            _logger.LogWarning(
+                "Endpoint rebuild has run {ElapsedMs} ms without completing - likely a COM/STA stall in the audio worker. " +
+                "If this repeats, the endpoint cache is wedged.",
+                elapsedMs);
+        }
+    }
 
     // IMMNotificationClient callbacks fire on a COM thread that the OS will block during
     // UnregisterEndpointNotificationCallback if any handler is in flight. Doing the rebuild
@@ -406,37 +565,128 @@ public sealed class AudioEndpointService : IAudioEndpointService, IMMNotificatio
     // that re-enumerate again) opens a window where a hardware change racing with shutdown
     // deadlocks the unregister call. Pushing the work onto the thread pool keeps the COM
     // callback fast and avoids that race.
-    private void RaiseEndpointsChanged() => QueueRebuild(raiseDefaults: false);
+    private void RaiseEndpointsChanged() => QueueRebuild(raiseEndpoints: true, raiseDefaults: false);
 
-    private void RaiseDefaultsAndEndpointsChanged() => QueueRebuild(raiseDefaults: true);
+    private void RaiseDefaultsAndEndpointsChanged() => QueueRebuild(raiseEndpoints: true, raiseDefaults: true);
 
-    private void QueueRebuild(bool raiseDefaults)
+    // Coalesces rebuild requests onto a single serialized worker. The IMM callbacks fire
+    // in bursts (a Bluetooth reconnect alone emits several); spawning one rebuild Task per
+    // callback meant dozens of concurrent COM enumerations fighting for the STA enumerator.
+    // Here a burst collapses into "the in-flight pass + at most one more pass after it".
+    private void QueueRebuild(bool raiseEndpoints, bool raiseDefaults)
     {
         if (_disposed)
         {
             return;
         }
 
-        var token = _shutdownCts.Token;
-        _ = Task.Run(() =>
+        lock (_scheduleGate)
         {
-            if (token.IsCancellationRequested || _disposed)
+            _pendingRaiseEndpoints |= raiseEndpoints;
+            _pendingRaiseDefaults |= raiseDefaults;
+            if (_rebuildRunning)
             {
+                if (!_rebuildPending)
+                {
+                    _rebuildPending = true;
+                    _logger.LogDebug("Rebuild request coalesced into the in-flight worker");
+                }
                 return;
             }
+            _rebuildRunning = true;
+        }
 
-            TryRebuild();
-            if (token.IsCancellationRequested)
-            {
-                return;
-            }
+        var token = _shutdownCts.Token;
+        _ = Task.Run(() => RebuildLoop(token), token);
+    }
 
-            EndpointsChanged?.Invoke(this, EventArgs.Empty);
-            if (raiseDefaults)
+    private void RebuildLoop(CancellationToken token)
+    {
+        try
+        {
+            while (true)
             {
-                DefaultsChanged?.Invoke(this, EventArgs.Empty);
+                bool raiseEndpoints;
+                bool raiseDefaults;
+                lock (_scheduleGate)
+                {
+                    raiseEndpoints = _pendingRaiseEndpoints;
+                    raiseDefaults = _pendingRaiseDefaults;
+                    _pendingRaiseEndpoints = false;
+                    _pendingRaiseDefaults = false;
+                    _rebuildPending = false;
+                }
+
+                if (token.IsCancellationRequested || _disposed)
+                {
+                    return;
+                }
+
+                var startTicks = Environment.TickCount64;
+                Interlocked.Exchange(ref _rebuildStartedTicks, startTicks);
+                try
+                {
+                    TryRebuild();
+                }
+                finally
+                {
+                    Interlocked.Exchange(ref _rebuildStartedTicks, 0);
+                }
+
+                var elapsed = Environment.TickCount64 - startTicks;
+                if (elapsed > RebuildSlowWarnMs)
+                {
+                    _logger.LogWarning("Endpoint rebuild took {ElapsedMs} ms", elapsed);
+                }
+
+                if (token.IsCancellationRequested || _disposed)
+                {
+                    return;
+                }
+
+                if (raiseEndpoints)
+                {
+                    RaiseSafe(EndpointsChanged);
+                }
+                if (raiseDefaults)
+                {
+                    RaiseSafe(DefaultsChanged);
+                }
+
+                lock (_scheduleGate)
+                {
+                    if (!_rebuildPending || token.IsCancellationRequested || _disposed)
+                    {
+                        _rebuildRunning = false;
+                        return;
+                    }
+                }
             }
-        }, token);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Endpoint rebuild worker faulted");
+            lock (_scheduleGate)
+            {
+                _rebuildRunning = false;
+            }
+        }
+    }
+
+    private void RaiseSafe(EventHandler? handler)
+    {
+        if (handler is null)
+        {
+            return;
+        }
+        try
+        {
+            handler(this, EventArgs.Empty);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Endpoint change subscriber threw");
+        }
     }
 
     void IMMNotificationClient.OnDeviceStateChanged(string deviceId, DeviceState newState) => RaiseEndpointsChanged();
@@ -466,6 +716,8 @@ public sealed class AudioEndpointService : IAudioEndpointService, IMMNotificatio
         }
 
         _safetyTimer.Dispose();
+        _watchdogTimer.Dispose();
+        _peakSampler.Dispose();
 
         if (_registered)
         {
@@ -481,13 +733,18 @@ public sealed class AudioEndpointService : IAudioEndpointService, IMMNotificatio
             _registered = false;
         }
 
+        // Pull the subs out under the lock, dispose outside it: MuteSubscription.Dispose
+        // releases COM that can marshal to the STA thread, and we never want to hold
+        // _muteSubGate across that (see RefreshMuteSubscriptions).
+        MuteSubscription[] subs;
         lock (_muteSubGate)
         {
-            foreach (var sub in _muteSubs.Values)
-            {
-                sub.Dispose();
-            }
+            subs = [.. _muteSubs.Values];
             _muteSubs.Clear();
+        }
+        foreach (var sub in subs)
+        {
+            sub.Dispose();
         }
 
         _enumerator.Dispose();
@@ -511,37 +768,53 @@ public sealed class AudioEndpointService : IAudioEndpointService, IMMNotificatio
     /// </summary>
     private sealed class MuteSubscription : IDisposable
     {
+        private const float VolumeEpsilon = 0.004f;
+
         private readonly MMDevice _device;
         private readonly string _deviceId;
-        private readonly Action<string, bool> _callback;
+        private readonly Action<string, bool> _muteCallback;
+        private readonly Action<string, float> _volumeCallback;
         private readonly ILogger _logger;
         private readonly AudioEndpointVolumeNotificationDelegate _handler;
         private bool _disposed;
         private bool? _lastMuted;
+        private float _lastVolume = -1f;
 
-        public MuteSubscription(MMDevice device, string deviceId, Action<string, bool> callback, ILogger logger)
+        public MuteSubscription(
+            MMDevice device,
+            string deviceId,
+            Action<string, bool> muteCallback,
+            Action<string, float> volumeCallback,
+            ILogger logger)
         {
             _device = device;
             _deviceId = deviceId;
-            _callback = callback;
+            _muteCallback = muteCallback;
+            _volumeCallback = volumeCallback;
             _logger = logger;
             _handler = OnNotification;
             _device.AudioEndpointVolume.OnVolumeNotification += _handler;
         }
 
+        // The OS fires this for every external mute OR volume change on the endpoint. We push
+        // mute and volume on their own deltas so the UI can react event-driven rather than by
+        // polling. The volume epsilon collapses driver micro-steps; the consumer additionally
+        // ignores echoes of the user's own in-flight drag.
         private void OnNotification(AudioVolumeNotificationData data)
         {
             if (_disposed) return;
 
-            // OnVolumeNotification fires for every volume change too, not just mute toggles.
-            // Slider drags otherwise post N dispatcher hops to the UI thread per second to do
-            // a no-op SyncMutedFromDevice. Suppress unless the mute bit actually moved.
-            if (_lastMuted.HasValue && _lastMuted.Value == data.Muted) return;
+            var muteChanged = !_lastMuted.HasValue || _lastMuted.Value != data.Muted;
+            var volumeChanged = Math.Abs(_lastVolume - data.MasterVolume) > VolumeEpsilon;
+            if (!muteChanged && !volumeChanged) return;
+
             _lastMuted = data.Muted;
+            _lastVolume = data.MasterVolume;
 
             try
             {
-                _callback(_deviceId, data.Muted);
+                if (muteChanged) _muteCallback(_deviceId, data.Muted);
+                if (volumeChanged) _volumeCallback(_deviceId, data.MasterVolume);
             }
             catch (Exception ex)
             {

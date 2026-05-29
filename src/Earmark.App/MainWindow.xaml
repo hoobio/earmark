@@ -98,7 +98,17 @@
                 </NavigationViewItem>
             </NavigationView.FooterMenuItems>
 
-            <Frame x:Name="ContentFrame" />
+            <Frame x:Name="ContentFrame">
+                <!-- NavigationService swaps pages via Content= (DI singletons), so there's no
+                     Frame.Navigate transition. A content transition removes the old page at once
+                     and animates the new one in, instead of the old tiles ghosting while the new
+                     page does its first layout. -->
+                <Frame.ContentTransitions>
+                    <TransitionCollection>
+                        <NavigationThemeTransition />
+                    </TransitionCollection>
+                </Frame.ContentTransitions>
+            </Frame>
         </NavigationView>
     </Grid>
 </Window>

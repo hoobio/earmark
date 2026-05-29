@@ -20,12 +20,17 @@ public partial class DeviceCard : ObservableObject
     private const double PeakHoldSeconds = 1.5;
     private const float PeakHoldDecayPerSecond = 0.55f;
 
+    // Don't pull external volume back onto the slider for a moment after the user moves it,
+    // so a poll landing mid-drag can't fight the drag.
+    private static readonly TimeSpan UserVolumeGrace = TimeSpan.FromMilliseconds(600);
+
     private readonly IAudioEndpointService _endpoints;
     private readonly IEndpointWriter _writer;
     private readonly Action<DeviceCard, VisibilityState> _onVisibilityToggled;
     private bool _suppressVolumeWrite;
     private bool _showHidden;
     private DateTime _peakHoldExpiry = DateTime.MinValue;
+    private DateTime _lastUserVolumeChange = DateTime.MinValue;
 
     /// <summary>Snapshot of the two user-visibility flags. Used to capture pre-toggle state
     /// for undo.</summary>
@@ -152,6 +157,7 @@ public partial class DeviceCard : ObservableObject
     public bool HasRules => Rules.Count > 0;
     public bool HasNoRules => Rules.Count == 0;
     public bool HasMultipleRules => Rules.Count > 1;
+    public bool HasSingleRule => Rules.Count == 1;
 
     // The slider is editable unless:
     //   - a volume rule pins the level, or
@@ -264,26 +270,9 @@ public partial class DeviceCard : ObservableObject
     /// to expand anything.</summary>
     public RuleSummary? FirstRule => Rules.Count > 0 ? Rules[0] : null;
 
-    /// <summary>Rules beyond the first. The Expander wraps these; toggle to show/hide.</summary>
+    /// <summary>Rules beyond the first. Shown as the Expander's content (the first rule is its
+    /// always-visible header), so this only carries the rules after index 0.</summary>
     public ObservableCollection<RuleSummary> AdditionalRules { get; } = new();
-
-    /// <summary>Tooltip label for the inline expand chevron next to the first rule chip,
-    /// e.g. "Show 2 more rules". Singular/plural handled here so the XAML stays
-    /// declarative.</summary>
-    public string AdditionalRulesLabel
-    {
-        get
-        {
-            var count = AdditionalRules.Count;
-            if (count <= 0) return string.Empty;
-            return count == 1 ? "Show 1 more rule" : $"Show {count} more rules";
-        }
-    }
-
-    /// <summary>Glyph for the inline expand chevron: down when collapsed, up when expanded.</summary>
-    public string RulesExpandGlyph => IsRulesExpanded
-        ? new string((char)0xE70E, 1)
-        : new string((char)0xE70D, 1);
 
     // ---- Peak meter (sectioned + hold) ----
     //
@@ -518,6 +507,23 @@ public partial class DeviceCard : ObservableObject
         }
     }
 
+    /// <summary>Pulls the OS volume onto the slider when an external source (Windows volume
+    /// flyout, hardware keys, another app) moved it. Suppressed during/just-after the user's
+    /// own drag (grace window) and below a small threshold, and never writes back to the
+    /// device (it's a display-only sync).</summary>
+    public void SyncVolumeFromDevice(float deviceVolume)
+    {
+        if (IsVolumeLockedByRule) return;
+        if (DateTime.UtcNow - _lastUserVolumeChange < UserVolumeGrace) return;
+
+        var clamped = Math.Clamp(deviceVolume, 0f, 1f);
+        if (Math.Abs(Volume - clamped) < 0.005f) return;
+
+        _suppressVolumeWrite = true;
+        try { Volume = clamped; }
+        finally { _suppressVolumeWrite = false; }
+    }
+
     /// <summary>Pushes a new peak sample. <see cref="PeakHoldLevel"/> latches at new highs,
     /// holds for <see cref="PeakHoldSeconds"/>, then decays linearly toward the current peak.</summary>
     public void UpdatePeak(float peak, TimeSpan tickInterval)
@@ -558,6 +564,10 @@ public partial class DeviceCard : ObservableObject
         OnPropertyChanged(nameof(VolumePercentText));
         NotifyMeterChanged();
         if (_suppressVolumeWrite || IsVolumeLockedByRule) return;
+
+        // User-initiated change: stamp it so SyncVolumeFromDevice's grace window leaves the
+        // drag alone.
+        _lastUserVolumeChange = DateTime.UtcNow;
 
         // User-initiated slider change: keep mute state coherent with the value. Dragging
         // off 0 unmutes, dragging back to 0 auto-mutes. Skipped when an active rule has
@@ -617,7 +627,6 @@ public partial class DeviceCard : ObservableObject
     partial void OnIsRulesExpandedChanged(bool value)
     {
         OnPropertyChanged(nameof(IsLayoutCustomSized));
-        OnPropertyChanged(nameof(RulesExpandGlyph));
     }
 
     partial void OnPeakLevelChanged(float value)

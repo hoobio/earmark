@@ -158,7 +158,8 @@ public partial class RulesViewModel : ObservableObject, IDisposable
         if (e.Action is NotifyCollectionChangedAction.Move or NotifyCollectionChangedAction.Add)
         {
             var ids = Items.Select(r => r.Id).ToList();
-            await _rules.ReorderAsync(ids);
+            try { await _rules.ReorderAsync(ids); }
+            catch { /* A failed reorder-save must not crash the UI thread (async void). */ }
         }
     }
 
@@ -204,6 +205,7 @@ public partial class RulesViewModel : ObservableObject, IDisposable
         lock (_gate)
         {
             _matchCts?.Cancel();
+            _matchCts?.Dispose();
             _matchCts = new CancellationTokenSource();
             token = _matchCts.Token;
         }
@@ -242,11 +244,13 @@ public partial class RulesViewModel : ObservableObject, IDisposable
         _dispatcher.Enqueue(() =>
         {
             var liveRules = Items.Select(r => r.ToRule()).ToList();
-            foreach (var row in Items)
+            // liveRules is a positional projection of Items, so Items[i] maps to liveRules[i];
+            // index directly instead of an O(n) Id scan per row.
+            for (var i = 0; i < Items.Count; i++)
             {
+                var row = Items[i];
                 row.Recompute(sessions, endpoints, snapshot, waveLinkState);
-                var rule = liveRules.First(r => r.Id == row.Id);
-                var evaluation = _evaluator.Evaluate(rule, liveRules, sessions, endpoints);
+                var evaluation = _evaluator.Evaluate(liveRules[i], liveRules, sessions, endpoints);
                 row.ApplyEvaluation(evaluation);
             }
         });

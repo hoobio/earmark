@@ -9,7 +9,7 @@ internal sealed class FileLoggerProvider : ILoggerProvider
 {
     private readonly string _path;
     private readonly Lock _gate = new();
-    private LogLevel _minimumLevel = LogLevel.Information;
+    private volatile LogLevel _minimumLevel = LogLevel.Information;
 
     public FileLoggerProvider(string path)
     {

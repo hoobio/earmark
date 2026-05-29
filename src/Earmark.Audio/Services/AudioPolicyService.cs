@@ -10,7 +10,7 @@ using Microsoft.Extensions.Logging;
 namespace Earmark.Audio.Services;
 
 [SupportedOSPlatform("windows10.0.19041.0")]
-public sealed class AudioPolicyService : IAudioPolicyService
+public sealed class AudioPolicyService : IAudioPolicyService, IDisposable
 {
     private const string MMDEVAPI_TOKEN = @"\\?\SWD#MMDEVAPI#";
     private const string DEVINTERFACE_AUDIO_RENDER = "#{e6327cad-dcec-4949-ae8a-991e976a79d2}";
@@ -24,6 +24,7 @@ public sealed class AudioPolicyService : IAudioPolicyService
     private bool _factoryProbed;
     private readonly Lock _policyConfigLock = new();
     private IPolicyConfigVista? _policyConfig;
+    private bool _disposed;
 
     public AudioPolicyService(ILogger<AudioPolicyService> logger)
     {
@@ -347,6 +348,32 @@ public sealed class AudioPolicyService : IAudioPolicyService
             ? DEVINTERFACE_AUDIO_RENDER
             : DEVINTERFACE_AUDIO_CAPTURE;
         return MMDEVAPI_TOKEN + endpointId + suffix;
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+        _disposed = true;
+
+        // Release the cached COM RCWs (the activation factory and the policy-config client).
+        // Shutdown-only; the OS reclaims on exit, but this keeps parity with the sibling
+        // services that all release their COM in Dispose.
+        lock (_factoryLock)
+        {
+            try { if (_factoryWin11 is not null) Marshal.FinalReleaseComObject(_factoryWin11); } catch { }
+            try { if (_factoryWin10 is not null) Marshal.FinalReleaseComObject(_factoryWin10); } catch { }
+            _factoryWin11 = null;
+            _factoryWin10 = null;
+        }
+
+        lock (_policyConfigLock)
+        {
+            try { if (_policyConfig is not null) Marshal.FinalReleaseComObject(_policyConfig); } catch { }
+            _policyConfig = null;
+        }
     }
 
     private static uint ResolveProcessId(string sessionIdentifier)

@@ -64,7 +64,10 @@ internal sealed class EndpointWriter : IEndpointWriter
             }
         }
 
-        return _endpoints.SetMuted(endpoint.Id, muted);
+        // Run the Windows-endpoint COM off the UI thread (this is reachable synchronously from
+        // the slider's OnVolumeChanged); a COM call on the dispatcher can cross-apartment-
+        // deadlock against the MTA audio worker threads.
+        return await Task.Run(() => _endpoints.SetMuted(endpoint.Id, muted)).ConfigureAwait(false);
     }
 
     public async Task<bool> SetVolumeAsync(AudioEndpoint endpoint, float level, CancellationToken ct = default)
@@ -87,7 +90,8 @@ internal sealed class EndpointWriter : IEndpointWriter
             }
         }
 
-        return _endpoints.SetVolume(endpoint.Id, level);
+        // Off the UI thread for the same reason as SetMutedAsync above.
+        return await Task.Run(() => _endpoints.SetVolume(endpoint.Id, level)).ConfigureAwait(false);
     }
 
     private abstract record WaveLinkRoute

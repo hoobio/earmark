@@ -88,6 +88,8 @@
                   CanReorderItems="True"
                   CanDragItems="True"
                   AllowDrop="True"
+                  DragItemsStarting="OnRulesDragStarting"
+                  DragItemsCompleted="OnRulesDragCompleted"
                   Visibility="{x:Bind ViewModel.HasItems, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
             <ListView.ItemContainerStyle>
                 <Style TargetType="ListViewItem">
@@ -102,7 +104,12 @@
                             Opacity="{x:Bind CardOpacity, Mode=OneWay}">
                         <StackPanel Spacing="14">
 
-                            <!-- Header -->
+                            <!-- Header. The whole card is the reorder drag surface; a tap
+                                 toggles the editor. The dragged row is collapsed for the drag
+                                 (DragItemsStarting) so you move a compact block, then restored
+                                 on completion - the editor uses instant Visibility (not an
+                                 animated accordion) so that collapse is immediate and the
+                                 reorder reflow stays clean. -->
                             <Grid ColumnSpacing="12"
                                   Background="Transparent"
                                   Tapped="OnHeaderTapped">
@@ -116,7 +123,8 @@
                                 <FontIcon Grid.Column="0"
                                           Glyph="&#xE700;" FontSize="14"
                                           Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                          VerticalAlignment="Center" />
+                                          VerticalAlignment="Center"
+                                          ToolTipService.ToolTip="Drag to reorder" />
                                 <ToggleSwitch Grid.Column="1"
                                               IsOn="{x:Bind Enabled, Mode=TwoWay}"
                                               OffContent="" OnContent=""
@@ -144,12 +152,13 @@
                                     </StackPanel>
                                 </StackPanel>
                                 <FontIcon Grid.Column="3"
-                                          Glyph="&#xE70D;" FontSize="12"
+                                          Glyph="{x:Bind ExpandGlyph, Mode=OneWay}" FontSize="12"
                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                           VerticalAlignment="Center" />
                             </Grid>
 
-                            <!-- Inline editor -->
+                            <!-- Inline editor. Instant Visibility (not an animated accordion) so
+                                 the dragged row collapses immediately for a clean reorder. -->
                             <StackPanel Spacing="16" Visibility="{x:Bind IsExpanded, Mode=OneWay}">
 
                                 <TextBox Header="Name"

@@ -687,14 +687,9 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
     private static Regex? TryCompile(string pattern)
     {
         if (string.IsNullOrWhiteSpace(pattern)) return null;
-        try
-        {
-            return new Regex(
-                pattern,
-                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
-                TimeSpan.FromMilliseconds(250));
-        }
-        catch (ArgumentException) { return null; }
+        // Reuse the shared compile cache instead of building a fresh regex per endpoint per
+        // rule per apply pass.
+        return RegexCache.TryGet(pattern, out var regex) ? regex : null;
     }
 
     private static bool MatchPattern(string pattern, Regex? regex, string input) =>
