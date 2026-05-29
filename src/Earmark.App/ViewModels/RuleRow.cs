@@ -442,7 +442,7 @@ public partial class ActionRow : ObservableObject, IDisposable, ISyncable<RuleAc
         new ActionTypeOption(ActionType.AddWaveLinkMixOutput, "Add device to Wave Link mix"),
         new ActionTypeOption(ActionType.RemoveWaveLinkMixOutput, "Remove device from Wave Link mix"),
         new ActionTypeOption(ActionType.SetWaveLinkMixOutput, "Set Wave Link mix outputs (exact)"),
-        new ActionTypeOption(ActionType.SetDeviceVolume, "Set device volume"),
+        new ActionTypeOption(ActionType.SetDeviceVolume, "Pin device volume"),
         new ActionTypeOption(ActionType.MuteDevice, "Mute device"),
         new ActionTypeOption(ActionType.UnmuteDevice, "Unmute device"),
     };
@@ -521,7 +521,7 @@ public partial class ActionRow : ObservableObject, IDisposable, ISyncable<RuleAc
         ActionType.AddWaveLinkMixOutput => "Add to mix",
         ActionType.RemoveWaveLinkMixOutput => "Remove from mix",
         ActionType.SetWaveLinkMixOutput => "Set mix outputs",
-        ActionType.SetDeviceVolume => "Set volume",
+        ActionType.SetDeviceVolume => "Pin volume",
         ActionType.MuteDevice => "Mute",
         ActionType.UnmuteDevice => "Unmute",
         _ => Type.ToString(),

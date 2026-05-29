@@ -25,6 +25,11 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
     // RulesChanged / DefaultsChanged. Keep this slow enough to not show up on idle CPU.
     private static readonly TimeSpan PeriodicInterval = TimeSpan.FromMinutes(5);
 
+    // External volume / mute changes (Windows flyout, hardware keys, another app) re-assert a
+    // locked device event-driven. Debounced so a slider drag settles before we snap it back -
+    // mirrors the Devices page's 600ms user-grace window.
+    private static readonly TimeSpan VolumeReconcileDebounce = TimeSpan.FromMilliseconds(500);
+
     private readonly IRulesService _rules;
     private readonly IAudioSessionService _sessions;
     private readonly IAudioEndpointService _endpoints;
@@ -41,6 +46,7 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
 
     private bool _started;
     private Timer? _timer;
+    private Timer? _volumeReconcileTimer;
     private CancellationTokenSource? _cts;
 
     public RoutingApplier(
@@ -82,6 +88,8 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
         _sessions.SessionRemoved += OnSessionRemoved;
         _rules.RulesChanged += OnRulesChanged;
         _endpoints.DefaultsChanged += OnDefaultsChanged;
+        _endpoints.ExternalVolumeChanged += OnExternalVolumeChanged;
+        _endpoints.ExternalMuteChanged += OnExternalMuteChanged;
         _waveLink.SnapshotChanged += OnWaveLinkSnapshotChanged;
 
         _ = Task.Run(async () =>
@@ -98,6 +106,8 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
         });
 
         _timer = new Timer(OnTimerTick, null, PeriodicInterval, PeriodicInterval);
+        // Single-shot debounce timer for external-change reconcile; armed by ScheduleVolumeReconcile.
+        _volumeReconcileTimer = new Timer(OnVolumeReconcileTick, null, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
         _logger.LogInformation("Routing applier started; periodic interval = {Interval}", PeriodicInterval);
     }
 
@@ -397,6 +407,60 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
         }
     }
 
+    // Windows-endpoint volume/mute changes (any active render or capture device). The WL-side
+    // equivalent rides OnWaveLinkSnapshotChanged; together they cover both transports.
+    private void OnExternalVolumeChanged(object? sender, EndpointVolumeChangedEventArgs e) =>
+        ScheduleVolumeReconcile();
+
+    private void OnExternalMuteChanged(object? sender, EndpointMuteChangedEventArgs e) =>
+        ScheduleVolumeReconcile();
+
+    // Re-assert volume/mute-lock rules after an external change, event-driven like the Devices
+    // page. Debounced through the single reconcile timer so a slider drag coalesces into one
+    // re-clamp once the user lets go. Skipped when no rule pins volume/mute, so machines without
+    // lock rules don't wake on every system volume keypress. Our own write is a no-op once
+    // settled (SetVolume/SetMuted skip when already at target), so this converges in one cycle.
+    private void ScheduleVolumeReconcile()
+    {
+        if (_cts is null || _cts.IsCancellationRequested) return;
+        if (!HasAnyVolumeOrMuteRule()) return;
+        _volumeReconcileTimer?.Change(VolumeReconcileDebounce, Timeout.InfiniteTimeSpan);
+    }
+
+    private bool HasAnyVolumeOrMuteRule()
+    {
+        foreach (var rule in _rules.Rules)
+        {
+            if (!rule.Enabled) continue;
+            foreach (var action in rule.Actions)
+            {
+                if (action.IsValid && (action.IsVolumeAction || action.IsMuteAction)) return true;
+            }
+        }
+        return false;
+    }
+
+    private async void OnVolumeReconcileTick(object? state)
+    {
+        if (_cts is null || _cts.IsCancellationRequested) return;
+        try
+        {
+            await _applyGate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                await Task.Run(ApplyVolumeAndMuteRules).ConfigureAwait(false);
+            }
+            finally
+            {
+                _applyGate.Release();
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "External-change volume reconcile failed");
+        }
+    }
+
     private async void OnTimerTick(object? state)
     {
         if (_cts is null || _cts.IsCancellationRequested)
@@ -416,10 +480,10 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
 
     private void ApplyVolumeAndMuteRules()
     {
-        // Per-device first-match-wins, symmetric with app/default-device rules. Volume and mute
-        // are independent dimensions, so each endpoint resolves them separately: we scan rules
-        // top-to-bottom and lock in the first matching SetDeviceVolume for the volume target and
-        // the first matching Mute/Unmute for the mute target.
+        // Per-device first-match-wins, symmetric with app/default-device rules. The effective
+        // volume / mute target for each endpoint comes from the shared DeviceRuleResolver - the
+        // same logic the Devices page uses to decide whether a card is locked - so enforcement
+        // here and the lock indicator there can't drift.
         var renderEndpoints = _endpoints.GetEndpoints(EndpointFlow.Render);
         var captureEndpoints = _endpoints.GetEndpoints(EndpointFlow.Capture);
         var allEndpoints = renderEndpoints
@@ -435,47 +499,12 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
 
         foreach (var endpoint in allEndpoints)
         {
-            float? targetVolume = null;
-            string? volumeRuleName = null;
-            bool? targetMuted = null;
-            string? muteRuleName = null;
+            var targets = DeviceRuleResolver.Resolve(endpoint, _rules.Rules, allEndpoints, sessions, _matcher);
 
-            foreach (var rule in _rules.Rules)
+            if (targets.Volume.HasValue)
             {
-                if (targetVolume.HasValue && targetMuted.HasValue) break;
-                if (!rule.Enabled) continue;
-                if (!_matcher.ConditionsMet(rule, renderEndpoints, sessions)) continue;
-
-                var ruleLabel = string.IsNullOrEmpty(rule.Name) ? rule.Id.ToString() : rule.Name;
-
-                foreach (var action in rule.Actions)
-                {
-                    if (!action.IsValid) continue;
-                    if (action.Type is not (ActionType.SetDeviceVolume or ActionType.MuteDevice or ActionType.UnmuteDevice)) continue;
-
-                    var devRegex = TryCompile(action.DevicePattern);
-                    if (!MatchPattern(action.DevicePattern, devRegex, endpoint.FriendlyName) &&
-                        !MatchPattern(action.DevicePattern, devRegex, endpoint.DisplayName)) continue;
-
-                    if (action.Type == ActionType.SetDeviceVolume && !targetVolume.HasValue)
-                    {
-                        targetVolume = action.Volume;
-                        volumeRuleName = ruleLabel;
-                    }
-                    else if (action.Type is ActionType.MuteDevice or ActionType.UnmuteDevice && !targetMuted.HasValue)
-                    {
-                        targetMuted = action.Type == ActionType.MuteDevice;
-                        muteRuleName = ruleLabel;
-                    }
-
-                    if (targetVolume.HasValue && targetMuted.HasValue) break;
-                }
-            }
-
-            if (targetVolume.HasValue)
-            {
-                var capturedVolume = targetVolume.Value;
-                var capturedRule = volumeRuleName;
+                var capturedVolume = targets.Volume.Value;
+                var capturedRule = targets.VolumeSource;
                 var capturedDevice = endpoint.DisplayName;
                 var capturedEndpoint = endpoint;
                 _ = Task.Run(async () =>
@@ -495,10 +524,10 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
                     }
                 });
             }
-            if (targetMuted.HasValue)
+            if (targets.Muted.HasValue)
             {
-                var capturedMute = targetMuted.Value;
-                var capturedRule = muteRuleName;
+                var capturedMute = targets.Muted.Value;
+                var capturedRule = targets.MuteSource;
                 var capturedDevice = endpoint.DisplayName;
                 var capturedEndpoint = endpoint;
                 _ = Task.Run(async () =>
@@ -705,10 +734,14 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
         _cts?.Cancel();
         _timer?.Dispose();
         _timer = null;
+        _volumeReconcileTimer?.Dispose();
+        _volumeReconcileTimer = null;
         _sessions.SessionAdded -= OnSessionAdded;
         _sessions.SessionRemoved -= OnSessionRemoved;
         _rules.RulesChanged -= OnRulesChanged;
         _endpoints.DefaultsChanged -= OnDefaultsChanged;
+        _endpoints.ExternalVolumeChanged -= OnExternalVolumeChanged;
+        _endpoints.ExternalMuteChanged -= OnExternalMuteChanged;
         _waveLink.SnapshotChanged -= OnWaveLinkSnapshotChanged;
         _cts?.Dispose();
         _cts = null;

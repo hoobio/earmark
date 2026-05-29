@@ -59,11 +59,11 @@ internal static class DeviceRulesSummary
 
         var summaries = new List<RuleSummary>();
         var combinedEndpoints = renderEndpoints.Concat(captureEndpoints).ToList();
-        var volumeLocked = false;
-        var muteLocked = false;
-        bool? ruleMutedTarget = null;
-        string? ruleMutedSource = null;
-        string? ruleVolumeSource = null;
+
+        // The lock state (which dimension is pinned, to what, by which rule) comes from the
+        // shared DeviceRuleResolver - the exact first-match-wins computation the routing applier
+        // uses to enforce these rules - so the lock icon and the enforcement can't disagree.
+        var targets = DeviceRuleResolver.Resolve(endpoint, rules, combinedEndpoints, sessions, matcher);
 
         foreach (var rule in rules)
         {
@@ -75,31 +75,6 @@ internal static class DeviceRulesSummary
 
             summaries.Add(new RuleSummary(
                 rule.Id, name, evaluation.Status, evaluation.Message, matchSummary));
-
-            // Only Active rules can lock controls. Highest-priority (first-listed) active rule
-            // wins the mute target; subsequent rules don't override it.
-            if (rule.Enabled && evaluation.Status == RuleStatus.Active)
-            {
-                foreach (var action in rule.Actions)
-                {
-                    if (!action.IsValid || !ActionTargetsEndpoint(action, endpoint)) continue;
-
-                    if (action.Type == ActionType.SetDeviceVolume)
-                    {
-                        volumeLocked = true;
-                        ruleVolumeSource ??= name;
-                    }
-                    if (action.Type is ActionType.MuteDevice or ActionType.UnmuteDevice)
-                    {
-                        muteLocked = true;
-                        if (ruleMutedTarget is null)
-                        {
-                            ruleMutedTarget = action.Type == ActionType.MuteDevice;
-                            ruleMutedSource = name;
-                        }
-                    }
-                }
-            }
         }
 
         // Active rules float to the top; everything else keeps its original priority order
@@ -108,7 +83,13 @@ internal static class DeviceRulesSummary
             .OrderByDescending(s => s.Status == RuleStatus.Active)
             .ToList();
 
-        return new Result(ordered, volumeLocked, muteLocked, ruleMutedTarget, ruleMutedSource, ruleVolumeSource);
+        return new Result(
+            ordered,
+            targets.Volume.HasValue,
+            targets.Muted.HasValue,
+            targets.Muted,
+            targets.MuteSource,
+            targets.VolumeSource);
     }
 
     private static bool RuleTargetsEndpoint(RoutingRule rule, AudioEndpoint endpoint)

@@ -1,5 +1,3 @@
-using System.Text.RegularExpressions;
-
 using Earmark.Core.Models;
 
 namespace Earmark.Core.Routing;
@@ -229,10 +227,7 @@ public sealed class RuleEvaluator : IRuleEvaluator
     private static List<uint> MatchAppPids(string pattern, IReadOnlyList<AudioSession> sessions)
     {
         var pids = new List<uint>();
-        if (!RegexCache.TryGet(pattern, out var regex) || regex is null)
-        {
-            return pids;
-        }
+        RegexCache.TryGet(pattern, out var regex);
 
         var seen = new HashSet<uint>();
         foreach (var session in sessions)
@@ -241,7 +236,8 @@ public sealed class RuleEvaluator : IRuleEvaluator
             {
                 continue;
             }
-            if (Match(regex, session.ProcessName) || Match(regex, session.ExecutablePath))
+            if (PatternMatcher.Matches(pattern, regex, session.ProcessName) ||
+                PatternMatcher.Matches(pattern, regex, session.ExecutablePath))
             {
                 pids.Add(session.ProcessId);
             }
@@ -252,62 +248,23 @@ public sealed class RuleEvaluator : IRuleEvaluator
 
     private static AudioEndpoint? MatchEndpoint(string pattern, EndpointFlow flow, IReadOnlyList<AudioEndpoint> endpoints)
     {
-        if (!RegexCache.TryGet(pattern, out var regex) || regex is null)
-        {
-            return null;
-        }
+        RegexCache.TryGet(pattern, out var regex);
 
         return endpoints
             .Where(e => e.Flow == flow && e.State == EndpointState.Active)
             .FirstOrDefault(e =>
-            {
-                try
-                {
-                    return regex.IsMatch(e.FriendlyName) || regex.IsMatch(e.DisplayName);
-                }
-                catch (RegexMatchTimeoutException)
-                {
-                    return false;
-                }
-            });
+                PatternMatcher.Matches(pattern, regex, e.FriendlyName) ||
+                PatternMatcher.Matches(pattern, regex, e.DisplayName));
     }
 
     private static AudioEndpoint? MatchEndpointAnyFlow(string pattern, IReadOnlyList<AudioEndpoint> endpoints)
     {
-        if (!RegexCache.TryGet(pattern, out var regex) || regex is null)
-        {
-            return null;
-        }
+        RegexCache.TryGet(pattern, out var regex);
 
         return endpoints
             .Where(e => e.State == EndpointState.Active)
             .FirstOrDefault(e =>
-            {
-                try
-                {
-                    return regex.IsMatch(e.FriendlyName) || regex.IsMatch(e.DisplayName);
-                }
-                catch (RegexMatchTimeoutException)
-                {
-                    return false;
-                }
-            });
-    }
-
-    private static bool Match(Regex regex, string input)
-    {
-        if (string.IsNullOrEmpty(input))
-        {
-            return false;
-        }
-
-        try
-        {
-            return regex.IsMatch(input);
-        }
-        catch (RegexMatchTimeoutException)
-        {
-            return false;
-        }
+                PatternMatcher.Matches(pattern, regex, e.FriendlyName) ||
+                PatternMatcher.Matches(pattern, regex, e.DisplayName));
     }
 }
