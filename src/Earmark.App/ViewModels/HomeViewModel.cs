@@ -859,12 +859,15 @@ public partial class HomeViewModel : ObservableObject, IDisposable
                 RulePinnedHere = add.PinnedHere,
             };
             InsertChipSorted(card.Apps, chip);
-            if (add.PinnedHere && !add.Audible)
-            {
-                _logger.LogInformation(
-                    "Chip placed via rule-pin (silent): pid={Pid} name='{Name}' card='{Card}'",
-                    add.Session.ProcessId, add.Session.ProcessName, card.Endpoint.DisplayName);
-            }
+            // Full identity at creation: the icon is loaded from ExecutablePath while the label
+            // uses DisplayName. If a stale PID-keyed process-info cache makes those disagree
+            // (e.g. display='Audacity' but path points at msedge.exe), the chip shows a mismatched
+            // icon - this line makes that obvious in the log.
+            _logger.LogInformation(
+                "Chip placed: pid={Pid} name='{Name}' display='{Display}' path='{Path}' key='{Key}' card='{Card}' pinnedHere={Pinned} audible={Audible}",
+                add.Session.ProcessId, add.Session.ProcessName, add.Session.DisplayName,
+                add.Session.ExecutablePath, add.Session.IdentityKey, card.Endpoint.DisplayName,
+                add.PinnedHere, add.Audible);
         }
 
         // Refresh the cached rule-pin flag on every surviving chip: a rule may have started or
