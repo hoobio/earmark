@@ -1,5 +1,51 @@
 # Changelog
 
+## [0.1.7](https://github.com/hoobio/earmark/compare/v0.1.6...v0.1.7) (2026-05-29)
+
+
+### Features
+
+* add a setting to reconcile Wave Link device names ([0f7d12c](https://github.com/hoobio/earmark/commit/0f7d12c53b19d3993f249344b18ce53dc5e862ed))
+* add Devices page with live cards, peak meter and Ctrl+Z undo ([#32](https://github.com/hoobio/earmark/issues/32)) ([f7951e8](https://github.com/hoobio/earmark/commit/f7951e8b2f5db119a3674826e84c70edd785f8b0))
+* **audio:** reconcile external mute changes via AudioEndpointVolume ([f7951e8](https://github.com/hoobio/earmark/commit/f7951e8b2f5db119a3674826e84c70edd785f8b0))
+* **home:** Ctrl+Z undo for hide / show, volume drags and mute toggles ([f7951e8](https://github.com/hoobio/earmark/commit/f7951e8b2f5db119a3674826e84c70edd785f8b0))
+* **home:** match device-card icons to Wave Link mixes ([0f7d12c](https://github.com/hoobio/earmark/commit/0f7d12c53b19d3993f249344b18ce53dc5e862ed))
+* **home:** persist window size across launches ([f7951e8](https://github.com/hoobio/earmark/commit/f7951e8b2f5db119a3674826e84c70edd785f8b0))
+* **rules:** add ApplicationRunning and ApplicationNotRunning conditions ([f7951e8](https://github.com/hoobio/earmark/commit/f7951e8b2f5db119a3674826e84c70edd785f8b0))
+* **ui:** replace per-page subtext lines with info-icon tooltips ([f7951e8](https://github.com/hoobio/earmark/commit/f7951e8b2f5db119a3674826e84c70edd785f8b0))
+* **ui:** right-click menus to hide a device and enable or delete a rule ([0f7d12c](https://github.com/hoobio/earmark/commit/0f7d12c53b19d3993f249344b18ce53dc5e862ed))
+* Wave Link card theming, app theme and per-device apps row ([#34](https://github.com/hoobio/earmark/issues/34)) ([0f7d12c](https://github.com/hoobio/earmark/commit/0f7d12c53b19d3993f249344b18ce53dc5e862ed))
+* **wavelink:** route Wave Link input mute and volume over the WebSocket ([0f7d12c](https://github.com/hoobio/earmark/commit/0f7d12c53b19d3993f249344b18ce53dc5e862ed))
+
+
+### Bug Fixes
+
+* **audio:** keep CoreAudio COM off the UI thread to stop hangs ([0f7d12c](https://github.com/hoobio/earmark/commit/0f7d12c53b19d3993f249344b18ce53dc5e862ed))
+* **audio:** release COM wrappers and adopt singleton view-model lifetime ([#28](https://github.com/hoobio/earmark/issues/28)) ([694819e](https://github.com/hoobio/earmark/commit/694819ea032cfe4e1be2f778e893cd1c315a284f))
+* **audio:** release MMDevice / AudioSessionControl wrappers and ([694819e](https://github.com/hoobio/earmark/commit/694819ea032cfe4e1be2f778e893cd1c315a284f))
+* **rules:** mark volume / mute rules targeting capture devices as Active ([f7951e8](https://github.com/hoobio/earmark/commit/f7951e8b2f5db119a3674826e84c70edd785f8b0))
+
+
+### Performance Improvements
+
+* **audio:** reuse cached MMDevice for peak-level reads to avoid ([f7951e8](https://github.com/hoobio/earmark/commit/f7951e8b2f5db119a3674826e84c70edd785f8b0))
+* **audio:** reuse the cached MMDevice and skip no-op mute notifications ([0f7d12c](https://github.com/hoobio/earmark/commit/0f7d12c53b19d3993f249344b18ce53dc5e862ed))
+
+
+### Documentation
+
+* **release-please:** require blank lines between footer entries ([#33](https://github.com/hoobio/earmark/issues/33)) ([4d21efc](https://github.com/hoobio/earmark/commit/4d21efca2e2af1ab221d690ded77362fa200f124))
+
+
+### Miscellaneous Chores
+
+* rename CLAUDE.md to AGENTS.md and document event-driven ([f7951e8](https://github.com/hoobio/earmark/commit/f7951e8b2f5db119a3674826e84c70edd785f8b0))
+
+
+### Build System
+
+* **deps:** Bump hoobio/pipeline-tools from 1.5.0 to 2.2.1 ([#31](https://github.com/hoobio/earmark/issues/31)) ([afe3e45](https://github.com/hoobio/earmark/commit/afe3e450b0a3de3b141dbf31a1f469e16920865f))
+
 ## [0.1.6](https://github.com/hoobio/earmark/compare/v0.1.5...v0.1.6) (2026-04-30)
 
 
