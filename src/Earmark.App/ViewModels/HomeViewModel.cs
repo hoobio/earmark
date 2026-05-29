@@ -39,6 +39,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     private readonly IEndpointWriter _writer;
     private readonly IAudioSessionService _sessions;
     private readonly IAudioSessionMeterService _sessionMeters;
+    private readonly IRunningProcessProvider _processes;
     private readonly IAudioPolicyService _policy;
     private readonly IRoutingApplier _routingApplier;
     private readonly ISessionIconService _iconService;
@@ -68,6 +69,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         IEndpointWriter writer,
         IAudioSessionService sessions,
         IAudioSessionMeterService sessionMeters,
+        IRunningProcessProvider processes,
         IAudioPolicyService policy,
         IRoutingApplier routingApplier,
         ISessionIconService iconService,
@@ -85,6 +87,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         _writer = writer ?? throw new ArgumentNullException(nameof(writer));
         _sessions = sessions ?? throw new ArgumentNullException(nameof(sessions));
         _sessionMeters = sessionMeters ?? throw new ArgumentNullException(nameof(sessionMeters));
+        _processes = processes ?? throw new ArgumentNullException(nameof(processes));
         _policy = policy ?? throw new ArgumentNullException(nameof(policy));
         _routingApplier = routingApplier ?? throw new ArgumentNullException(nameof(routingApplier));
         _iconService = iconService ?? throw new ArgumentNullException(nameof(iconService));
@@ -115,6 +118,12 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         _sessions.SessionsChanged += OnSessionsChangedInPlace;
         _sessions.SessionRemoved += OnSessionRemoved;
         _sessions.SessionAdded += OnSessionAdded;
+        // A matched app that's running but silent has no audio session, so it never shows up via
+        // the session events above. The process watcher fills that gap: a start/stop reconciles the
+        // chips in place (same debounced path as SessionsChanged) so a rule-pinned-but-quiet app
+        // gets a dimmed chip on its target card, and loses it when the process exits.
+        _processes.ProcessStarted += OnProcessSetChanged;
+        _processes.ProcessStopped += OnProcessSetChanged;
         // After a route is applied (rule reapply, per-app default change, drag-drop), the
         // meter cache often holds stale IAudioSessionControl handles that report 0 peak on
         // the now-correct endpoint and lingering peak on the old one - which leaves the
@@ -431,7 +440,13 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     /// GetPeak COM calls and matcher invocations) backs up the dispatcher to the point of
     /// the UI hanging.
     /// </summary>
-    private void OnSessionsChangedInPlace(object? sender, EventArgs e)
+    private void OnSessionsChangedInPlace(object? sender, EventArgs e) => QueueAppsReconcile();
+
+    // Process start/stop (from the running-process watcher, off a timer thread) shares the same
+    // debounced in-place reconcile - a burst of starts at login collapses into one SyncAllCardsApps.
+    private void OnProcessSetChanged(object? sender, RunningProcessEvent e) => QueueAppsReconcile();
+
+    private void QueueAppsReconcile()
     {
         _sessionsSyncCts?.Cancel();
         _sessionsSyncCts = new CancellationTokenSource();
@@ -616,17 +631,82 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         // card, so computing it per card would multiply that cost needlessly. Phase 2 / Phase 3
         // in the 20Hz tick never call the matcher - they read the cached chip flag instead.
         var routeByPid = new Dictionary<uint, AppRouteMatch?>();
+        var realIdentities = new HashSet<string>(StringComparer.Ordinal);
         foreach (var session in sessions)
         {
             if (!AppChip.ShouldShowAsAppChip(session)) continue;
+            realIdentities.Add(session.IdentityKey);
             if (routeByPid.ContainsKey(session.ProcessId)) continue;
             routeByPid[session.ProcessId] = _matcher.FindAppRoute(session, EndpointFlow.Render, rules, combined, sessions);
         }
 
+        // Fold in matched-but-silent running apps (no audio session, so absent from the snapshot).
+        var runningIdentities = new HashSet<string>(StringComparer.Ordinal);
+        var synthetic = BuildSyntheticSessions(rules, combined, sessions, realIdentities, routeByPid, runningIdentities);
+        IReadOnlyList<AudioSession> effectiveSessions = sessions;
+        if (synthetic.Count > 0)
+        {
+            var merged = new List<AudioSession>(sessions.Count + synthetic.Count);
+            merged.AddRange(sessions);
+            merged.AddRange(synthetic);
+            effectiveSessions = merged;
+        }
+
+        // An app is "alive" if it owns a session OR a matched process is running. A chip whose app
+        // is on neither has exited; SyncCardApps removes it (the silent-running case has no
+        // SessionRemoved to drive that).
+        var aliveIdentities = realIdentities;
+        if (runningIdentities.Count > 0)
+        {
+            aliveIdentities = new HashSet<string>(realIdentities, StringComparer.Ordinal);
+            aliveIdentities.UnionWith(runningIdentities);
+        }
+
         foreach (var card in _allCards)
         {
-            SyncCardApps(card, sessions, routeByPid);
+            SyncCardApps(card, effectiveSessions, routeByPid, aliveIdentities);
         }
+    }
+
+    /// <summary>
+    /// Synthesises sessions for apps that are running but have no audio session, so a rule-pinned
+    /// app gets a (dimmed) chip on its target card before it ever makes a sound. Only apps an
+    /// <c>ApplicationOutput</c> rule actually pins are included - everything else would be noise -
+    /// and only when no real session already represents the app (a live session always wins, since
+    /// it carries the real pid for metering). Matched identities are recorded in
+    /// <paramref name="runningIdentities"/> and their route cached in <paramref name="routeByPid"/>.
+    /// </summary>
+    private List<AudioSession> BuildSyntheticSessions(
+        IReadOnlyList<RoutingRule> rules,
+        IReadOnlyList<AudioEndpoint> combined,
+        IReadOnlyList<AudioSession> sessions,
+        HashSet<string> realIdentities,
+        Dictionary<uint, AppRouteMatch?> routeByPid,
+        HashSet<string> runningIdentities)
+    {
+        var result = new List<AudioSession>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var process in _processes.GetRunningProcesses())
+        {
+            // No resolvable executable path => a service or protected system process (steamservice,
+            // svchost, ...). Those don't produce routable audio and have no icon, so a synthetic
+            // chip for one is pure noise - and the per-app endpoint API couldn't pin it anyway.
+            if (string.IsNullOrEmpty(process.ExecutablePath)) continue;
+
+            var session = process.ToSyntheticSession();
+            var key = session.IdentityKey;
+            if (realIdentities.Contains(key)) continue;
+            if (!seen.Add(key)) continue;
+            if (!AppChip.ShouldShowAsAppChip(session)) continue;
+
+            var match = _matcher.FindAppRoute(session, EndpointFlow.Render, rules, combined, sessions);
+            if (match is null) continue;
+
+            routeByPid[session.ProcessId] = match;
+            runningIdentities.Add(key);
+            result.Add(session);
+        }
+        return result;
     }
 
     private List<DeviceCard> BuildCards(HashSet<string> hiddenIds, HashSet<string> pinnedIds, List<string> deviceOrder, bool showHidden)
@@ -769,7 +849,8 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     private void SyncCardApps(
         DeviceCard card,
         IReadOnlyList<AudioSession> sessions,
-        Dictionary<uint, AppRouteMatch?> routeByPid)
+        Dictionary<uint, AppRouteMatch?> routeByPid,
+        HashSet<string> aliveIdentities)
     {
         if (card.Endpoint.Flow != EndpointFlow.Render)
         {
@@ -779,6 +860,23 @@ public partial class HomeViewModel : ObservableObject, IDisposable
                 card.NotifyAppsChanged();
             }
             return;
+        }
+
+        // Drop chips whose app is gone: its identity is on no live source (neither an audio session
+        // nor a running process). This is the removal path for the silent-but-running chips below -
+        // they never get a SessionRemoved (no session ever existed) and are exempt from the Phase 3
+        // grace prune (they're rule-pinned). Guarded on "not audible right now" so a momentary
+        // snapshot gap for a still-playing app can't yank its chip.
+        for (var i = card.Apps.Count - 1; i >= 0; i--)
+        {
+            var chip = card.Apps[i];
+            if (aliveIdentities.Contains(chip.Session.IdentityKey)) continue;
+            var peak = _sessionMeters.GetPeak(chip.ProcessId, card.Endpoint.Id) ?? 0f;
+            if (peak >= AppChip.AudibleAmplitudeThreshold) continue;
+            _logger.LogInformation("Chip removed (app exited): pid={Pid} key='{Key}' card={Card}",
+                chip.ProcessId, chip.Session.IdentityKey, card.Endpoint.DisplayName);
+            card.Apps.RemoveAt(i);
+            card.NotifyAppsChanged();
         }
 
         // Collapse any pre-existing duplicate chips for the same app (an app spawns several
@@ -847,10 +945,11 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             }
         }
 
-        // SyncCardApps does ADDITIONS only (plus the rule-pin flag refresh below). Removals live
-        // on two paths: event-driven SessionRemoved when a process exits, and the Phase 3 prune
-        // for live-but-silent sessions (which skips rule-pinned chips). Tying removal to "peak
-        // says silent right now" would lose chips during brief gaps (track changes, pause).
+        // Past the app-exited sweep above, this loop does ADDITIONS only (plus the rule-pin flag
+        // refresh below). Other removals live on two paths: event-driven SessionRemoved when a
+        // process with a session exits, and the Phase 3 prune for live-but-silent sessions (which
+        // skips rule-pinned chips). Tying removal to "peak says silent right now" would lose chips
+        // during brief gaps (track changes, pause).
         foreach (var add in additions.Values
             .OrderBy(a => a.Session.IsSystemSounds ? "System Sounds" : a.Session.DisplayName, StringComparer.OrdinalIgnoreCase))
         {
@@ -1169,6 +1268,8 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         _sessions.SessionsChanged -= OnSessionsChangedInPlace;
         _sessions.SessionRemoved -= OnSessionRemoved;
         _sessions.SessionAdded -= OnSessionAdded;
+        _processes.ProcessStarted -= OnProcessSetChanged;
+        _processes.ProcessStopped -= OnProcessSetChanged;
         _routingApplier.RouteApplied -= OnRouteApplied;
         _waveLink.SnapshotChanged -= OnAnythingChanged;
         _waveLink.StateChanged -= OnAnythingChanged;
