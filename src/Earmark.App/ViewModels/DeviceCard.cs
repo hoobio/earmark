@@ -157,7 +157,6 @@ public partial class DeviceCard : ObservableObject
     public bool HasRules => Rules.Count > 0;
     public bool HasNoRules => Rules.Count == 0;
     public bool HasMultipleRules => Rules.Count > 1;
-    public bool HasSingleRule => Rules.Count == 1;
 
     // The slider is editable unless:
     //   - a volume rule pins the level, or
@@ -270,9 +269,24 @@ public partial class DeviceCard : ObservableObject
     /// to expand anything.</summary>
     public RuleSummary? FirstRule => Rules.Count > 0 ? Rules[0] : null;
 
-    /// <summary>Rules beyond the first. Shown as the Expander's content (the first rule is its
-    /// always-visible header), so this only carries the rules after index 0.</summary>
+    /// <summary>Rules beyond the first - revealed under the first-rule chip when expanded.</summary>
     public ObservableCollection<RuleSummary> AdditionalRules { get; } = new();
+
+    /// <summary>Tooltip for the expand chevron, e.g. "Show 2 more rules".</summary>
+    public string AdditionalRulesLabel
+    {
+        get
+        {
+            var count = AdditionalRules.Count;
+            if (count <= 0) return string.Empty;
+            return count == 1 ? "Show 1 more rule" : $"Show {count} more rules";
+        }
+    }
+
+    /// <summary>Expand chevron glyph: down when collapsed, up when expanded.</summary>
+    public string RulesExpandGlyph => IsRulesExpanded
+        ? new string((char)0xE70E, 1)
+        : new string((char)0xE70D, 1);
 
     // ---- Peak meter (sectioned + hold) ----
     //
@@ -627,6 +641,7 @@ public partial class DeviceCard : ObservableObject
     partial void OnIsRulesExpandedChanged(bool value)
     {
         OnPropertyChanged(nameof(IsLayoutCustomSized));
+        OnPropertyChanged(nameof(RulesExpandGlyph));
     }
 
     partial void OnPeakLevelChanged(float value)

@@ -351,30 +351,23 @@
                                                    Style="{StaticResource CaptionTextBlockStyle}"
                                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
 
-                                        <!-- One rule: a plain chip. Multiple rules: an Expander
-                                             that homes on the first rule (its always-visible
-                                             header, still click-to-open-in-Rules) with the rest
-                                             as animated content. The Expander supplies the
-                                             rotating chevron and the open/close animation. -->
-                                        <ContentControl Visibility="{x:Bind HasSingleRule, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
-                                                        HorizontalAlignment="Stretch"
-                                                        HorizontalContentAlignment="Stretch"
-                                                        Margin="0,2,0,0"
-                                                        Content="{x:Bind FirstRule, Mode=OneWay}"
-                                                        ContentTemplate="{StaticResource RuleChipTemplate}" />
-
-                                        <Expander Visibility="{x:Bind HasMultipleRules, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
-                                                  IsExpanded="{x:Bind IsRulesExpanded, Mode=TwoWay}"
-                                                  HorizontalAlignment="Stretch"
-                                                  HorizontalContentAlignment="Stretch"
-                                                  Margin="0,2,0,0"
-                                                  Padding="0">
-                                            <Expander.Header>
-                                                <!-- Inline chip (not a ContentControl) so it
-                                                     stretches to fill the header width. -->
-                                                <Button Style="{StaticResource SubtleRuleChipButtonStyle}"
-                                                        HorizontalAlignment="Stretch"
-                                                        HorizontalContentAlignment="Left"
+                                        <!-- First rule chip: full-width chip-styled Border that
+                                             fills the card. Left: chip body (opens in Rules).
+                                             Right: chevron button (toggles the additional-rules
+                                             panel), shown only when there's more than one rule.
+                                             (A WinUI Expander can't stretch its header content to
+                                             fill, so the rules section stays this chip layout.) -->
+                                        <Border Background="{ThemeResource SubtleFillColorTertiaryBrush}"
+                                                CornerRadius="4"
+                                                Margin="0,2,0,0">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <Button Grid.Column="0"
+                                                        Style="{StaticResource SubtleRuleChipButtonStyle}"
+                                                        Background="Transparent"
                                                         Opacity="{x:Bind FirstRule.Opacity, FallbackValue=1.0, Mode=OneWay}"
                                                         DataContext="{x:Bind FirstRule, Mode=OneWay}"
                                                         Click="OnRuleChipClicked"
@@ -399,26 +392,42 @@
                                                         </StackPanel>
                                                     </StackPanel>
                                                 </Button>
-                                            </Expander.Header>
-                                            <ItemsControl ItemsSource="{x:Bind AdditionalRules}"
-                                                          HorizontalAlignment="Stretch"
-                                                          HorizontalContentAlignment="Stretch">
-                                                <ItemsControl.ItemContainerStyle>
-                                                    <Style TargetType="ContentPresenter">
-                                                        <Setter Property="HorizontalAlignment" Value="Stretch" />
-                                                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                                                    </Style>
-                                                </ItemsControl.ItemContainerStyle>
-                                                <ItemsControl.ItemTemplate>
-                                                    <DataTemplate x:DataType="vm:RuleSummary">
-                                                        <ContentControl HorizontalAlignment="Stretch"
-                                                                        HorizontalContentAlignment="Stretch"
-                                                                        Content="{x:Bind}"
-                                                                        ContentTemplate="{StaticResource RuleChipTemplate}" />
-                                                    </DataTemplate>
-                                                </ItemsControl.ItemTemplate>
-                                            </ItemsControl>
-                                        </Expander>
+                                                <Button Grid.Column="1"
+                                                        Background="Transparent"
+                                                        BorderBrush="Transparent"
+                                                        Padding="10,0"
+                                                        VerticalAlignment="Stretch"
+                                                        Tag="{x:Bind}"
+                                                        Click="OnRulesExpandToggle"
+                                                        Visibility="{x:Bind HasMultipleRules, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                                        ToolTipService.ToolTip="{x:Bind AdditionalRulesLabel}">
+                                                    <FontIcon Glyph="{x:Bind RulesExpandGlyph, Mode=OneWay}"
+                                                              FontSize="12"
+                                                              Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                                </Button>
+                                            </Grid>
+                                        </Border>
+
+                                        <!-- Additional rules, shown only when expanded. -->
+                                        <ItemsControl ItemsSource="{x:Bind AdditionalRules}"
+                                                      HorizontalAlignment="Stretch"
+                                                      HorizontalContentAlignment="Stretch"
+                                                      Visibility="{x:Bind IsRulesExpanded, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                            <ItemsControl.ItemContainerStyle>
+                                                <Style TargetType="ContentPresenter">
+                                                    <Setter Property="HorizontalAlignment" Value="Stretch" />
+                                                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                                </Style>
+                                            </ItemsControl.ItemContainerStyle>
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate x:DataType="vm:RuleSummary">
+                                                    <ContentControl HorizontalAlignment="Stretch"
+                                                                    HorizontalContentAlignment="Stretch"
+                                                                    Content="{x:Bind}"
+                                                                    ContentTemplate="{StaticResource RuleChipTemplate}" />
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
                                     </StackPanel>
 
                                     <TextBlock Text="No rules target this device."

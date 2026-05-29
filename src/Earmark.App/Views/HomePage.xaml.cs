@@ -73,6 +73,14 @@ public sealed partial class HomePage : Page
         _mainWindow.NavigateByTag("Rules");
     }
 
+    private void OnRulesExpandToggle(object sender, RoutedEventArgs e)
+    {
+        // ItemsRepeater doesn't propagate DataContext into x:Bind templates, so the button
+        // carries the DeviceCard via Tag="{x:Bind}".
+        if (sender is not FrameworkElement { Tag: DeviceCard card }) return;
+        card.IsRulesExpanded = !card.IsRulesExpanded;
+    }
+
     // CA1822 suppressed: XAML event hookup requires instance methods even when the body
     // doesn't touch instance state.
 #pragma warning disable CA1822
