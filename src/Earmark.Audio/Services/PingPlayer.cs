@@ -12,9 +12,11 @@ namespace Earmark.Audio.Services;
 internal static class PingPlayer
 {
     // Built-in Windows sound effects, in order of preference. We pick the first one that
-    // exists on the machine so the ping uses a familiar OS chime instead of a custom tone.
+    // exists on the machine so the ping matches the systray volume slider's audible blip
+    // - that's "Windows Background.wav" (the same file Windows plays on slider release).
     private static readonly string[] CandidateWavNames =
     [
+        "Windows Background.wav",
         "Windows Navigation Start.wav",
         "Windows Menu Command.wav",
         "Windows Pop-up Blocked.wav",
@@ -29,6 +31,7 @@ internal static class PingPlayer
         MMDevice? device = null;
         WasapiOut? output = null;
         WaveFileReader? reader = null;
+        ManualResetEventSlim? finished = null;
         try
         {
             device = enumerator.GetDevice(deviceId);
@@ -52,17 +55,17 @@ internal static class PingPlayer
                 Volume = PlaybackGain,
             };
 
+            finished = new ManualResetEventSlim(false);
             output = new WasapiOut(device, AudioClientShareMode.Shared, useEventSync: true, latency: 50);
+            // Event-driven instead of a 20ms busy-poll. Guard the Set: PlaybackStopped can fire
+            // again during output.Dispose() in the finally, after `finished` is disposed.
+            output.PlaybackStopped += (_, _) => { try { finished.Set(); } catch (ObjectDisposedException) { } };
             output.Init(sampleProvider);
             output.Play();
 
-            // Block this background task until playback finishes (or the safety deadline hits),
-            // then dispose. WAV is typically ~200ms; 2s deadline is generous.
-            var deadline = DateTime.UtcNow.AddSeconds(2);
-            while (output.PlaybackState == PlaybackState.Playing && DateTime.UtcNow < deadline)
-            {
-                Thread.Sleep(20);
-            }
+            // Block this background task on the stop signal (no busy-poll) until playback ends,
+            // capped by a safety deadline. WAV is typically ~200ms; 2s is generous.
+            finished.Wait(TimeSpan.FromSeconds(2));
         }
         catch (Exception ex)
         {
@@ -70,9 +73,12 @@ internal static class PingPlayer
         }
         finally
         {
+            // Dispose `finished` last: output.Dispose() can raise a final PlaybackStopped whose
+            // handler touches it.
             output?.Dispose();
             reader?.Dispose();
             device?.Dispose();
+            finished?.Dispose();
         }
     }
 

@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 
+using Earmark.App.Settings;
 using Earmark.Core.Audio;
 using Earmark.Core.Models;
 using Earmark.Core.Routing;
@@ -27,9 +28,12 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
     private readonly IRulesService _rules;
     private readonly IAudioSessionService _sessions;
     private readonly IAudioEndpointService _endpoints;
+    private readonly IEndpointWriter _writer;
     private readonly IAudioPolicyService _policy;
     private readonly IRuleMatcher _matcher;
     private readonly IWaveLinkService _waveLink;
+    private readonly IWaveLinkNameReconciler _reconciler;
+    private readonly ISettingsService _settings;
     private readonly ILogger<RoutingApplier> _logger;
     private readonly HashSet<string> _appliedSessionKeys = new(StringComparer.OrdinalIgnoreCase);
     private readonly Lock _appliedGate = new();
@@ -43,17 +47,23 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
         IRulesService rules,
         IAudioSessionService sessions,
         IAudioEndpointService endpoints,
+        IEndpointWriter writer,
         IAudioPolicyService policy,
         IRuleMatcher matcher,
         IWaveLinkService waveLink,
+        IWaveLinkNameReconciler reconciler,
+        ISettingsService settings,
         ILogger<RoutingApplier> logger)
     {
         _rules = rules;
         _sessions = sessions;
         _endpoints = endpoints;
+        _writer = writer;
         _policy = policy;
         _matcher = matcher;
         _waveLink = waveLink;
+        _reconciler = reconciler;
+        _settings = settings;
         _logger = logger;
     }
 
@@ -72,6 +82,7 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
         _sessions.SessionRemoved += OnSessionRemoved;
         _rules.RulesChanged += OnRulesChanged;
         _endpoints.DefaultsChanged += OnDefaultsChanged;
+        _waveLink.SnapshotChanged += OnWaveLinkSnapshotChanged;
 
         _ = Task.Run(async () =>
         {
@@ -130,7 +141,21 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
                 ApplyVolumeAndMuteRules();
             }).ConfigureAwait(false);
 
-            await ApplyWaveLinkRulesAsync(_cts?.Token ?? CancellationToken.None).ConfigureAwait(false);
+            var ct = _cts?.Token ?? CancellationToken.None;
+            await ApplyWaveLinkRulesAsync(ct).ConfigureAwait(false);
+
+            if (_settings.Current.EnableWaveLink && _settings.Current.ReconcileWaveLinkNames)
+            {
+                try
+                {
+                    await _reconciler.ReconcileAsync(ct).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) { }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Auto-reconcile Wave Link names failed");
+                }
+            }
         }
         finally
         {
@@ -356,6 +381,22 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
         }
     }
 
+    private async void OnWaveLinkSnapshotChanged(object? sender, EventArgs e)
+    {
+        // External drift (user moves a device in Wave Link, snapshot pull catches up to a
+        // restart, etc.) shouldn't wait for the 5-min timer to reconcile. skipIfBusy stops
+        // the SetMix call's own snapshot ripple from stacking re-applies on top of the
+        // in-flight one; the post-fix claim logic is idempotent so a passive re-check is cheap.
+        try
+        {
+            await ApplyAllInternalAsync(force: false, skipIfBusy: true).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Wave Link snapshot-changed handler failed");
+        }
+    }
+
     private async void OnTimerTick(object? state)
     {
         if (_cts is null || _cts.IsCancellationRequested)
@@ -433,21 +474,49 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
 
             if (targetVolume.HasValue)
             {
-                var applied = _endpoints.SetVolume(endpoint.Id, targetVolume.Value);
-                if (applied)
+                var capturedVolume = targetVolume.Value;
+                var capturedRule = volumeRuleName;
+                var capturedDevice = endpoint.DisplayName;
+                var capturedEndpoint = endpoint;
+                _ = Task.Run(async () =>
                 {
-                    _logger.LogInformation("Applied volume rule '{Rule}': '{Device}' -> {Volume:F2}",
-                        volumeRuleName, endpoint.DisplayName, targetVolume.Value);
-                }
+                    try
+                    {
+                        var ok = await _writer.SetVolumeAsync(capturedEndpoint, capturedVolume).ConfigureAwait(false);
+                        if (ok)
+                        {
+                            _logger.LogInformation("Applied volume rule '{Rule}': '{Device}' -> {Volume:F2}",
+                                capturedRule, capturedDevice, capturedVolume);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "Volume rule '{Rule}' write failed for {Device}", capturedRule, capturedDevice);
+                    }
+                });
             }
             if (targetMuted.HasValue)
             {
-                var applied = _endpoints.SetMuted(endpoint.Id, targetMuted.Value);
-                if (applied)
+                var capturedMute = targetMuted.Value;
+                var capturedRule = muteRuleName;
+                var capturedDevice = endpoint.DisplayName;
+                var capturedEndpoint = endpoint;
+                _ = Task.Run(async () =>
                 {
-                    _logger.LogInformation("Applied {Verb} rule '{Rule}': '{Device}'",
-                        targetMuted.Value ? "mute" : "unmute", muteRuleName, endpoint.DisplayName);
-                }
+                    try
+                    {
+                        var ok = await _writer.SetMutedAsync(capturedEndpoint, capturedMute).ConfigureAwait(false);
+                        if (ok)
+                        {
+                            _logger.LogInformation("Applied {Verb} rule '{Rule}': '{Device}'",
+                                capturedMute ? "mute" : "unmute", capturedRule, capturedDevice);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "Mute rule '{Rule}' write failed for {Device}", capturedRule, capturedDevice);
+                    }
+                });
             }
         }
     }
@@ -578,9 +647,17 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
                             }
                             break;
                         case ActionType.RemoveWaveLinkMixOutput:
-                            if (deviceMatches && string.Equals(output.CurrentMixId, matchedMix.Id, StringComparison.Ordinal))
+                            if (deviceMatches)
                             {
-                                claims[output.DeviceId] = new WaveLinkClaim(string.Empty, ruleLabel);
+                                // Pin the device regardless of current mix. If it's currently on
+                                // the mix-to-remove, target empty so the apply pass strips it.
+                                // Otherwise hold its current mix so later Set/Add rules can't
+                                // re-add it - without this guard, a SetWaveLinkMixOutput rule
+                                // further down repeatedly re-adds what Remove just stripped.
+                                var target = string.Equals(output.CurrentMixId, matchedMix.Id, StringComparison.Ordinal)
+                                    ? string.Empty
+                                    : output.CurrentMixId;
+                                claims[output.DeviceId] = new WaveLinkClaim(target, ruleLabel);
                             }
                             break;
                     }
@@ -610,14 +687,9 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
     private static Regex? TryCompile(string pattern)
     {
         if (string.IsNullOrWhiteSpace(pattern)) return null;
-        try
-        {
-            return new Regex(
-                pattern,
-                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
-                TimeSpan.FromMilliseconds(250));
-        }
-        catch (ArgumentException) { return null; }
+        // Reuse the shared compile cache instead of building a fresh regex per endpoint per
+        // rule per apply pass.
+        return RegexCache.TryGet(pattern, out var regex) ? regex : null;
     }
 
     private static bool MatchPattern(string pattern, Regex? regex, string input) =>
@@ -637,6 +709,7 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
         _sessions.SessionRemoved -= OnSessionRemoved;
         _rules.RulesChanged -= OnRulesChanged;
         _endpoints.DefaultsChanged -= OnDefaultsChanged;
+        _waveLink.SnapshotChanged -= OnWaveLinkSnapshotChanged;
         _cts?.Dispose();
         _cts = null;
         _started = false;

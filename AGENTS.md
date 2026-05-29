@@ -25,6 +25,8 @@ tests/
 
 ## Build, run, and iterate (THE pattern)
 
+**Rebuild and re-launch after EVERY code change.** Not "after the last change in a batch", not "if it looked like a UI change" - every change to anything that ends up in a binary (`.cs`, `.xaml`, `.csproj`, etc.). A clean `dotnet build` is not verification; the running app is. If you finish a task with only a build, the task is not finished. Report what the relaunched binary actually did (log lines, observed behaviour) before declaring success. Doc-only edits (`.md`, comments-only) are exempt.
+
 The app holds open file handles on its own DLLs while running, which makes incremental builds fail with `MSB3027`. **Always kill before building.** Standard inner loop:
 
 ```bash
@@ -86,9 +88,32 @@ Rules apply in **list order** - top of the list wins. There is no priority field
 - `Program.Main` (custom, `DISABLE_XAML_GENERATED_MAIN`) handles single-instance via `Microsoft.Windows.AppLifecycle.AppInstance.FindOrRegisterForKey("Earmark.SingleInstance")`. A second launch redirects activation to the running process, which calls `App.RestoreFromBackground` -> `IWindowChromeManager.RestoreWindow`.
 - `App.OnLaunched` builds the generic host, loads settings + rules, starts the routing applier, attaches `WindowChromeManager` to `MainWindow`, then activates (or hides to tray if "Launch to tray" is on).
 - DI uses `Microsoft.Extensions.Hosting`. Pages and view-models are registered in `HostBuilderExtensions.ConfigureEarmark`.
-- Pages live in `src/Earmark.App/Views/` (namespace `Earmark.App.Views`): `RulesPage` (inline editor - **no dialog**, click a rule to expand and edit, auto-saves 500ms after last keystroke), `SessionsPage`, `SettingsPage`. The Devices page was removed - everything routing-relevant is on Rules.
+- Pages live in `src/Earmark.App/Views/` (namespace `Earmark.App.Views`): `HomePage` (the "Devices" nav item, `Tag="Home"` - per-device cards with volume/meter and a rule-summary chip), `RulesPage` (inline editor - **no dialog**, click a rule to expand and edit, auto-saves 500ms after last keystroke), `SessionsPage`, `SettingsPage`.
 - `RuleRow` is the per-rule view-model. It owns its own debounced `SaveAsync`. When the underlying rules list changes, `RulesViewModel.OnRulesChanged` calls `SyncFromRule` on each existing row in place (preserving expanded state) when the order is unchanged; only on add/delete/reorder does it rebuild `Items`.
 - Tray: `H.NotifyIcon.WinUI`. `WindowChromeManager` subclasses the window with `SetWindowSubclass` to intercept `WM_SYSCOMMAND/SC_MINIMIZE` for "minimize to tray", and handles `Closed` for "close to tray".
+
+## Components and custom controls
+
+Reach for UI building blocks in this order, and don't skip a tier without reason:
+
+1. **WinUI 3 native control first.** Use the built-in control if it does the job. Note its limits before rejecting it (e.g. `Expander` can't stretch its header content to fill width - that's why `ExpanderPill` exists).
+2. **Existing custom component second.** If a control in `src/Earmark.App/Controls/` already covers it, reuse it. Don't reinvent or inline a one-off copy.
+3. **New custom component last.** Only when neither of the above fits.
+
+When you do build one, make it a **reusable control**, not page-local markup: put it in `src/Earmark.App/Controls/` (namespace `Earmark.App.Controls`, referenced from XAML via `xmlns:controls="using:Earmark.App.Controls"`) and drive it through dependency properties so every page configures it the same way. When two pages need the same affordance, share one component - don't duplicate the XAML and let the copies drift.
+
+Current shared controls:
+- `ExpanderPill` - rounded pill with left content + a full-height chevron (grey box) on the right that toggles `IsExpanded`. Used by the Devices first-rule chip and the Rules row header so both expanders match. Key knobs: `PillBackground` (grey chip on Devices; `Transparent` on Rules so the rule's own card is the surface), `ChevronCornerRadius` (rounds the chevron's right corners to the container radius - 4 for the chip, 8 for the card - so the chevron sits flush to the edge), `PlainChevronWhenExpanded` (Rules: drop the grey box to a plain glyph while expanded so the open editor isn't cluttered; Devices leaves it on since its chip never grows). Toggle is driven by `Tapped` (not a nested `Button.Click`, which swallows the first tap inside a `ListView` item). `ToggleOnBodyTap=false` leaves the body free for its own click (Devices navigates; Rules toggles on the whole pill). Rules dims disabled rows by fading the card *content*, not the card surface - fading the surface lets the `ListViewItem`'s own chrome show through as a nested box.
+- `WrapByRowLayout` - virtualising wrap layout that sizes each row to its own tallest card, so one expanded card grows only its row.
+
+## Design language (Fluent 2)
+
+The UI follows current [Fluent 2](https://fluent2.microsoft.design) standards. Benchmark against first-party Windows apps (Settings): it should read as native, not bespoke.
+
+- **Spacing:** 4px grid via the `Spacing*` `x:Double` resources in `App.xaml` (`SpacingXXSmall`=2 ... `SpacingXXLarge`=32). Prefer these over ad-hoc numbers and keep values on the grid (nudge stray 10/14 to 8/12/16).
+- **Corner radii:** `{ThemeResource ControlCornerRadius}` (4) for inset controls/chips, `{StaticResource CardCornerRadius}` (8) for cards/tiles/containers. No one-off radii (the old stray `10`s were removed).
+- **Theme:** `AppSettings.Theme` (System/Light/Dark) drives `RootGrid.RequestedTheme` in `MainWindow`, the caption-button colours, and the Mica tint. Mica is applied via `MicaController` (not `<Window.SystemBackdrop>`) **so its tint follows the Theme setting, not just the OS**. Theme-dependent brushes MUST be `{ThemeResource}`: a brush resolved in code (`Application.Current.Resources[key]`) snapshots one theme and renders the wrong variant after a switch. Absolute brand colours (Wave Link channel accents, the white mix tile) are deliberately theme-independent.
+- **Content width:** content pages (Devices/Rules/Sessions) stretch full-width; Settings uses a ~720 column. A `ContentMaxWidth` token exists if a page ever needs capping, but don't cap the list/grid pages: they're meant to stretch.
 
 ## Reactivity preferences
 
@@ -101,7 +126,7 @@ Rules apply in **list order** - top of the list wins. There is no priority field
 - **Don't reintroduce `Process.MainModule.FileName`**. It blocks on protected processes (games with anti-cheat). The replacement is `ProcessPath.TryGet` in `Earmark.Audio.Interop`.
 - **Two-way x:Bind on `ComboBox.SelectedItem` against a value-type property** (e.g. an enum) NREs during item-template recycling because the generated code casts null to the value type. Use `Mode=OneWay` plus a `SelectionChanged` event handler that updates the source.
 - **`UnhandledType.UnhandledExceptionEventArgs` is ambiguous** between `Microsoft.UI.Xaml` and `System` namespaces. Always fully-qualify: `Microsoft.UI.Xaml.UnhandledExceptionEventArgs`.
-- **`Grid.Padding`** wants a `Thickness`. Don't define an `x:Double` resource named `PagePadding` and bind it to `Padding` - it'll throw at XAML parse time. Use `<Thickness x:Key="PagePadding">28,12,28,20</Thickness>`.
+- **`Padding`/`Margin` want a `Thickness`, not a `double`.** The `Spacing*` resources are `x:Double` (sized for `StackPanel.Spacing` and `Grid.ColumnSpacing`/`RowSpacing`, which are doubles). Binding one to a `Thickness` property throws at page load (`Failed to assign to property ... Border.Padding`) - it is NOT caught at build time. For padding/margins use a `Thickness` resource (`PagePadding`, `SectionPadding`) or a literal (`Padding="16"`). Same trap with an `x:Double PagePadding` bound to `Grid.Padding`.
 - **Editor disposable analyzer rules**: `CA1001`, `CA1816`, `CA1848`, `CA1873` etc are silenced in `.editorconfig`. Don't add them back unless you also fix the call sites.
 - **`Microsoft.Win32.Registry`**: don't add as a separate package. Already provided by the windows TFM (`net10.0-windows10.0.26100.0`); adding the package triggers `NU1510`.
 

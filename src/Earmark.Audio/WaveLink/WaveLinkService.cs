@@ -14,14 +14,15 @@ internal sealed class WaveLinkService : IWaveLinkService, IAsyncDisposable
     private readonly Lock _stateGate = new();
 
     private WaveLinkClient? _client;
-    private bool _clientFailed;
-    private bool _disposed;
+    private volatile bool _clientFailed;
+    private volatile bool _disposed;
 
-    private bool _isEnabled;
+    private volatile bool _isEnabled;
     private WaveLinkConnectionState _state = WaveLinkConnectionState.Disabled;
     private WaveLinkSnapshot? _lastSnapshot;
     private CancellationTokenSource? _pollCts;
     private Task? _pollTask;
+    private Task? _disableTask;
 
     public WaveLinkService(ILogger<WaveLinkService> logger, ILogger<WaveLinkClient> clientLogger)
     {
@@ -50,7 +51,7 @@ internal sealed class WaveLinkService : IWaveLinkService, IAsyncDisposable
             {
                 _logger.LogInformation("Wave Link integration disabled");
                 StopPolling();
-                _ = Task.Run(async () =>
+                _disableTask = Task.Run(async () =>
                 {
                     await _gate.WaitAsync().ConfigureAwait(false);
                     try { await DisposeClientLockedAsync().ConfigureAwait(false); }
@@ -101,8 +102,36 @@ internal sealed class WaveLinkService : IWaveLinkService, IAsyncDisposable
                 return null;
             }
 
+            // getInputDevices: hardware capture interfaces wired up to WL. Best-effort
+            // because some WL versions return errors on the call; mute routing for virtual
+            // capture endpoints still works via mix matching even when this misses.
+            WaveLinkInputDevicesResult? inputDevicesResult = null;
+            try
+            {
+                inputDevicesResult = await client.CallAsync<WaveLinkInputDevicesResult>("getInputDevices", null, ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Wave Link: getInputDevices failed; continuing without input-device data");
+            }
+
+            // getChannels: mixer strips + their per-channel artwork (the coloured tiles).
+            // Best-effort: only consumed for optional UI theming, so a failure here must not
+            // break name reconciliation or mix routing.
+            WaveLinkChannelsResult? channelsResult = null;
+            try
+            {
+                channelsResult = await client.CallAsync<WaveLinkChannelsResult>("getChannels", null, ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Wave Link: getChannels failed; continuing without channel artwork");
+            }
+
             var mixes = mixesResult.Mixes
-                .Select(m => new WaveLinkMixInfo(m.Id, m.Name))
+                .Select(m => new WaveLinkMixInfo(m.Id, m.Name, m.Image?.Name))
                 .ToList();
 
             var outputs = new List<WaveLinkOutputInfo>();
@@ -118,7 +147,33 @@ internal sealed class WaveLinkService : IWaveLinkService, IAsyncDisposable
                 }
             }
 
-            var snapshot = new WaveLinkSnapshot(mixes, outputs);
+            var inputDevices = new List<WaveLinkInputDeviceInfo>();
+            if (inputDevicesResult is not null)
+            {
+                foreach (var device in inputDevicesResult.InputDevices)
+                {
+                    var inputs = device.Inputs
+                        .Select(i => new WaveLinkInputChannelInfo(i.Id, i.Name, i.IsMuted))
+                        .ToList();
+                    inputDevices.Add(new WaveLinkInputDeviceInfo(device.Id, device.Name, inputs));
+                }
+            }
+
+            var channels = new List<WaveLinkChannelInfo>();
+            if (channelsResult is not null)
+            {
+                foreach (var channel in channelsResult.Channels)
+                {
+                    channels.Add(new WaveLinkChannelInfo(
+                        channel.Id,
+                        channel.Name,
+                        channel.Type,
+                        channel.Image?.IsAppIcon ?? false,
+                        channel.Image?.ImgData));
+                }
+            }
+
+            var snapshot = new WaveLinkSnapshot(mixes, outputs, inputDevices, channels);
             SetSnapshot(snapshot);
             SetState(WaveLinkConnectionState.Connected);
             return snapshot;
@@ -172,6 +227,45 @@ internal sealed class WaveLinkService : IWaveLinkService, IAsyncDisposable
         {
             _logger.LogWarning(ex, "Wave Link: setOutputDevice({DeviceId}, {OutputId}, {MixId}) failed",
                 deviceId, outputId, mixId);
+            _clientFailed = true;
+            SetState(WaveLinkConnectionState.Unavailable);
+            return false;
+        }
+    }
+
+    public Task<bool> SetMixMutedAsync(string mixId, bool muted, CancellationToken ct = default) =>
+        InvokeAsync("setMix", new { id = mixId, isMuted = muted }, ct);
+
+    public Task<bool> SetMixLevelAsync(string mixId, float level, CancellationToken ct = default) =>
+        InvokeAsync("setMix", new { id = mixId, level = Math.Clamp(level, 0f, 1f) }, ct);
+
+    public Task<bool> SetInputDeviceMutedAsync(string deviceId, string inputId, bool muted, CancellationToken ct = default) =>
+        InvokeAsync("setInputDevice", new
+        {
+            id = deviceId,
+            inputs = new[] { new { id = inputId, isMuted = muted } },
+        }, ct);
+
+    private async Task<bool> InvokeAsync(string method, object payload, CancellationToken ct)
+    {
+        if (!_isEnabled) return false;
+
+        var client = await EnsureConnectedAsync(ct).ConfigureAwait(false);
+        if (client is null)
+        {
+            SetState(WaveLinkConnectionState.Unavailable);
+            return false;
+        }
+
+        try
+        {
+            await client.CallAsync(method, payload, ct).ConfigureAwait(false);
+            return true;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Wave Link: {Method} failed", method);
             _clientFailed = true;
             SetState(WaveLinkConnectionState.Unavailable);
             return false;
@@ -336,6 +430,8 @@ internal sealed class WaveLinkService : IWaveLinkService, IAsyncDisposable
         if (a is null || b is null) return false;
         if (a.Mixes.Count != b.Mixes.Count) return false;
         if (a.OutputDevices.Count != b.OutputDevices.Count) return false;
+        if (a.InputDevices.Count != b.InputDevices.Count) return false;
+        if (a.Channels.Count != b.Channels.Count) return false;
 
         for (var i = 0; i < a.Mixes.Count; i++)
         {
@@ -344,6 +440,23 @@ internal sealed class WaveLinkService : IWaveLinkService, IAsyncDisposable
         for (var i = 0; i < a.OutputDevices.Count; i++)
         {
             if (!a.OutputDevices[i].Equals(b.OutputDevices[i])) return false;
+        }
+        for (var i = 0; i < a.InputDevices.Count; i++)
+        {
+            var ad = a.InputDevices[i];
+            var bd = b.InputDevices[i];
+            if (ad.DeviceId != bd.DeviceId || ad.DeviceName != bd.DeviceName) return false;
+            if (ad.Inputs.Count != bd.Inputs.Count) return false;
+            for (var j = 0; j < ad.Inputs.Count; j++)
+            {
+                if (!ad.Inputs[j].Equals(bd.Inputs[j])) return false;
+            }
+        }
+        // Record equality covers Id/Name/Type/IsAppIcon/ImageData; the base64 compare is what
+        // lets a user recolouring a channel in Wave Link propagate to the card theming.
+        for (var i = 0; i < a.Channels.Count; i++)
+        {
+            if (!a.Channels[i].Equals(b.Channels[i])) return false;
         }
         return true;
     }
@@ -365,6 +478,15 @@ internal sealed class WaveLinkService : IWaveLinkService, IAsyncDisposable
         {
             _gate.Release();
         }
+
+        // Drain a disable-triggered disposal task (if any) so it can't WaitAsync on the
+        // semaphore after we've disposed it.
+        var disable = _disableTask;
+        if (disable is not null)
+        {
+            try { await disable.ConfigureAwait(false); } catch { }
+        }
+
         _gate.Dispose();
     }
 }

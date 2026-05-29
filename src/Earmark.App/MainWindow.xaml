@@ -9,10 +9,8 @@
     Title="Earmark"
     mc:Ignorable="d">
 
-    <Window.SystemBackdrop>
-        <MicaBackdrop Kind="BaseAlt" />
-    </Window.SystemBackdrop>
-
+    <!-- Mica is applied in code (MicaController) rather than <Window.SystemBackdrop> so its
+         tint can follow the app's Theme setting, not just the OS. See MainWindow.xaml.cs. -->
     <Grid x:Name="RootGrid">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -98,7 +96,17 @@
                 </NavigationViewItem>
             </NavigationView.FooterMenuItems>
 
-            <Frame x:Name="ContentFrame" />
+            <Frame x:Name="ContentFrame">
+                <!-- NavigationService swaps pages via Content= (DI singletons), so there's no
+                     Frame.Navigate transition. A content transition removes the old page at once
+                     and animates the new one in, instead of the old tiles ghosting while the new
+                     page does its first layout. -->
+                <Frame.ContentTransitions>
+                    <TransitionCollection>
+                        <NavigationThemeTransition />
+                    </TransitionCollection>
+                </Frame.ContentTransitions>
+            </Frame>
         </NavigationView>
     </Grid>
 </Window>

@@ -7,24 +7,25 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:vm="using:Earmark.App.ViewModels"
     xmlns:models="using:Earmark.Core.Models"
+    xmlns:controls="using:Earmark.App.Controls"
     mc:Ignorable="d"
     Background="Transparent">
 
-    <Grid Padding="{StaticResource PagePadding}" RowSpacing="16">
+    <Grid Padding="{StaticResource PagePadding}" RowSpacing="{StaticResource SpacingLarge}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
         <!-- Page header -->
-        <Grid Grid.Row="0" ColumnSpacing="12">
+        <Grid Grid.Row="0" ColumnSpacing="{StaticResource SpacingMedium}">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
 
-            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="{StaticResource SpacingSmall}" VerticalAlignment="Center">
                 <TextBlock Text="Rules" Style="{StaticResource PageHeaderTextStyle}" />
                 <FontIcon Glyph="&#xE946;" FontSize="14"
                           Foreground="{ThemeResource TextFillColorTertiaryBrush}"
@@ -36,7 +37,7 @@
                     Style="{StaticResource AccentButtonStyle}"
                     Command="{x:Bind ViewModel.AddCommand}"
                     VerticalAlignment="Center">
-                <StackPanel Orientation="Horizontal" Spacing="8">
+                <StackPanel Orientation="Horizontal" Spacing="{StaticResource SpacingSmall}">
                     <FontIcon Glyph="&#xE710;" FontSize="14" />
                     <TextBlock Text="Add rule" />
                 </StackPanel>
@@ -46,7 +47,7 @@
                     Command="{x:Bind ViewModel.ReapplyCommand}"
                     VerticalAlignment="Center"
                     ToolTipService.ToolTip="Force re-apply of all rules">
-                <StackPanel Orientation="Horizontal" Spacing="8">
+                <StackPanel Orientation="Horizontal" Spacing="{StaticResource SpacingSmall}">
                     <FontIcon Glyph="&#xE72C;" FontSize="14" />
                     <TextBlock Text="Reapply" />
                 </StackPanel>
@@ -58,7 +59,7 @@
                 Style="{StaticResource SectionCardStyle}"
                 Padding="32"
                 Visibility="{x:Bind ViewModel.IsEmpty, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
-            <StackPanel Spacing="12" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="420">
+            <StackPanel Spacing="{StaticResource SpacingMedium}" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="420">
                 <FontIcon Glyph="&#xE8FD;" FontSize="40"
                           Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                           HorizontalAlignment="Center" />
@@ -73,7 +74,7 @@
                         Command="{x:Bind ViewModel.AddCommand}"
                         HorizontalAlignment="Center"
                         Margin="0,4,0,0">
-                    <StackPanel Orientation="Horizontal" Spacing="8">
+                    <StackPanel Orientation="Horizontal" Spacing="{StaticResource SpacingSmall}">
                         <FontIcon Glyph="&#xE710;" FontSize="14" />
                         <TextBlock Text="Add your first rule" />
                     </StackPanel>
@@ -81,13 +82,21 @@
             </StackPanel>
         </Border>
 
+        <!-- Negative right margin cancels the page's 28px right padding so the scroll bar lives
+             in a gutter at the content edge; the matching right padding re-insets the cards so
+             they still line up at 28px on both sides. Without this the overlay scroll bar sits
+             on top of the chevron at the card's right edge. -->
         <ListView Grid.Row="1"
                   x:Name="RulesList"
+                  Margin="0,0,-28,0"
+                  Padding="0,0,28,0"
                   ItemsSource="{x:Bind ViewModel.Items}"
                   SelectionMode="None"
                   CanReorderItems="True"
                   CanDragItems="True"
                   AllowDrop="True"
+                  DragItemsStarting="OnRulesDragStarting"
+                  DragItemsCompleted="OnRulesDragCompleted"
                   Visibility="{x:Bind ViewModel.HasItems, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
             <ListView.ItemContainerStyle>
                 <Style TargetType="ListViewItem">
@@ -98,71 +107,114 @@
             </ListView.ItemContainerStyle>
             <ListView.ItemTemplate>
                 <DataTemplate x:DataType="vm:RuleRow">
-                    <Border Style="{StaticResource SectionCardStyle}"
-                            Opacity="{x:Bind CardOpacity, Mode=OneWay}">
-                        <StackPanel Spacing="14">
+                    <!-- No card padding: the header ExpanderPill spans the full card so its
+                         chevron can sit flush against the card's top/right/bottom edges. The
+                         header content and editor pad themselves instead. The card stays opaque
+                         (dimming is applied to the content below, not here) so the ListViewItem's
+                         own hover/selection chrome can't show through a faded card. -->
+                    <Border CornerRadius="{StaticResource CardCornerRadius}"
+                            Background="{ThemeResource LayerFillColorDefaultBrush}">
+                        <!-- Right-click shortcuts that mirror the in-row toggle and Delete button. -->
+                        <Border.ContextFlyout>
+                            <MenuFlyout>
+                                <MenuFlyoutItem Text="{x:Bind EnabledToggleLabel, Mode=OneWay}"
+                                                Command="{x:Bind ToggleEnabledCommand}" />
+                                <MenuFlyoutSeparator />
+                                <MenuFlyoutItem Text="Delete rule"
+                                                Click="OnDeleteRuleClicked"
+                                                Tag="{x:Bind}">
+                                    <!-- Critical red across rest/hover/press so the destructive
+                                         action reads as destructive; the default template would
+                                         otherwise swap the foreground to the neutral theme brush
+                                         on pointer-over. -->
+                                    <MenuFlyoutItem.Resources>
+                                        <SolidColorBrush x:Key="MenuFlyoutItemForeground" Color="{ThemeResource SystemFillColorCritical}" />
+                                        <SolidColorBrush x:Key="MenuFlyoutItemForegroundPointerOver" Color="{ThemeResource SystemFillColorCritical}" />
+                                        <SolidColorBrush x:Key="MenuFlyoutItemForegroundPressed" Color="{ThemeResource SystemFillColorCritical}" />
+                                    </MenuFlyoutItem.Resources>
+                                    <MenuFlyoutItem.Icon>
+                                        <FontIcon Glyph="&#xE74D;" Foreground="{ThemeResource SystemFillColorCriticalBrush}" />
+                                    </MenuFlyoutItem.Icon>
+                                </MenuFlyoutItem>
+                            </MenuFlyout>
+                        </Border.ContextFlyout>
+                        <!-- Dimming (disabled / shadowed / unmet conditions) fades the content,
+                             not the card surface, so nothing shows through from behind. -->
+                        <StackPanel Spacing="0" Opacity="{x:Bind CardOpacity, Mode=OneWay}">
 
-                            <!-- Header -->
-                            <Grid ColumnSpacing="12"
-                                  Background="Transparent"
-                                  Tapped="OnHeaderTapped">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
+                            <!-- Header as one full-width ExpanderPill: drag handle + enable
+                                 toggle + rule summary on the left, chevron as a flush right-edge
+                                 strip whose grey fills the card's top/right/bottom edges (right
+                                 corners match the card's 8px radius), exactly like the Devices
+                                 chip's chevron fills its pill. Tapping the pill toggles the editor.
+                                 The dragged row is collapsed for the drag (DragItemsStarting) so
+                                 you move a compact block, then restored on completion - the editor
+                                 uses instant Visibility (not an animated accordion) so that
+                                 collapse is immediate and the reorder reflow stays clean. -->
+                            <controls:ExpanderPill PillBackground="Transparent"
+                                                   ChevronCornerRadius="0,8,8,0"
+                                                   PlainChevronWhenExpanded="True"
+                                                   IsExpanded="{x:Bind IsExpanded, Mode=TwoWay}">
+                                <controls:ExpanderPill.PillContent>
+                                    <Grid ColumnSpacing="{StaticResource SpacingMedium}" Padding="16,16,0,16">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
 
-                                <FontIcon Grid.Column="0"
-                                          Glyph="&#xE700;" FontSize="14"
-                                          Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                          VerticalAlignment="Center" />
-                                <ToggleSwitch Grid.Column="1"
-                                              IsOn="{x:Bind Enabled, Mode=TwoWay}"
-                                              OffContent="" OnContent=""
-                                              MinWidth="0" Width="44"
-                                              VerticalAlignment="Center" />
-                                <StackPanel Grid.Column="2" Spacing="2">
-                                    <StackPanel Orientation="Horizontal" Spacing="8">
-                                        <TextBlock Text="{x:Bind DisplayName, Mode=OneWay}"
-                                                   Style="{StaticResource BodyStrongTextBlockStyle}" />
-                                        <FontIcon Glyph="&#xE7BA;" FontSize="13"
-                                                  Foreground="{ThemeResource SystemFillColorCautionBrush}"
+                                        <FontIcon Grid.Column="0"
+                                                  Glyph="&#xE700;" FontSize="14"
+                                                  Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                                                   VerticalAlignment="Center"
-                                                  Visibility="{x:Bind HasWarning, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
-                                                  ToolTipService.ToolTip="{x:Bind Warning, Mode=OneWay}" />
-                                    </StackPanel>
-                                    <StackPanel Orientation="Horizontal" Spacing="8">
-                                        <TextBlock Text="{x:Bind StatusMessage, Mode=OneWay}"
-                                                   Style="{StaticResource CaptionTextBlockStyle}"
-                                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                   Visibility="{x:Bind HasStatusMessage, Mode=OneWay}" />
-                                        <TextBlock Text="{x:Bind MatchSummary, Mode=OneWay}"
-                                                   Style="{StaticResource CaptionTextBlockStyle}"
-                                                   Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                                   Visibility="{x:Bind HasMatchSummary, Mode=OneWay}" />
-                                    </StackPanel>
-                                </StackPanel>
-                                <FontIcon Grid.Column="3"
-                                          Glyph="&#xE70D;" FontSize="12"
-                                          Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                          VerticalAlignment="Center" />
-                            </Grid>
+                                                  ToolTipService.ToolTip="Drag to reorder" />
+                                        <ToggleSwitch Grid.Column="1"
+                                                      IsOn="{x:Bind Enabled, Mode=TwoWay}"
+                                                      OffContent="" OnContent=""
+                                                      MinWidth="0" Width="44"
+                                                      VerticalAlignment="Center" />
+                                        <StackPanel Grid.Column="2" Spacing="{StaticResource SpacingXXSmall}" VerticalAlignment="Center">
+                                            <StackPanel Orientation="Horizontal" Spacing="{StaticResource SpacingSmall}">
+                                                <TextBlock Text="{x:Bind DisplayName, Mode=OneWay}"
+                                                           Style="{StaticResource BodyStrongTextBlockStyle}" />
+                                                <FontIcon Glyph="&#xE7BA;" FontSize="13"
+                                                          Foreground="{ThemeResource SystemFillColorCautionBrush}"
+                                                          VerticalAlignment="Center"
+                                                          Visibility="{x:Bind HasWarning, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                                          ToolTipService.ToolTip="{x:Bind Warning, Mode=OneWay}" />
+                                            </StackPanel>
+                                            <StackPanel Orientation="Horizontal" Spacing="{StaticResource SpacingSmall}">
+                                                <TextBlock Text="{x:Bind StatusMessage, Mode=OneWay}"
+                                                           Style="{StaticResource CaptionTextBlockStyle}"
+                                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                           Visibility="{x:Bind HasStatusMessage, Mode=OneWay}" />
+                                                <TextBlock Text="{x:Bind MatchSummary, Mode=OneWay}"
+                                                           Style="{StaticResource CaptionTextBlockStyle}"
+                                                           Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                           Visibility="{x:Bind HasMatchSummary, Mode=OneWay}" />
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </Grid>
+                                </controls:ExpanderPill.PillContent>
+                            </controls:ExpanderPill>
 
-                            <!-- Inline editor -->
-                            <StackPanel Spacing="16" Visibility="{x:Bind IsExpanded, Mode=OneWay}">
+                            <!-- Inline editor. Instant Visibility (not an animated accordion) so
+                                 the dragged row collapses immediately for a clean reorder. Pads
+                                 itself since the card carries no padding (see header note). -->
+                            <StackPanel Spacing="{StaticResource SpacingLarge}" Padding="16,0,16,16"
+                                        Visibility="{x:Bind IsExpanded, Mode=OneWay}">
 
                                 <TextBox Header="Name"
                                          Text="{x:Bind Name, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
 
                                 <!-- Conditions -->
-                                <StackPanel Spacing="8">
+                                <StackPanel Spacing="{StaticResource SpacingSmall}">
                                     <Grid>
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
-                                        <StackPanel Grid.Column="0" Spacing="2">
+                                        <StackPanel Grid.Column="0" Spacing="{StaticResource SpacingXXSmall}">
                                             <TextBlock Text="Conditions" Style="{StaticResource SectionTitleTextStyle}" />
                                             <TextBlock Style="{StaticResource MutedCaptionTextStyle}"
                                                        Text="All conditions must be true for the rule to take effect. Leave empty to always run." />
@@ -181,7 +233,7 @@
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate x:DataType="vm:ConditionRow">
                                                 <Border Style="{StaticResource SubtleCardStyle}" Margin="0,4,0,0">
-                                                    <Grid ColumnSpacing="10">
+                                                    <Grid ColumnSpacing="{StaticResource SpacingSmall}">
                                                         <Grid.ColumnDefinitions>
                                                             <ColumnDefinition Width="Auto" />
                                                             <ColumnDefinition Width="200" />
@@ -235,13 +287,13 @@
                                 </StackPanel>
 
                                 <!-- Actions -->
-                                <StackPanel Spacing="8">
+                                <StackPanel Spacing="{StaticResource SpacingSmall}">
                                     <Grid>
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
-                                        <StackPanel Grid.Column="0" Spacing="2">
+                                        <StackPanel Grid.Column="0" Spacing="{StaticResource SpacingXXSmall}">
                                             <TextBlock Text="Actions" Style="{StaticResource SectionTitleTextStyle}" />
                                             <TextBlock Style="{StaticResource MutedCaptionTextStyle}"
                                                        Text="Each action runs in order. Topmost wins for the same target." />
@@ -261,8 +313,8 @@
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate x:DataType="vm:ActionRow">
                                                 <Border Style="{StaticResource EmphasizedSubtleCardStyle}" Margin="0,4,0,0">
-                                                    <StackPanel Spacing="10">
-                                                        <Grid ColumnSpacing="10">
+                                                    <StackPanel Spacing="{StaticResource SpacingSmall}">
+                                                        <Grid ColumnSpacing="{StaticResource SpacingSmall}">
                                                             <Grid.ColumnDefinitions>
                                                                 <ColumnDefinition Width="240" />
                                                                 <ColumnDefinition Width="*" />
@@ -293,7 +345,7 @@
                                                                         GotFocus="OnMixPatternGotFocus"
                                                                         Visibility="{x:Bind IsWaveLinkAction, Mode=OneWay}">
                                                             <AutoSuggestBox.Header>
-                                                                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                                                <StackPanel Orientation="Horizontal" Spacing="{StaticResource SpacingSmall}" VerticalAlignment="Center">
                                                                     <TextBlock Text="Mix pattern (regex)" VerticalAlignment="Center" />
                                                                     <Border Style="{StaticResource ChipBorderStyle}"
                                                                             Visibility="{x:Bind HasMixMatch, Mode=OneWay}">
@@ -314,7 +366,7 @@
                                                                  Text="{x:Bind AppPattern, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                                                  Visibility="{x:Bind RequiresAppPattern, Mode=OneWay}">
                                                             <TextBox.Header>
-                                                                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                                                <StackPanel Orientation="Horizontal" Spacing="{StaticResource SpacingSmall}" VerticalAlignment="Center">
                                                                     <TextBlock Text="App pattern (regex)" VerticalAlignment="Center" />
                                                                     <Border Style="{StaticResource ChipBorderStyle}"
                                                                             Visibility="{x:Bind HasAppMatches, Mode=OneWay}"
@@ -338,7 +390,7 @@
                                                                         SuggestionChosen="OnDeviceSuggestionChosen"
                                                                         GotFocus="OnDevicePatternGotFocus">
                                                             <AutoSuggestBox.Header>
-                                                                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                                                <StackPanel Orientation="Horizontal" Spacing="{StaticResource SpacingSmall}" VerticalAlignment="Center">
                                                                     <TextBlock Text="Device pattern (regex)" VerticalAlignment="Center" />
                                                                     <Border Style="{StaticResource ChipBorderStyle}"
                                                                             Visibility="{x:Bind HasDeviceMatch, Mode=OneWay}">
@@ -361,7 +413,7 @@
                                                                 Value="{x:Bind Volume, Mode=TwoWay, Converter={StaticResource VolumeFloatToPercentConverter}}"
                                                                 Visibility="{x:Bind RequiresVolumeSlider, Mode=OneWay}" />
 
-                                                        <StackPanel Orientation="Horizontal" Spacing="24"
+                                                        <StackPanel Orientation="Horizontal" Spacing="{StaticResource SpacingXLarge}"
                                                                     Visibility="{x:Bind IsDefaultAction, Mode=OneWay}">
                                                             <ToggleSwitch Header="Default device"
                                                                           OffContent="Off" OnContent="On"
@@ -374,10 +426,10 @@
                                                         <Border Background="{ThemeResource SystemFillColorCautionBackgroundBrush}"
                                                                 BorderBrush="{ThemeResource SystemFillColorCautionBrush}"
                                                                 BorderThickness="1"
-                                                                CornerRadius="4"
-                                                                Padding="10,6"
+                                                                CornerRadius="{ThemeResource ControlCornerRadius}"
+                                                                Padding="8,4"
                                                                 Visibility="{x:Bind HasDiagnostic, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                            <StackPanel Orientation="Horizontal" Spacing="{StaticResource SpacingSmall}">
                                                                 <FontIcon Glyph="&#xE7BA;" FontSize="13"
                                                                           Foreground="{ThemeResource SystemFillColorCautionBrush}"
                                                                           VerticalAlignment="Center" />
@@ -396,7 +448,7 @@
                                 </StackPanel>
 
                                 <!-- Footer -->
-                                <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+                                <StackPanel Orientation="Horizontal" Spacing="{StaticResource SpacingSmall}" HorizontalAlignment="Right">
                                     <Button Style="{StaticResource DangerButtonStyle}"
                                             Click="OnDeleteRuleClicked"
                                             Tag="{x:Bind}">

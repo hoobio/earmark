@@ -3,7 +3,7 @@ using System.Text.RegularExpressions;
 
 namespace Earmark.Core.Routing;
 
-internal static class RegexCache
+public static class RegexCache
 {
     private static readonly ConcurrentDictionary<string, Regex> Cache = new(StringComparer.Ordinal);
 

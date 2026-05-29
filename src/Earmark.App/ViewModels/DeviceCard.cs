@@ -1,10 +1,18 @@
+using System.Collections.ObjectModel;
+
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
+using Earmark.App.Services;
 using Earmark.Core.Audio;
 using Earmark.Core.Models;
 
+using Microsoft.UI;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Imaging;
+
+using Windows.UI;
 
 namespace Earmark.App.ViewModels;
 
@@ -17,11 +25,17 @@ public partial class DeviceCard : ObservableObject
     private const double PeakHoldSeconds = 1.5;
     private const float PeakHoldDecayPerSecond = 0.55f;
 
+    // Don't pull external volume back onto the slider for a moment after the user moves it,
+    // so a poll landing mid-drag can't fight the drag.
+    private static readonly TimeSpan UserVolumeGrace = TimeSpan.FromMilliseconds(600);
+
     private readonly IAudioEndpointService _endpoints;
+    private readonly IEndpointWriter _writer;
     private readonly Action<DeviceCard, VisibilityState> _onVisibilityToggled;
     private bool _suppressVolumeWrite;
     private bool _showHidden;
     private DateTime _peakHoldExpiry = DateTime.MinValue;
+    private DateTime _lastUserVolumeChange = DateTime.MinValue;
 
     /// <summary>Snapshot of the two user-visibility flags. Used to capture pre-toggle state
     /// for undo.</summary>
@@ -29,6 +43,7 @@ public partial class DeviceCard : ObservableObject
 
     public DeviceCard(
         IAudioEndpointService endpoints,
+        IEndpointWriter writer,
         AudioEndpoint endpoint,
         float volume,
         bool isMuted,
@@ -36,6 +51,7 @@ public partial class DeviceCard : ObservableObject
         bool isMuteLockedByRule,
         bool? ruleMutedTarget,
         string? ruleMutedSource,
+        string? ruleVolumeSource,
         IReadOnlyList<RuleSummary> rules,
         bool isHiddenByUser,
         bool isPinnedByUser,
@@ -43,8 +59,14 @@ public partial class DeviceCard : ObservableObject
         Action<DeviceCard, VisibilityState> onUserVisibilityToggled)
     {
         _endpoints = endpoints;
+        _writer = writer;
         _onVisibilityToggled = onUserVisibilityToggled;
         Endpoint = endpoint;
+        _split = SplitFriendlyName(endpoint.FriendlyName);
+        // Resolve the thematic glyph once - the name doesn't change for the lifetime of
+        // the card (a rename triggers a full rebuild) and the prefix scan, while cheap,
+        // would otherwise re-run on every binding refresh during slider drags.
+        _themedGlyph = WaveLinkGlyphMapper.TryResolve(_split.Name);
 
         _suppressVolumeWrite = true;
         Volume = Math.Clamp(volume, 0f, 1f);
@@ -55,8 +77,12 @@ public partial class DeviceCard : ObservableObject
         IsMuteLockedByRule = isMuteLockedByRule;
         RuleMutedTarget = ruleMutedTarget;
         RuleMutedSource = ruleMutedSource;
+        RuleVolumeSource = ruleVolumeSource;
         Rules = rules;
-
+        for (var i = 1; i < Rules.Count; i++)
+        {
+            AdditionalRules.Add(Rules[i]);
+        }
         _showHidden = showHidden;
         IsHiddenByUser = isHiddenByUser;
         IsPinnedByUser = isPinnedByUser;
@@ -65,8 +91,62 @@ public partial class DeviceCard : ObservableObject
     public AudioEndpoint Endpoint { get; }
     public IReadOnlyList<RuleSummary> Rules { get; }
 
+    /// <summary>
+    /// Live chips for sessions currently rendering on this endpoint. Populated and mutated
+    /// in place by <c>HomeViewModel</c> so add / remove animations on the ItemsRepeater fire
+    /// individually (replacing the whole collection would tear down every chip on a rebuild).
+    /// </summary>
+    public ObservableCollection<AppChip> Apps { get; } = new();
+
+    public bool HasApps => Apps.Count > 0;
+
+    /// <summary>
+    /// Combined opt-out from <see cref="Controls.WrapByRowLayout"/>'s row-baseline sizing.
+    /// True when the card has any "extra" content other cards in the row might lack: an
+    /// expanded rules panel OR an apps row. Each adds real content height that shouldn't
+    /// force every other card to pad up to match.
+    /// </summary>
+    public bool IsLayoutCustomSized => IsRulesExpanded || HasApps;
+
+    /// <summary>Tells the page that <see cref="HasApps"/> may have flipped. Raised from
+    /// <c>HomeViewModel</c> after it adds/removes chips so the section visibility binding
+    /// re-evaluates without us having to plumb a CollectionChanged subscription through XAML.</summary>
+    public void NotifyAppsChanged()
+    {
+        OnPropertyChanged(nameof(HasApps));
+        OnPropertyChanged(nameof(IsLayoutCustomSized));
+    }
+
     public string DisplayName => Endpoint.FriendlyName;
     public string Subtitle => Endpoint.DeviceDescription;
+
+    /// <summary>
+    /// Windows hands us names shaped "Speakers (Nvidia Broadcast)" - the user-facing label
+    /// followed by the driver / device-id in parens. Splitting it lets the card render the
+    /// label prominently and the device-id as quieter subtext, and keeps the glyph mapper
+    /// from matching on the bracketed part (which produced bogus hits like "Nvidia
+    /// Broadcast" -> streaming glyph).
+    /// </summary>
+    public string DeviceNameOnly => _split.Name;
+    public string DeviceIdSubtext => _split.Subtext ?? string.Empty;
+    public bool HasDeviceIdSubtext => !string.IsNullOrEmpty(_split.Subtext);
+
+    private readonly (string Name, string? Subtext) _split;
+    private readonly string? _themedGlyph;
+
+    private static (string Name, string? Subtext) SplitFriendlyName(string friendly)
+    {
+        if (string.IsNullOrEmpty(friendly)) return (friendly ?? string.Empty, null);
+        var openIdx = friendly.LastIndexOf(" (", StringComparison.Ordinal);
+        if (openIdx <= 0 || !friendly.EndsWith(')'))
+        {
+            return (friendly, null);
+        }
+        var name = friendly.Substring(0, openIdx);
+        var sub = friendly.Substring(openIdx + 2, friendly.Length - openIdx - 3);
+        return (name, sub);
+    }
+
     public bool IsRender => Endpoint.Flow == EndpointFlow.Render;
     public bool IsCapture => Endpoint.Flow == EndpointFlow.Capture;
     public string FlowLabel => IsRender ? "Output" : "Input";
@@ -91,6 +171,11 @@ public partial class DeviceCard : ObservableObject
     public bool IsVolumeEditable =>
         !IsVolumeLockedByRule && !(IsMuteLockedByRule && RuleMutedTarget == true);
 
+    /// <summary>Inverse of <see cref="IsVolumeEditable"/>: true when something (volume rule or
+    /// active mute-to-muted rule) is keeping the user from changing the level. Drives the
+    /// transparent overlay that captures clicks and shows the lock tooltip.</summary>
+    public bool IsVolumeLocked => !IsVolumeEditable;
+
     /// <summary>If a rule is currently pinning this device's mute state, this is the target
     /// value (true = forced muted, false = forced unmuted). Null when no rule applies.</summary>
     public bool? RuleMutedTarget { get; private set; }
@@ -98,6 +183,10 @@ public partial class DeviceCard : ObservableObject
     /// <summary>The display name of the rule currently pinning the mute state, used by the
     /// reconciliation toast to tell the user which rule overrode their change.</summary>
     public string? RuleMutedSource { get; private set; }
+
+    /// <summary>The display name of the rule currently pinning the volume level, used for the
+    /// locked-slider tooltip so the user knows which rule is in charge.</summary>
+    public string? RuleVolumeSource { get; private set; }
 
     // ---- Persistence-bound state ----
 
@@ -173,38 +262,31 @@ public partial class DeviceCard : ObservableObject
     public bool IsMuteToggleEnabled => !IsMuteLockedByRule;
 
     /// <summary>
-    /// When true, the rules panel renders all rule chips up to <see cref="RulesPanelMaxHeightExpanded"/>;
-    /// otherwise it caps at one rule (~52 dip) and shows a chevron-down to expand. Toggled
-    /// only when there are 2+ rules.
+    /// Bound directly to the rules <see cref="Microsoft.UI.Xaml.Controls.Expander.IsExpanded"/>.
+    /// The Expander only renders for cards with 2+ rules; for single-rule cards the first
+    /// rule chip stands alone with no expander chrome.
     /// </summary>
     [ObservableProperty]
     public partial bool IsRulesExpanded { get; set; }
 
-    /// <summary>
-    /// When there's only one rule, no cap (so the chip never gets a stray scrollbar). With
-    /// 2+ rules: collapsed caps to one chip's worth of height with chevron-down to expand;
-    /// expanded grows to a generous ceiling.
-    /// </summary>
-    public double RulesPanelMaxHeight
+    /// <summary>The first rule chip - always visible (when any rules apply at all). Sits
+    /// outside the Expander so users see at-a-glance which rule is active without having
+    /// to expand anything.</summary>
+    public RuleSummary? FirstRule => Rules.Count > 0 ? Rules[0] : null;
+
+    /// <summary>Rules beyond the first - revealed under the first-rule chip when expanded.</summary>
+    public ObservableCollection<RuleSummary> AdditionalRules { get; } = new();
+
+    /// <summary>Tooltip for the expand chevron, e.g. "Show 2 more rules".</summary>
+    public string AdditionalRulesLabel
     {
         get
         {
-            if (!HasMultipleRules) return RulesPanelMaxHeightExpanded;
-            return IsRulesExpanded ? RulesPanelMaxHeightExpanded : RulesPanelMaxHeightCollapsed;
+            var count = AdditionalRules.Count;
+            if (count <= 0) return string.Empty;
+            return count == 1 ? "Show 1 more rule" : $"Show {count} more rules";
         }
     }
-
-    public string RulesExpandGlyph => IsRulesExpanded
-        ? new string((char)0xE70E, 1)   // ChevronUp
-        : new string((char)0xE70D, 1);  // ChevronDown
-
-    public string RulesExpandTooltip => IsRulesExpanded ? "Collapse rules" : "Show all rules";
-
-    // Chip body = 10 (top padding) + 20 (BodyStrong line) + 2 (spacing) + 16 (Caption line)
-    // + 10 (bottom padding) = 58 dip (no borders); plus 2 dip top margin between chips.
-    // 60 fits one chip + its leading margin so the second chip starts past the viewport.
-    private const double RulesPanelMaxHeightCollapsed = 60;
-    private const double RulesPanelMaxHeightExpanded = 320;
 
     // ---- Peak meter (sectioned + hold) ----
     //
@@ -282,13 +364,103 @@ public partial class DeviceCard : ObservableObject
 
     // ---- Icon visuals ----
 
-    public string Glyph => (IsRender, IsMuted) switch
+    public string Glyph
     {
-        (true, false) => new string((char)0xE15D, 1),   // Volume / speaker
-        (true, true) => new string((char)0xE74F, 1),    // Volume Mute
-        (false, false) => new string((char)0xE720, 1),  // Microphone
-        (false, true) => new string((char)0xF781, 1),   // MicOff
-    };
+        get
+        {
+            // A Wave Link mix exposes a named icon (no bitmap); we map that to the closest
+            // Fluent glyph and let it win over the device-name guess below.
+            if (_waveLinkGlyphOverride is not null) return _waveLinkGlyphOverride;
+
+            // Themed glyph (Game / Voice Chat / Music / ...) is resolved once at
+            // construction. It stays constant across mute state because the glyph foreground
+            // already paints the icon red when muted - swapping the glyph too would double
+            // the signal.
+            if (_themedGlyph is not null) return _themedGlyph;
+
+            return (IsRender, IsMuted) switch
+            {
+                (true, false) => new string((char)0xE15D, 1),   // Volume / speaker
+                (true, true) => new string((char)0xE74F, 1),    // Volume Mute
+                (false, false) => new string((char)0xE720, 1),  // Microphone
+                (false, true) => new string((char)0xF781, 1),   // MicOff
+            };
+        }
+    }
+
+    // ---- Wave Link channel theming (optional, driven by WaveLinkChannelStyle) ----
+    //
+    // All null unless the device maps to a Wave Link channel/mix and the user picked a style.
+    //  - Channel + Colours: _waveLinkAccent = the channel's bitmap-derived colour (tints tile).
+    //  - Channel + Icons:   _waveLinkIcon = the channel's bitmap (replaces the glyph).
+    //  - Mix (either style): _waveLinkAccent = white (mixes are monochrome, no colour) and
+    //    _waveLinkGlyphOverride = the Fluent glyph mapped from the mix's named icon.
+    // The accent tile (absolute colour) and the muted card tint live on separate XAML borders
+    // bound to ShowAccentTile / ShowDefaultTile so theme-dependent fills stay {ThemeResource}.
+    private Color? _waveLinkAccent;
+    private ImageSource? _waveLinkIcon;
+    private string? _waveLinkGlyphOverride;
+
+    /// <summary>Applies (or clears) the Wave Link visual. Called on the UI thread by the Home
+    /// view-model after a rebuild or a style-setting change.</summary>
+    public void SetWaveLinkVisual(Color? accent, ImageSource? icon, string? glyphOverride)
+    {
+        _waveLinkAccent = accent;
+        _waveLinkIcon = icon;
+        _waveLinkGlyphOverride = glyphOverride;
+        OnPropertyChanged(nameof(WaveLinkIconSource));
+        OnPropertyChanged(nameof(ShowWaveLinkIcon));
+        OnPropertyChanged(nameof(ShowGlyph));
+        OnPropertyChanged(nameof(ShowAccentTile));
+        OnPropertyChanged(nameof(ShowDefaultTile));
+        OnPropertyChanged(nameof(WaveLinkTileBrush));
+        OnPropertyChanged(nameof(GlyphContrastBrush));
+        OnPropertyChanged(nameof(GlyphOnAccent));
+        OnPropertyChanged(nameof(GlyphMutedThemed));
+        OnPropertyChanged(nameof(GlyphNormalThemed));
+        OnPropertyChanged(nameof(Glyph));
+    }
+
+    public ImageSource? WaveLinkIconSource => _waveLinkIcon;
+    public bool ShowWaveLinkIcon => _waveLinkIcon is not null;
+    public bool ShowGlyph => _waveLinkIcon is null;
+
+    /// <summary>Absolute (theme-independent) accent fill for the icon tile: the Wave Link
+    /// channel colour, or white for a mix (mixes carry only a monochrome named icon). Null when
+    /// no tint applies.</summary>
+    public Brush? WaveLinkTileBrush => _waveLinkAccent is Color c ? new SolidColorBrush(c) : null;
+
+    /// <summary>Show the absolute-colour accent tile: a tint exists, the device isn't muted (the
+    /// muted card tint owns that signal), and it isn't showing a bitmap or rule-locked.</summary>
+    public bool ShowAccentTile => _waveLinkAccent.HasValue && !IsMuted && _waveLinkIcon is null && !IsMuteLockedByRule;
+
+    /// <summary>Show the default theme tile ({ThemeResource} subtle fill): no Wave Link tint or
+    /// bitmap, and not rule-locked (locked stays transparent / non-interactive).</summary>
+    public bool ShowDefaultTile => _waveLinkIcon is null && !IsMuteLockedByRule && !ShowAccentTile;
+
+    // The glyph is drawn by one of three overlaid FontIcons in XAML, chosen by the bools below,
+    // so the two theme-dependent colours can stay {ThemeResource} (which a code-resolved brush
+    // can't - it snapshots one theme and shows the wrong variant after a light/dark switch).
+    //
+    //  - GlyphOnAccent    : on a coloured / white tile - an absolute contrast colour.
+    //  - GlyphMutedThemed : muted, default tile        - {ThemeResource} critical red.
+    //  - GlyphNormalThemed: otherwise                  - {ThemeResource} accent text.
+
+    /// <summary>Absolute contrast colour (near-black or white) for a glyph sitting on an accent
+    /// or white tile. Null when there's no tile colour.</summary>
+    public Brush? GlyphContrastBrush => _waveLinkAccent is Color c ? new SolidColorBrush(ContrastingGlyph(c)) : null;
+
+    public bool GlyphOnAccent => ShowGlyph && ShowAccentTile;
+    public bool GlyphMutedThemed => ShowGlyph && !ShowAccentTile && IsMuted;
+    public bool GlyphNormalThemed => ShowGlyph && !ShowAccentTile && !IsMuted;
+
+    // Rec. 601 luma: bright tiles get a near-black glyph (matching Wave Link's own choice),
+    // dark / saturated ones get white. Keeps the Fluent glyph legible on any accent.
+    private static Color ContrastingGlyph(Color c)
+    {
+        var luma = (0.299 * c.R) + (0.587 * c.G) + (0.114 * c.B);
+        return luma >= 150 ? Color.FromArgb(255, 0x1A, 0x1A, 0x1A) : Colors.White;
+    }
 
     public string MuteTooltip
     {
@@ -296,11 +468,34 @@ public partial class DeviceCard : ObservableObject
         {
             if (IsMuteLockedByRule)
             {
-                return IsMuted ? "Mute locked by rule" : "Unmute locked by rule";
+                var verb = IsMuted ? "Mute" : "Unmute";
+                return string.IsNullOrEmpty(RuleMutedSource)
+                    ? $"{verb} locked by rule"
+                    : $"{verb} locked by rule '{RuleMutedSource}'";
             }
             return IsMuted
                 ? (IsRender ? "Unmute output" : "Unmute input")
                 : (IsRender ? "Mute output" : "Mute input");
+        }
+    }
+
+    public string VolumeLockedTooltip
+    {
+        get
+        {
+            if (IsVolumeLockedByRule)
+            {
+                return string.IsNullOrEmpty(RuleVolumeSource)
+                    ? "Volume locked by rule"
+                    : $"Volume locked by rule '{RuleVolumeSource}'";
+            }
+            if (IsMuteLockedByRule && RuleMutedTarget == true)
+            {
+                return string.IsNullOrEmpty(RuleMutedSource)
+                    ? "Volume disabled while a mute rule silences this device"
+                    : $"Volume disabled while mute rule '{RuleMutedSource}' silences this device";
+            }
+            return "Volume locked by rule";
         }
     }
 
@@ -378,12 +573,20 @@ public partial class DeviceCard : ObservableObject
     }
 
     [RelayCommand]
-    public void ToggleMute()
+    public async Task ToggleMute()
     {
         if (IsMuteLockedByRule) return;
         var target = !IsMuted;
-        _endpoints.SetMuted(Endpoint.Id, target);
-        IsMuted = _endpoints.GetMuted(Endpoint.Id) ?? target;
+        // Optimistic: the WL setInputConfig path mirrors back through the Windows endpoint
+        // notification, but there's a perceptible WS round-trip latency. Flip the UI now and
+        // let the writer reconcile in the background.
+        IsMuted = target;
+        var ok = await _writer.SetMutedAsync(Endpoint, target).ConfigureAwait(true);
+        if (!ok)
+        {
+            var actual = _endpoints.GetMuted(Endpoint.Id);
+            if (actual.HasValue) IsMuted = actual.Value;
+        }
     }
 
     /// <summary>Updates <see cref="IsMuted"/> only when it differs, so the change-notification
@@ -394,6 +597,23 @@ public partial class DeviceCard : ObservableObject
         {
             IsMuted = muted;
         }
+    }
+
+    /// <summary>Pulls the OS volume onto the slider when an external source (Windows volume
+    /// flyout, hardware keys, another app) moved it. Suppressed during/just-after the user's
+    /// own drag (grace window) and below a small threshold, and never writes back to the
+    /// device (it's a display-only sync).</summary>
+    public void SyncVolumeFromDevice(float deviceVolume)
+    {
+        if (IsVolumeLockedByRule) return;
+        if (DateTime.UtcNow - _lastUserVolumeChange < UserVolumeGrace) return;
+
+        var clamped = Math.Clamp(deviceVolume, 0f, 1f);
+        if (Math.Abs(Volume - clamped) < 0.005f) return;
+
+        _suppressVolumeWrite = true;
+        try { Volume = clamped; }
+        finally { _suppressVolumeWrite = false; }
     }
 
     /// <summary>Pushes a new peak sample. <see cref="PeakHoldLevel"/> latches at new highs,
@@ -437,20 +657,25 @@ public partial class DeviceCard : ObservableObject
         NotifyMeterChanged();
         if (_suppressVolumeWrite || IsVolumeLockedByRule) return;
 
+        // User-initiated change: stamp it so SyncVolumeFromDevice's grace window leaves the
+        // drag alone.
+        _lastUserVolumeChange = DateTime.UtcNow;
+
         // User-initiated slider change: keep mute state coherent with the value. Dragging
         // off 0 unmutes, dragging back to 0 auto-mutes. Skipped when an active rule has
-        // pinned the mute state.
+        // pinned the mute state. Both writes route through IEndpointWriter so Wave Link
+        // virtual inputs get setInputConfig instead of metadata-only Windows endpoint ops.
         if (!IsMuteLockedByRule)
         {
             var shouldBeMuted = value <= 0.001f;
             if (IsMuted != shouldBeMuted)
             {
-                _endpoints.SetMuted(Endpoint.Id, shouldBeMuted);
                 IsMuted = shouldBeMuted;
+                _ = _writer.SetMutedAsync(Endpoint, shouldBeMuted);
             }
         }
 
-        _endpoints.SetVolume(Endpoint.Id, value);
+        _ = _writer.SetVolumeAsync(Endpoint, value);
     }
 
     private void NotifyMeterChanged()
@@ -473,23 +698,37 @@ public partial class DeviceCard : ObservableObject
         OnPropertyChanged(nameof(MuteIconForegroundResource));
         OnPropertyChanged(nameof(VolumePercentText));
         OnPropertyChanged(nameof(VolumeAreaOpacity));
+        OnPropertyChanged(nameof(ShowAccentTile));
+        OnPropertyChanged(nameof(ShowDefaultTile));
+        OnPropertyChanged(nameof(GlyphOnAccent));
+        OnPropertyChanged(nameof(GlyphMutedThemed));
+        OnPropertyChanged(nameof(GlyphNormalThemed));
     }
 
-    partial void OnIsVolumeLockedByRuleChanged(bool value) =>
+    partial void OnIsVolumeLockedByRuleChanged(bool value)
+    {
         OnPropertyChanged(nameof(IsVolumeEditable));
+        OnPropertyChanged(nameof(IsVolumeLocked));
+        OnPropertyChanged(nameof(VolumeLockedTooltip));
+    }
 
     partial void OnIsMuteLockedByRuleChanged(bool value)
     {
         OnPropertyChanged(nameof(IsMuteToggleEnabled));
         OnPropertyChanged(nameof(MuteTooltip));
         OnPropertyChanged(nameof(IsVolumeEditable));
+        OnPropertyChanged(nameof(IsVolumeLocked));
+        OnPropertyChanged(nameof(VolumeLockedTooltip));
+        OnPropertyChanged(nameof(ShowAccentTile));
+        OnPropertyChanged(nameof(ShowDefaultTile));
+        OnPropertyChanged(nameof(GlyphOnAccent));
+        OnPropertyChanged(nameof(GlyphMutedThemed));
+        OnPropertyChanged(nameof(GlyphNormalThemed));
     }
 
     partial void OnIsRulesExpandedChanged(bool value)
     {
-        OnPropertyChanged(nameof(RulesPanelMaxHeight));
-        OnPropertyChanged(nameof(RulesExpandGlyph));
-        OnPropertyChanged(nameof(RulesExpandTooltip));
+        OnPropertyChanged(nameof(IsLayoutCustomSized));
     }
 
     partial void OnPeakLevelChanged(float value)

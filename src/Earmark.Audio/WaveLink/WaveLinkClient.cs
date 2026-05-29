@@ -12,13 +12,14 @@ public sealed class WaveLinkClient : IAsyncDisposable
     private const string OriginHeader = "streamdeck://";
 
     private readonly ILogger<WaveLinkClient> _logger;
-    private readonly ConcurrentDictionary<int, TaskCompletionSource<JsonElement>> _pending = new();
+    private readonly ConcurrentDictionary<long, TaskCompletionSource<JsonElement>> _pending = new();
     private readonly SemaphoreSlim _sendLock = new(1, 1);
     private readonly CancellationTokenSource _disposalCts = new();
 
     private ClientWebSocket? _socket;
     private Task? _receiveLoop;
-    private int _nextId;
+    // long so the per-call counter cannot wrap into the id<=0 range that DispatchFrame ignores.
+    private long _nextId;
 
     public WaveLinkClient(ILogger<WaveLinkClient> logger)
     {
@@ -206,7 +207,7 @@ public sealed class WaveLinkClient : IAsyncDisposable
         try
         {
             var root = doc.RootElement;
-            if (root.TryGetProperty("id", out var idEl) && idEl.ValueKind == JsonValueKind.Number && idEl.TryGetInt32(out var id) && id > 0)
+            if (root.TryGetProperty("id", out var idEl) && idEl.ValueKind == JsonValueKind.Number && idEl.TryGetInt64(out var id) && id > 0)
             {
                 if (_pending.TryRemove(id, out var tcs))
                 {

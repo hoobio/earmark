@@ -15,6 +15,7 @@ public static class AudioServiceCollectionExtensions
 
         services.AddSingleton<IAudioEndpointService, AudioEndpointService>();
         services.AddSingleton<IAudioSessionService, AudioSessionService>();
+        services.AddSingleton<IAudioSessionMeterService, AudioSessionMeterService>();
         services.AddSingleton<IAudioPolicyService, AudioPolicyService>();
         services.AddSingleton<IWaveLinkService, WaveLinkService>();
         return services;

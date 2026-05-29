@@ -63,8 +63,20 @@ public partial class App : Application
             // moved off it.
             var initTask = Task.Run(async () =>
             {
+                // Construct the audio singletons here (off the UI thread) so their COM-heavy
+                // setup never runs during page navigation. Time each so a slow machine shows
+                // where startup goes. The meter service is pre-built too: HomeViewModel needs
+                // it, and otherwise its Rebuild() would run on the UI thread during nav.
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                _ = _host.Services.GetRequiredService<IAudioEndpointService>();
+                var epMs = sw.ElapsedMilliseconds;
                 _ = _host.Services.GetRequiredService<IAudioSessionService>();
-                _logger.LogInformation("Audio services initialized");
+                var sessMs = sw.ElapsedMilliseconds - epMs;
+                _ = _host.Services.GetRequiredService<IAudioSessionMeterService>();
+                var meterMs = sw.ElapsedMilliseconds - epMs - sessMs;
+                _logger.LogInformation(
+                    "Audio services initialized in {TotalMs} ms (endpoints {EpMs}, sessions {SessMs}, meters {MeterMs})",
+                    sw.ElapsedMilliseconds, epMs, sessMs, meterMs);
 
                 await _host.Services.GetRequiredService<IRulesService>().LoadAsync();
                 _logger.LogInformation("Rules loaded");
@@ -132,15 +144,10 @@ public partial class App : Application
 
         _logger?.LogInformation("Shutting down host");
 
-        try
-        {
-            host.StopAsync(TimeSpan.FromSeconds(2)).GetAwaiter().GetResult();
-        }
-        catch
-        {
-            // Ignore shutdown failures.
-        }
-
+        // No IHostedService / lifetime subscribers are registered, so StopAsync would just be a
+        // no-op that blocks the UI thread up to its timeout on close. host.Dispose() alone
+        // disposes the singletons (which release their COM). Re-add StopAsync if a hosted
+        // service is ever registered.
         try
         {
             host.Dispose();

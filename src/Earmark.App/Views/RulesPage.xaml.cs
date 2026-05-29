@@ -15,6 +15,10 @@ public sealed partial class RulesPage : Page
 {
     private readonly ILogger<RulesPage>? _logger;
 
+    // Rules collapsed for the duration of a reorder drag, restored when it completes - so you
+    // drag a compact header, not the whole expanded editor.
+    private readonly List<RuleRow> _collapsedForDrag = new();
+
     public RulesPage(RulesViewModel viewModel)
     {
         ViewModel = viewModel;
@@ -55,13 +59,30 @@ public sealed partial class RulesPage : Page
         });
     }
 
-    private void OnHeaderTapped(object sender, TappedRoutedEventArgs e)
+    private void OnRulesDragStarting(object sender, DragItemsStartingEventArgs e)
     {
-        if (sender is FrameworkElement { DataContext: RuleRow row })
+        // Collapse the dragged rule(s) so the drag is a compact header, not the full editor.
+        // Done synchronously here so the list reflows around a small item during the drag.
+        _collapsedForDrag.Clear();
+        foreach (var item in e.Items)
         {
-            row.IsExpanded = !row.IsExpanded;
-            _logger?.LogInformation("Rule {Id} expanded={Expanded}", row.Id, row.IsExpanded);
+            if (item is RuleRow row && row.IsExpanded)
+            {
+                row.IsExpanded = false;
+                _collapsedForDrag.Add(row);
+            }
         }
+    }
+
+    private void OnRulesDragCompleted(Microsoft.UI.Xaml.Controls.ListViewBase sender, DragItemsCompletedEventArgs args)
+    {
+        // Re-expand whatever we collapsed for the drag (the RuleRow instances survive the
+        // reorder, so this restores the user's open editor). Fires on drop or cancel.
+        foreach (var row in _collapsedForDrag)
+        {
+            row.IsExpanded = true;
+        }
+        _collapsedForDrag.Clear();
     }
 
     private async void OnDeleteRuleClicked(object sender, RoutedEventArgs e)

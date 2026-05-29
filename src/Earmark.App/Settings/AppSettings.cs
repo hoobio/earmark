@@ -14,7 +14,26 @@ public sealed class AppSettings
 
     public bool VerboseLogging { get; set; }
 
+    /// <summary>App theme. <see cref="AppTheme.System"/> (default) follows Windows.</summary>
+    public AppTheme Theme { get; set; } = AppTheme.System;
+
     public bool EnableWaveLink { get; set; }
+
+    /// <summary>
+    /// When true, the periodic ticker keeps Windows endpoint FriendlyName in sync with the
+    /// label Wave Link uses for the same device. Only meaningful when <see
+    /// cref="EnableWaveLink"/> is also on.
+    /// </summary>
+    public bool ReconcileWaveLinkNames { get; set; }
+
+    /// <summary>
+    /// How device cards mapped to a Wave Link channel render their icon tile. Defaults to
+    /// <see cref="WaveLinkChannelStyle.Colours"/> (tint the tile with the channel accent);
+    /// <see cref="WaveLinkChannelStyle.Icons"/> swaps in the raw Wave Link bitmap, and
+    /// <see cref="WaveLinkChannelStyle.Off"/> keeps the plain Fluent look. Only meaningful when
+    /// <see cref="EnableWaveLink"/> is also on.
+    /// </summary>
+    public WaveLinkChannelStyle WaveLinkChannelStyle { get; set; } = WaveLinkChannelStyle.Colours;
 
     public List<string> HiddenDeviceIds { get; set; } = new();
 
