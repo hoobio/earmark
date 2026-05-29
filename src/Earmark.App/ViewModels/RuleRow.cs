@@ -38,16 +38,14 @@ public partial class RuleRow : ObservableObject, IDisposable
     [ObservableProperty]
     public partial bool IsExpanded { get; set; }
 
-    /// <summary>Chevron glyph for the row header: down (collapsed) / up (expanded).</summary>
-    public string ExpandGlyph => IsExpanded ? new string((char)0xE70E, 1) : new string((char)0xE70D, 1);
-
-    partial void OnIsExpandedChanged(bool value) => OnPropertyChanged(nameof(ExpandGlyph));
-
     [ObservableProperty]
     public partial string Name { get; set; } = string.Empty;
 
     [ObservableProperty]
     public partial bool Enabled { get; set; } = true;
+
+    /// <summary>Verb for the right-click enable/disable item, mirroring the header toggle.</summary>
+    public string EnabledToggleLabel => Enabled ? "Disable rule" : "Enable rule";
 
     [ObservableProperty]
     public partial RuleStatus Status { get; set; } = RuleStatus.Idle;
@@ -219,6 +217,9 @@ public partial class RuleRow : ObservableObject, IDisposable
     }
 
     [RelayCommand]
+    private void ToggleEnabled() => Enabled = !Enabled;
+
+    [RelayCommand]
     private void AddCondition()
     {
         var row = new ConditionRow(new RuleCondition(), NotifyChildChanged);
@@ -281,7 +282,11 @@ public partial class RuleRow : ObservableObject, IDisposable
         QueueSave();
     }
 
-    partial void OnEnabledChanged(bool value) => QueueSave();
+    partial void OnEnabledChanged(bool value)
+    {
+        OnPropertyChanged(nameof(EnabledToggleLabel));
+        QueueSave();
+    }
 
     partial void OnStatusChanged(RuleStatus value)
     {

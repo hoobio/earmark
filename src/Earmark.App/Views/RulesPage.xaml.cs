@@ -59,14 +59,6 @@ public sealed partial class RulesPage : Page
         });
     }
 
-    private void OnHeaderTapped(object sender, TappedRoutedEventArgs e)
-    {
-        if (sender is FrameworkElement { DataContext: RuleRow row })
-        {
-            row.IsExpanded = !row.IsExpanded;
-        }
-    }
-
     private void OnRulesDragStarting(object sender, DragItemsStartingEventArgs e)
     {
         // Collapse the dragged rule(s) so the drag is a compact header, not the full editor.
