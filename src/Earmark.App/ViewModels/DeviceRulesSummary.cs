@@ -98,9 +98,11 @@ internal static class DeviceRulesSummary
     {
         // Either branch counts - the rule is "associated" with the device if it can act on it in
         // any state. Its live status (and which branch wins) comes from the evaluator/resolver.
+        // Wave Link mix actions count too: they name a physical device via DevicePattern (the
+        // output added to / removed from the mix), so that device's card should list the rule.
         foreach (var action in rule.Actions.Concat(rule.ElseActions))
         {
-            if (!action.IsValid || action.IsWaveLinkAction) continue;
+            if (!action.IsValid) continue;
             if (ActionTargetsEndpoint(action, endpoint)) return true;
         }
         return false;
@@ -116,6 +118,9 @@ internal static class DeviceRulesSummary
             ActionType.SetApplicationOutput or ActionType.SetDefaultOutput => endpoint.Flow == EndpointFlow.Render,
             ActionType.SetApplicationInput or ActionType.SetDefaultInput => endpoint.Flow == EndpointFlow.Capture,
             ActionType.SetDeviceVolume or ActionType.MuteDevice or ActionType.UnmuteDevice => true,
+            // Wave Link mixes route render outputs, so the named device is a render endpoint.
+            ActionType.AddWaveLinkMixOutput or ActionType.RemoveWaveLinkMixOutput or ActionType.SetWaveLinkMixOutput
+                => endpoint.Flow == EndpointFlow.Render,
             _ => false,
         };
         if (!flowOk) return false;
@@ -154,7 +159,7 @@ internal static class DeviceRulesSummary
                 }
             }
 
-            if (!action.IsWaveLinkAction && !string.IsNullOrWhiteSpace(action.DevicePattern))
+            if (!string.IsNullOrWhiteSpace(action.DevicePattern))
             {
                 var hits = endpoints.Any(e => e.State == EndpointState.Active &&
                     (RuleRow.MatchOrExact(action.DevicePattern, e.FriendlyName) ||
