@@ -5,7 +5,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:controls="using:Earmark.App.Controls">
 
-    <!-- Stacked, colour-banded peak bars (1 = mono, 2 = L/R, 3 = L/R/Centre+LFE) that butt
+    <!-- Stacked, colour-banded peak bars (1 = mono, 2 = L/R, 3 = L/Centre+LFE/R) that butt
          together with no gap so the stack reads as one block: the top bar rounds its top
          corners, the bottom bar its bottom corners, the middle none. A single peak-hold line
          (driven by the max across channels) overlays the whole stack. The bar template lives
@@ -33,36 +33,50 @@
                             CornerRadius="{x:Bind Corners, Mode=OneWay}"
                             Background="{ThemeResource ControlAltFillColorTertiaryBrush}">
                         <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="{x:Bind GreenStars, Mode=OneWay}" />
-                                <ColumnDefinition Width="{x:Bind GreenYellowBlendStars, Mode=OneWay}" />
-                                <ColumnDefinition Width="{x:Bind YellowStars, Mode=OneWay}" />
-                                <ColumnDefinition Width="{x:Bind YellowRedBlendStars, Mode=OneWay}" />
-                                <ColumnDefinition Width="{x:Bind RedStars, Mode=OneWay}" />
-                                <ColumnDefinition Width="{x:Bind RemainderStars, Mode=OneWay}" />
-                            </Grid.ColumnDefinitions>
-                            <Border Grid.Column="0"
-                                    Background="{ThemeResource SystemFillColorSuccessBrush}" />
-                            <Border Grid.Column="1">
-                                <Border.Background>
-                                    <LinearGradientBrush StartPoint="0,0.5" EndPoint="1,0.5">
-                                        <GradientStop Color="{ThemeResource SystemFillColorSuccess}" Offset="0" />
-                                        <GradientStop Color="{ThemeResource SystemFillColorCaution}" Offset="1" />
-                                    </LinearGradientBrush>
-                                </Border.Background>
-                            </Border>
-                            <Border Grid.Column="2"
-                                    Background="{ThemeResource SystemFillColorCautionBrush}" />
-                            <Border Grid.Column="3">
-                                <Border.Background>
-                                    <LinearGradientBrush StartPoint="0,0.5" EndPoint="1,0.5">
-                                        <GradientStop Color="{ThemeResource SystemFillColorCaution}" Offset="0" />
-                                        <GradientStop Color="{ThemeResource SystemFillColorCritical}" Offset="1" />
-                                    </LinearGradientBrush>
-                                </Border.Background>
-                            </Border>
-                            <Border Grid.Column="4"
-                                    Background="{ThemeResource SystemFillColorCriticalBrush}" />
+                            <!-- Colour-banded fill (gradient + blocks). Blocks mode collapses the
+                                 blend columns to zero width; both are hidden in Single mode. -->
+                            <Grid Visibility="{x:Bind BandedVisibility, Mode=OneWay}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="{x:Bind GreenStars, Mode=OneWay}" />
+                                    <ColumnDefinition Width="{x:Bind GreenYellowBlendStars, Mode=OneWay}" />
+                                    <ColumnDefinition Width="{x:Bind YellowStars, Mode=OneWay}" />
+                                    <ColumnDefinition Width="{x:Bind YellowRedBlendStars, Mode=OneWay}" />
+                                    <ColumnDefinition Width="{x:Bind RedStars, Mode=OneWay}" />
+                                    <ColumnDefinition Width="{x:Bind RemainderStars, Mode=OneWay}" />
+                                </Grid.ColumnDefinitions>
+                                <Border Grid.Column="0"
+                                        Background="{ThemeResource SystemFillColorSuccessBrush}" />
+                                <Border Grid.Column="1">
+                                    <Border.Background>
+                                        <LinearGradientBrush StartPoint="0,0.5" EndPoint="1,0.5">
+                                            <GradientStop Color="{ThemeResource SystemFillColorSuccess}" Offset="0" />
+                                            <GradientStop Color="{ThemeResource SystemFillColorCaution}" Offset="1" />
+                                        </LinearGradientBrush>
+                                    </Border.Background>
+                                </Border>
+                                <Border Grid.Column="2"
+                                        Background="{ThemeResource SystemFillColorCautionBrush}" />
+                                <Border Grid.Column="3">
+                                    <Border.Background>
+                                        <LinearGradientBrush StartPoint="0,0.5" EndPoint="1,0.5">
+                                            <GradientStop Color="{ThemeResource SystemFillColorCaution}" Offset="0" />
+                                            <GradientStop Color="{ThemeResource SystemFillColorCritical}" Offset="1" />
+                                        </LinearGradientBrush>
+                                    </Border.Background>
+                                </Border>
+                                <Border Grid.Column="4"
+                                        Background="{ThemeResource SystemFillColorCriticalBrush}" />
+                            </Grid>
+
+                            <!-- Single-colour fill: a flat bar in the user-chosen colour, shown only
+                                 in Single mode (clipping is then signalled by the hold tick alone). -->
+                            <Grid Visibility="{x:Bind SingleVisibility, Mode=OneWay}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="{x:Bind SingleFillStars, Mode=OneWay}" />
+                                    <ColumnDefinition Width="{x:Bind SingleRemainderStars, Mode=OneWay}" />
+                                </Grid.ColumnDefinitions>
+                                <Border Grid.Column="0" Background="{x:Bind SingleBrush, Mode=OneWay}" />
+                            </Grid>
                         </Grid>
                     </Border>
                 </DataTemplate>

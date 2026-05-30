@@ -1,6 +1,11 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 
+using Earmark.App.Settings;
+
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Media;
+
+using Windows.UI;
 
 namespace Earmark.App.Controls;
 
@@ -19,13 +24,18 @@ namespace Earmark.App.Controls;
 public partial class MeterBar : ObservableObject
 {
     private const double MinDb = -60.0;
-    private const double YellowCentre = 0.80;  // = (-12 - MinDb) / -MinDb
-    private const double RedCentre = 0.90;     // = (-6  - MinDb) / -MinDb
-    private const double BlendHalf = 0.02;     // ±2% on either side of each threshold
-    private const double GreenEnd = YellowCentre - BlendHalf;     // 0.78
-    private const double YellowStart = YellowCentre + BlendHalf;  // 0.82
-    private const double YellowEnd = RedCentre - BlendHalf;       // 0.88
-    private const double RedStart = RedCentre + BlendHalf;        // 0.92
+    private const double YellowCentre = 0.80;       // = (-12 - MinDb) / -MinDb
+    private const double RedCentre = 0.90;          // = (-6  - MinDb) / -MinDb
+    private const double GradientBlendHalf = 0.02;  // ±2% on either side of each threshold
+
+    // Blocks mode collapses the gradient blend bands to zero width, so green/amber/red butt
+    // together with hard edges. Gradient keeps the ±2% blends; Single mode is rendered by a
+    // separate overlay (see SingleFillStars) so these bands are hidden and their values unused.
+    private double BlendHalf => ColourMode == PeakMeterColourMode.Blocks ? 0.0 : GradientBlendHalf;
+    private double GreenEnd => YellowCentre - BlendHalf;
+    private double YellowStart => YellowCentre + BlendHalf;
+    private double YellowEnd => RedCentre - BlendHalf;
+    private double RedStart => RedCentre + BlendHalf;
 
     /// <summary>Live peak (0..1 linear amplitude).</summary>
     [ObservableProperty]
@@ -52,6 +62,15 @@ public partial class MeterBar : ObservableObject
     /// the top bar rounds its top corners, the bottom bar its bottom corners, the middle none.</summary>
     [ObservableProperty]
     public partial CornerRadius Corners { get; set; }
+
+    /// <summary>How the fill is painted: gradient/blocks use the colour-banded columns; single
+    /// uses the flat <see cref="SingleBrush"/> overlay. Set by the parent meter from settings.</summary>
+    [ObservableProperty]
+    public partial PeakMeterColourMode ColourMode { get; set; } = PeakMeterColourMode.Gradient;
+
+    /// <summary>The flat fill colour for <see cref="PeakMeterColourMode.Solid"/>.</summary>
+    [ObservableProperty]
+    public partial Color SingleColour { get; set; }
 
     private static double DbBar(double amplitude)
     {
@@ -81,6 +100,22 @@ public partial class MeterBar : ObservableObject
     public GridLength RemainderStars =>
         Star(1.0 - Math.Clamp(DbBar(Level) * Volume, 0.0, 1.0));
 
+    // Single-colour overlay: a flat fill from 0 to the current level (volume-bounded), painted in
+    // SingleBrush. Only this overlay shows in Single mode; the colour-banded columns are hidden.
+    public GridLength SingleFillStars =>
+        Star(Math.Clamp(DbBar(Level) * Volume, 0.0, 1.0));
+
+    public GridLength SingleRemainderStars =>
+        Star(1.0 - Math.Clamp(DbBar(Level) * Volume, 0.0, 1.0));
+
+    public Brush SingleBrush => new SolidColorBrush(SingleColour);
+
+    public Visibility SingleVisibility =>
+        ColourMode == PeakMeterColourMode.Solid ? Visibility.Visible : Visibility.Collapsed;
+
+    public Visibility BandedVisibility =>
+        ColourMode == PeakMeterColourMode.Solid ? Visibility.Collapsed : Visibility.Visible;
+
     public GridLength HoldLeftStars =>
         Star(Math.Clamp(DbBar(Hold) * Volume, 0.0, 1.0));
 
@@ -104,6 +139,16 @@ public partial class MeterBar : ObservableObject
     partial void OnVolumeChanged(double value) => NotifyBands();
     partial void OnShowHoldChanged(bool value) => OnPropertyChanged(nameof(HoldVisibility));
 
+    partial void OnColourModeChanged(PeakMeterColourMode value)
+    {
+        // Mode shifts the band boundaries (gradient vs blocks) and toggles banded vs single fill.
+        NotifyBands();
+        OnPropertyChanged(nameof(SingleVisibility));
+        OnPropertyChanged(nameof(BandedVisibility));
+    }
+
+    partial void OnSingleColourChanged(Color value) => OnPropertyChanged(nameof(SingleBrush));
+
     partial void OnHoldChanged(double value)
     {
         OnPropertyChanged(nameof(HoldLeftStars));
@@ -122,6 +167,8 @@ public partial class MeterBar : ObservableObject
         OnPropertyChanged(nameof(YellowRedBlendStars));
         OnPropertyChanged(nameof(RedStars));
         OnPropertyChanged(nameof(RemainderStars));
+        OnPropertyChanged(nameof(SingleFillStars));
+        OnPropertyChanged(nameof(SingleRemainderStars));
         OnPropertyChanged(nameof(HoldLeftStars));
         OnPropertyChanged(nameof(HoldRightStars));
         OnPropertyChanged(nameof(HoldVisibility));
