@@ -265,15 +265,16 @@ public sealed class BlockWrapLayout : VirtualizingLayout
             y = rowStartY + rowTotal;
             if (i < order.Length)
             {
-                // Extra gap at a boundary that touches a group, so a group reads as a distinct cluster
-                // and an adjacent ungrouped card isn't mistaken for a member.
+                // Extra gap only when a group sits directly above ungrouped device(s), so the device
+                // isn't mistaken for a member. Two stacked groups keep the normal spacing (each group's
+                // own title already separates them; adding more reads as an enormous gap).
                 var thisRowHasGroup = false;
                 foreach (var slot in rowSlots)
                 {
                     if (Info(context, order[slot])?.BreaksRow ?? false) { thisRowHasGroup = true; break; }
                 }
                 var nextIsGroup = Info(context, order[i])?.BreaksRow ?? false;
-                y += RowSpacing + (thisRowHasGroup || nextIsGroup ? GroupSeparation : 0);
+                y += RowSpacing + (thisRowHasGroup && !nextIsGroup ? GroupSeparation : 0);
             }
         }
 

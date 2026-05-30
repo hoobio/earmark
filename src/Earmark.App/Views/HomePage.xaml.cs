@@ -86,6 +86,13 @@ public sealed partial class HomePage : Page
     /// blocks get the implicit slide animation attached as they scroll into view.</summary>
     private bool _reorderActive;
 
+    /// <summary>The group's inner layout currently showing a member make-space gap (within-group
+    /// reorder) or a phantom join slot, or null.</summary>
+    private WrapByRowLayout? _activeInnerLayout;
+
+    /// <summary>The inner member repeater currently carrying the implicit slide animation, or null.</summary>
+    private ItemsRepeater? _animatedInner;
+
     private async void OnDeviceCardDragStarting(UIElement sender, DragStartingEventArgs args)
     {
         if (sender is not FrameworkElement { Tag: DeviceCard card } element) return;
@@ -166,6 +173,8 @@ public sealed partial class HomePage : Page
         _draggedCardGroup = null;
         _draggedGroup = null;
         ClearHighlights();
+        ClearActiveInnerGap();
+        ClearInnerAnimations();
         Layout?.ClearReorderState();
         SetDragInProgress(false);
         EnableReorderAnimations(false);
@@ -200,11 +209,28 @@ public sealed partial class HomePage : Page
 
         if (_draggedCardGroup is not null)
         {
-            // Member drag: inside its group box -> reorder within (committed on drop); outside -> leave.
+            // Member drag: inside its group box -> reorder within (members bump to show the gap);
+            // outside -> leave.
             var box = Layout.GetContentRect(ViewModel.Blocks.IndexOf(_draggedCardGroup));
             ClearHighlights();
             Layout.ClearReorderState();   // member moves don't open a block-level gap
-            SetDragCaption(e, box.Contains(point) ? "Move within group" : "Remove from group");
+
+            if (box.Contains(point)
+                && InnerRepeaterOf(_draggedCardGroup) is { Layout: WrapByRowLayout innerLayout } inner)
+            {
+                EnsureInnerAnimations(inner);
+                var draggedIdx = _draggedCardGroup.Members.IndexOf(_draggedCard);
+                var raw = InnerInsertionIndex(inner, innerLayout, point);
+                innerLayout.SetReorderState(draggedIdx, raw > draggedIdx ? raw - 1 : raw);
+                SetActiveInnerGap(innerLayout);
+                SetDragCaption(e, "Move within group");
+            }
+            else
+            {
+                ClearActiveInnerGap();   // left the box - close the in-group gap
+                SetDragCaption(e, "Remove from group");
+            }
+
             e.AcceptedOperation = DataPackageOperation.Move;
             e.Handled = true;
             return;
@@ -219,6 +245,13 @@ public sealed partial class HomePage : Page
             Layout.ClearReorderState();
             ClearCreateTarget();
             SetJoinTarget(joinGroup);
+            // Open a phantom slot in the group so its members bump to preview where the card lands.
+            if (InnerRepeaterOf(joinGroup) is { Layout: WrapByRowLayout joinLayout } joinInner)
+            {
+                EnsureInnerAnimations(joinInner);
+                joinLayout.SetPhantomGap(InnerInsertionIndex(joinInner, joinLayout, point));
+                SetActiveInnerGap(joinLayout);
+            }
             SetDragCaption(e, "Add to group");
         }
         else if (target is DeviceCard targetCard
@@ -226,6 +259,7 @@ public sealed partial class HomePage : Page
                  && IsCentreZone(point, Layout.GetContentRect(targetIdx)))
         {
             Layout.ClearReorderState();
+            ClearActiveInnerGap();
             ClearJoinTarget();
             SetCreateTarget(targetCard);
             SetDragCaption(e, "Group");
@@ -233,6 +267,7 @@ public sealed partial class HomePage : Page
         else
         {
             ClearHighlights();
+            ClearActiveInnerGap();
             SetReorderGap(_draggedCard, point);
             SetDragCaption(e, "Move");
         }
@@ -273,7 +308,7 @@ public sealed partial class HomePage : Page
 
             if (box.Contains(point))
             {
-                var anchor = MemberAnchorAt(group, point, sourceId);
+                var anchor = MemberAnchorBefore(group, point, sourceId);
                 _logger?.LogInformation("Reorder within group {Group}: {Member}", group.Id, sourceId);
                 ViewModel.ReorderWithinGroup(sourceId, anchor);
             }
@@ -298,8 +333,9 @@ public sealed partial class HomePage : Page
 
         if (target is DeviceGroupCard joinGroup)
         {
+            var anchor = MemberAnchorBefore(joinGroup, point, draggedMemberId: null);
             _logger?.LogInformation("Join group {Group}: {Source}", joinGroup.Id, sourceId);
-            ViewModel.AddToGroup(sourceId, joinGroup.Id);
+            ViewModel.AddToGroup(sourceId, joinGroup.Id, anchor);
             return;
         }
         if (target is DeviceCard targetCard
@@ -334,37 +370,77 @@ public sealed partial class HomePage : Page
         return raw >= 0 && raw < ViewModel.Blocks.Count ? PageBlockId(ViewModel.Blocks[raw]) : null;
     }
 
-    /// <summary>The member endpoint id the pointer sits before within <paramref name="group"/> (null =
-    /// at the end), skipping the dragged member, for within-group reorder. Members live in the group's
-    /// nested repeater, which the outer layout can't hit-test, so this reads the realised member
-    /// elements' bounds (mapped into the repeater's coordinate space) directly.</summary>
-    private string? MemberAnchorAt(DeviceGroupCard group, Point point, string draggedMemberId)
+    /// <summary>The group's inner member repeater, or null if not realised.</summary>
+    private ItemsRepeater? InnerRepeaterOf(DeviceGroupCard group)
     {
         var blockIndex = ViewModel.Blocks.IndexOf(group);
-        if (blockIndex < 0 || DevicesRepeater.TryGetElement(blockIndex) is not FrameworkElement blockEl) return null;
-        if (FindDescendant<ItemsRepeater>(blockEl) is not { } inner) return null;
+        return blockIndex >= 0 && DevicesRepeater.TryGetElement(blockIndex) is FrameworkElement blockEl
+            ? FindDescendant<ItemsRepeater>(blockEl)
+            : null;
+    }
 
-        for (var i = 0; i < group.Members.Count; i++)
+    /// <summary>The member insertion index ([0, memberCount]) for a pointer, using the inner layout's
+    /// stable no-gap geometry (so an open gap / phantom doesn't make the answer jitter).</summary>
+    private int InnerInsertionIndex(ItemsRepeater inner, WrapByRowLayout layout, Point point)
+    {
+        var local = DevicesRepeater.TransformToVisual(inner).TransformPoint(point);
+        return layout.GetInsertionIndex(local);
+    }
+
+    /// <summary>The member endpoint id the pointer sits before within <paramref name="group"/> (null =
+    /// at the end), skipping <paramref name="draggedMemberId"/> if set (within-group reorder).</summary>
+    private string? MemberAnchorBefore(DeviceGroupCard group, Point point, string? draggedMemberId)
+    {
+        if (InnerRepeaterOf(group) is not { Layout: WrapByRowLayout layout } inner) return null;
+        var raw = InnerInsertionIndex(inner, layout, point);
+        for (var k = raw; k < group.Members.Count; k++)
         {
-            var member = group.Members[i];
-            if (string.Equals(member.Endpoint.Id, draggedMemberId, StringComparison.OrdinalIgnoreCase)) continue;
-            if (inner.TryGetElement(i) is not FrameworkElement memberEl) continue;
-
-            Rect r;
-            try
+            var id = group.Members[k].Endpoint.Id;
+            if (draggedMemberId is null || !string.Equals(id, draggedMemberId, StringComparison.OrdinalIgnoreCase))
             {
-                r = memberEl.TransformToVisual(DevicesRepeater)
-                    .TransformBounds(new Rect(0, 0, memberEl.ActualWidth, memberEl.ActualHeight));
-            }
-            catch { continue; }
-
-            // Reading-order "before" test: an earlier row, or the left half of a same-row member.
-            if (point.Y < r.Top || (point.Y <= r.Bottom && point.X < r.Left + (r.Width / 2)))
-            {
-                return member.Endpoint.Id;
+                return id;
             }
         }
-        return null;   // after the last member
+        return null;
+    }
+
+    /// <summary>Switches which inner layout is showing a member gap / phantom, clearing the previous.</summary>
+    private void SetActiveInnerGap(WrapByRowLayout layout)
+    {
+        if (ReferenceEquals(_activeInnerLayout, layout)) return;
+        _activeInnerLayout?.ClearReorderState();
+        _activeInnerLayout = layout;
+    }
+
+    private void ClearActiveInnerGap()
+    {
+        _activeInnerLayout?.ClearReorderState();
+        _activeInnerLayout = null;
+    }
+
+    /// <summary>Attaches the implicit slide animation to a group's member elements so they bump
+    /// smoothly when the gap / phantom moves. One inner repeater is animated per drag.</summary>
+    private void EnsureInnerAnimations(ItemsRepeater inner)
+    {
+        if (ReferenceEquals(_animatedInner, inner)) return;
+        ClearInnerAnimations();
+        _animatedInner = inner;
+        var count = inner.ItemsSourceView?.Count ?? 0;
+        for (var i = 0; i < count; i++)
+        {
+            if (inner.TryGetElement(i) is UIElement el) ApplyReorderAnimation(el, true);
+        }
+    }
+
+    private void ClearInnerAnimations()
+    {
+        if (_animatedInner is null) return;
+        var count = _animatedInner.ItemsSourceView?.Count ?? 0;
+        for (var i = 0; i < count; i++)
+        {
+            if (_animatedInner.TryGetElement(i) is UIElement el) ApplyReorderAnimation(el, false);
+        }
+        _animatedInner = null;
     }
 
     private static T? FindDescendant<T>(DependencyObject root) where T : DependencyObject

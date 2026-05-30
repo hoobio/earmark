@@ -102,6 +102,10 @@ public sealed class WrapByRowLayout : VirtualizingLayout
     private int[] _draggedIndices = [];
     private int _gapIndex = -1;
 
+    // A "phantom" gap reserves an empty slot at this index without lifting any existing item, so a
+    // group's members bump aside to show where an incoming (external) card would land on a join drag.
+    private int _phantomGapIndex = -1;
+
     /// <summary>No-gap rectangle per data index, refreshed every arrange. Frozen reference point
     /// for drag hit-testing so opening the gap doesn't move the answer.</summary>
     private Rect[] _identityRects = [];
@@ -128,20 +132,33 @@ public sealed class WrapByRowLayout : VirtualizingLayout
     /// the block-excluded / compacted sequence).</summary>
     public void SetReorderState(IReadOnlyList<int> draggedIndices, int gapIndex)
     {
-        if (_gapIndex == gapIndex && SameIndices(_draggedIndices, draggedIndices)) return;
+        if (_gapIndex == gapIndex && _phantomGapIndex < 0 && SameIndices(_draggedIndices, draggedIndices)) return;
         _draggedIndices = [.. draggedIndices];
         _gapIndex = gapIndex;
-        InvalidateArrange();
+        _phantomGapIndex = -1;
+        InvalidateMeasure();
+    }
+
+    /// <summary>Reserves an empty slot at <paramref name="gapIndex"/> (no item lifted) so the members
+    /// bump aside to preview where an incoming card would land on a join drag.</summary>
+    public void SetPhantomGap(int gapIndex)
+    {
+        if (_phantomGapIndex == gapIndex && _draggedIndices.Length == 0) return;
+        _draggedIndices = [];
+        _gapIndex = -1;
+        _phantomGapIndex = gapIndex;
+        InvalidateMeasure();
     }
 
     /// <summary>Drops the gap and restores plain in-order layout (drag ended or cancelled).</summary>
     public void ClearReorderState()
     {
         IncludeDraggedInGroupRect = false;
-        if (_draggedIndices.Length == 0 && _gapIndex < 0) return;
+        if (_draggedIndices.Length == 0 && _gapIndex < 0 && _phantomGapIndex < 0) return;
         _draggedIndices = [];
         _gapIndex = -1;
-        InvalidateArrange();
+        _phantomGapIndex = -1;
+        InvalidateMeasure();
     }
 
     private static bool SameIndices(int[] a, IReadOnlyList<int> b)
@@ -193,6 +210,16 @@ public sealed class WrapByRowLayout : VirtualizingLayout
     /// case the dragged block is lifted from its slots and re-inserted contiguously at the gap.</summary>
     private int[] BuildDisplayOrder(int count)
     {
+        // Phantom gap: keep every item in order but reserve an empty slot (-1) at the gap so the
+        // members shift aside to preview an incoming card's landing spot (join drag).
+        if (_phantomGapIndex >= 0 && _draggedIndices.Length == 0)
+        {
+            var list = new List<int>(count + 1);
+            for (var i = 0; i < count; i++) list.Add(i);
+            list.Insert(Math.Clamp(_phantomGapIndex, 0, list.Count), -1);
+            return list.ToArray();
+        }
+
         if (_draggedIndices.Length == 0 || _gapIndex < 0)
         {
             var order = new int[count];
@@ -201,14 +228,14 @@ public sealed class WrapByRowLayout : VirtualizingLayout
         }
 
         var dragged = new HashSet<int>(_draggedIndices);
-        var list = new List<int>(count);
+        var compacted = new List<int>(count);
         for (var i = 0; i < count; i++)
         {
-            if (!dragged.Contains(i)) list.Add(i);
+            if (!dragged.Contains(i)) compacted.Add(i);
         }
         // Insert the block in its given (member) order so the group keeps its internal arrangement.
-        list.InsertRange(Math.Clamp(_gapIndex, 0, list.Count), _draggedIndices);
-        return list.ToArray();
+        compacted.InsertRange(Math.Clamp(_gapIndex, 0, compacted.Count), _draggedIndices);
+        return compacted.ToArray();
     }
 
     private bool IsDragged(int dataIndex) => System.Array.IndexOf(_draggedIndices, dataIndex) >= 0;
@@ -230,9 +257,10 @@ public sealed class WrapByRowLayout : VirtualizingLayout
             context.GetOrCreateElementAt(i).Measure(new Size(columnWidth, double.PositiveInfinity));
         }
 
-        var identity = new int[context.ItemCount];
-        for (var i = 0; i < identity.Length; i++) identity[i] = i;
-        var rects = ComputeSlotRects(context, availableSize.Width, identity, out var totalHeight);
+        // Size from the live display order (folds in a reorder gap / phantom join slot) so the group
+        // box grows to fit the previewed gap during a drag.
+        var display = BuildDisplayOrder(context.ItemCount);
+        var rects = ComputeSlotRects(context, availableSize.Width, display, out var totalHeight);
 
         // Report the actual content width (the widest row), not the full available width, so a host
         // that left-aligns this repeater (a group section with fewer members than columns) sizes to
@@ -272,6 +300,7 @@ public sealed class WrapByRowLayout : VirtualizingLayout
 
         for (var slot = 0; slot < display.Length; slot++)
         {
+            if (display[slot] < 0) continue;   // phantom slot - nothing to arrange
             context.GetOrCreateElementAt(display[slot]).Arrange(slotRects[slot]);
         }
 
@@ -350,6 +379,7 @@ public sealed class WrapByRowLayout : VirtualizingLayout
             var rowTotal = 0.0;
             for (var slot = rowStart; slot < rowEnd; slot++)
             {
+                if (order[slot] < 0) continue;   // phantom slot - no element
                 var element = context.GetOrCreateElementAt(order[slot]);
                 var h = element.DesiredSize.Height;
                 if (h > rowTotal) rowTotal = h;
@@ -367,12 +397,18 @@ public sealed class WrapByRowLayout : VirtualizingLayout
             // Pass 2: non-custom cards stretch to the baseline so siblings stay aligned.
             for (var slot = rowStart; slot < rowEnd; slot++)
             {
-                var element = context.GetOrCreateElementAt(order[slot]);
                 var col = slot - rowStart;
                 var x = col * (columnWidth + ColumnSpacing);
-                var h = GetIsCustomSized((DependencyObject)element)
-                    ? element.DesiredSize.Height
-                    : baseline;
+                double h;
+                if (order[slot] < 0)
+                {
+                    h = baseline;   // phantom: a card-height empty slot the members bump around
+                }
+                else
+                {
+                    var element = context.GetOrCreateElementAt(order[slot]);
+                    h = GetIsCustomSized((DependencyObject)element) ? element.DesiredSize.Height : baseline;
+                }
                 rects[slot] = new Rect(x, y + band, columnWidth, h);
             }
 

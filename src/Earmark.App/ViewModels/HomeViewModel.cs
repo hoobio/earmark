@@ -1507,8 +1507,9 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>Adds a lone <paramref name="sourceId"/> to the existing group <paramref name="groupId"/>,
-    /// appended to the member order. The source's lone block slot is dropped.</summary>
-    public void AddToGroup(string sourceId, string groupId)
+    /// inserted before <paramref name="anchorMemberId"/> (null = appended). The source's lone block
+    /// slot is dropped.</summary>
+    public void AddToGroup(string sourceId, string groupId, string? anchorMemberId = null)
     {
         if (string.IsNullOrEmpty(sourceId) || string.IsNullOrEmpty(groupId)) return;
         if (FindCard(sourceId) is null || IsMember(sourceId)) return;
@@ -1516,7 +1517,12 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         if (group is null) return;
         if (group.MemberIds.Any(id => string.Equals(id, sourceId, StringComparison.OrdinalIgnoreCase))) return;
 
-        group.MemberIds.Add(sourceId);
+        var insertAt = anchorMemberId is not null
+            ? group.MemberIds.FindIndex(id => string.Equals(id, anchorMemberId, StringComparison.OrdinalIgnoreCase))
+            : group.MemberIds.Count;
+        if (insertAt < 0) insertAt = group.MemberIds.Count;
+        group.MemberIds.Insert(insertAt, sourceId);
+
         _settings.Current.DeviceOrder = ComputeOrderedBlockIds(out _);   // source is now a member, not a lone block
         QueueSettingsSave();
         SyncBlocks();
