@@ -32,6 +32,13 @@
                         <ComboBoxItem Content="Dark" />
                     </ComboBox>
                 </ctrl:SettingsCard>
+                <ctrl:SettingsCard Header="Backdrop" Description="The window's background material. Mica tints the desktop wallpaper, Acrylic blurs whatever sits behind the window, and Solid is an opaque themed surface.">
+                    <ComboBox SelectedIndex="{x:Bind ViewModel.BackdropIndex, Mode=TwoWay}" MinWidth="140">
+                        <ComboBoxItem Content="Mica" />
+                        <ComboBoxItem Content="Acrylic" />
+                        <ComboBoxItem Content="Solid" />
+                    </ComboBox>
+                </ctrl:SettingsCard>
 
                 <TextBlock Text="Devices" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,12,0,0" />
                 <ctrl:SettingsExpander Header="App indicators"

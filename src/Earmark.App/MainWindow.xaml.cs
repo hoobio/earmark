@@ -21,8 +21,9 @@ public sealed partial class MainWindow : Window, IDisposable
     private readonly IDispatcherQueueProvider _dispatcher;
     private readonly ISettingsService _settings;
     private readonly IUpdateService _update;
-    private MicaController? _micaController;
+    private ISystemBackdropControllerWithTargets? _backdropController;
     private SystemBackdropConfiguration? _backdropConfig;
+    private BackdropMode? _appliedBackdrop;
     private bool _initialNavComplete;
 
     public MainWindow(INavigationService navigation, IDispatcherQueueProvider dispatcher, ISettingsService settings, IUpdateService update)
@@ -43,9 +44,21 @@ public sealed partial class MainWindow : Window, IDisposable
         _update.StatusChanged += OnUpdateStatusChanged;
         OnUpdateStatusChanged(this, EventArgs.Empty);
 
-        // Apply the saved theme to the content root and keep the Mica backdrop and caption
-        // buttons in sync with the setting and, in System mode, the live OS theme.
-        TrySetupBackdrop();
+        // The backdrop configuration is shared across materials and used by UpdateThemeChrome to
+        // push the resolved theme to whichever controller is active. Create it (and its activation
+        // tracking) once, up front, then apply the chosen material.
+        _backdropConfig = new SystemBackdropConfiguration { IsInputActive = true };
+        Activated += (_, args) =>
+        {
+            if (_backdropConfig is not null)
+            {
+                _backdropConfig.IsInputActive = args.WindowActivationState != WindowActivationState.Deactivated;
+            }
+        };
+
+        // Apply the saved backdrop + theme and keep both, plus the caption buttons, in sync with
+        // the settings and, in System mode, the live OS theme.
+        ApplyBackdrop();
         ApplyTheme();
         RootGrid.ActualThemeChanged += (_, _) => UpdateThemeChrome();
         _settings.SettingsChanged += OnSettingsChanged;
@@ -103,13 +116,19 @@ public sealed partial class MainWindow : Window, IDisposable
 
     private void OnSettingsChanged(object? sender, EventArgs e)
     {
+        void Apply()
+        {
+            ApplyBackdrop();
+            ApplyTheme();
+        }
+
         if (DispatcherQueue.HasThreadAccess)
         {
-            ApplyTheme();
+            Apply();
         }
         else
         {
-            DispatcherQueue.TryEnqueue(ApplyTheme);
+            DispatcherQueue.TryEnqueue(Apply);
         }
     }
 
@@ -153,33 +172,50 @@ public sealed partial class MainWindow : Window, IDisposable
         }
     }
 
-    // Mica via the controller (not <Window.SystemBackdrop>) so its tint can be themed to the
-    // app's Theme setting rather than only the OS. No-op on OSes without Mica support.
-    private void TrySetupBackdrop()
+    // Applies the backdrop material from settings via a controller (not <Window.SystemBackdrop>) so
+    // its tint can be themed to the app's Theme setting rather than only the OS. Tears down and
+    // recreates the controller only when the material actually changes, so unrelated settings saves
+    // don't flicker the window. Solid (or any material the OS can't draw) attaches no controller and
+    // shows the opaque SolidBackdrop fill instead.
+    private void ApplyBackdrop()
     {
-        if (!MicaController.IsSupported())
+        var mode = _settings.Current.Backdrop;
+        if (_appliedBackdrop == mode)
         {
             return;
         }
+        _appliedBackdrop = mode;
 
-        _backdropConfig = new SystemBackdropConfiguration { IsInputActive = true };
-        _micaController = new MicaController { Kind = MicaKind.BaseAlt };
-        _micaController.SetSystemBackdropConfiguration(_backdropConfig);
-        _micaController.AddSystemBackdropTarget(this.As<ICompositionSupportsSystemBackdrop>());
+        _backdropController?.Dispose();
+        _backdropController = null;
 
-        Activated += (_, args) =>
+        var target = this.As<ICompositionSupportsSystemBackdrop>();
+        ISystemBackdropControllerWithTargets? controller = mode switch
         {
-            if (_backdropConfig is not null)
-            {
-                _backdropConfig.IsInputActive = args.WindowActivationState != WindowActivationState.Deactivated;
-            }
+            BackdropMode.Acrylic when DesktopAcrylicController.IsSupported() => new DesktopAcrylicController(),
+            BackdropMode.Mica when MicaController.IsSupported() => new MicaController { Kind = MicaKind.BaseAlt },
+            _ => null,
         };
+
+        if (controller is not null)
+        {
+            controller.SetSystemBackdropConfiguration(_backdropConfig);
+            controller.AddSystemBackdropTarget(target);
+            _backdropController = controller;
+        }
+
+        // Solid mode (and the unsupported-material fallback) has no system backdrop, so paint the
+        // opaque themed fill behind the content; otherwise let the backdrop show through.
+        SolidBackdrop.Visibility = controller is null ? Visibility.Visible : Visibility.Collapsed;
+
+        // A freshly created controller starts at the OS theme; push the app's resolved theme now.
+        UpdateThemeChrome();
     }
 
     public void Dispose()
     {
-        _micaController?.Dispose();
-        _micaController = null;
+        _backdropController?.Dispose();
+        _backdropController = null;
     }
 
     /// <summary>
