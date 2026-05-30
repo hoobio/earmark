@@ -77,9 +77,27 @@
                                 <FontIcon Glyph="{x:Bind VolumeControlsToggleGlyph, Mode=OneWay}" />
                             </MenuFlyoutItem.Icon>
                         </MenuFlyoutItem>
-                        <!-- Only shown for grouped devices: remove this one from its group. -->
+                        <!-- Group-level actions, shown only for a grouped device, separated from the
+                             device-level options above. -->
+                        <MenuFlyoutSeparator Visibility="{x:Bind IsGroupMember, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                        <MenuFlyoutItem Text="Rename group"
+                                        Click="OnRenameGroupClicked"
+                                        Tag="{x:Bind}"
+                                        Visibility="{x:Bind IsGroupMember, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <MenuFlyoutItem.Icon>
+                                <FontIcon Glyph="&#xE8AC;" />
+                            </MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
                         <MenuFlyoutItem Text="Ungroup device"
                                         Click="OnUngroupDeviceClicked"
+                                        Tag="{x:Bind}"
+                                        Visibility="{x:Bind IsGroupMember, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <MenuFlyoutItem.Icon>
+                                <FontIcon Glyph="&#xF0B4;" />
+                            </MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+                        <MenuFlyoutItem Text="Ungroup all"
+                                        Click="OnUngroupAllClicked"
                                         Tag="{x:Bind}"
                                         Visibility="{x:Bind IsGroupMember, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
                             <MenuFlyoutItem.Icon>

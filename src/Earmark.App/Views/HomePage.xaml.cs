@@ -177,7 +177,7 @@ public sealed partial class HomePage : Page
 
     private void OnRenameGroupClicked(object sender, RoutedEventArgs e)
     {
-        if (sender is not FrameworkElement { Tag: DeviceGroupCard group }) return;
+        if (sender is not FrameworkElement fe || GroupFromTag(fe.Tag) is not { } group) return;
         group.IsEditingTitle = true;
         // The flyout item isn't in the header's tree; focus the editor via the realised block element.
         var idx = ViewModel.Blocks.IndexOf(group);
@@ -189,11 +189,20 @@ public sealed partial class HomePage : Page
 
     private void OnUngroupAllClicked(object sender, RoutedEventArgs e)
     {
-        if (sender is FrameworkElement { Tag: DeviceGroupCard group })
+        if (sender is FrameworkElement fe && GroupFromTag(fe.Tag) is { } group)
         {
             ViewModel.UngroupAll(group.Id);
         }
     }
+
+    /// <summary>Resolves the group a flyout item targets: directly when invoked from a group header
+    /// (tag = the group), or the parent group when invoked from a member card (tag = the card).</summary>
+    private DeviceGroupCard? GroupFromTag(object? tag) => tag switch
+    {
+        DeviceGroupCard group => group,
+        DeviceCard card => FindGroupOf(card),
+        _ => null,
+    };
 
     private void OnUngroupDeviceClicked(object sender, RoutedEventArgs e)
     {
