@@ -20,20 +20,28 @@ public sealed partial class MainWindow : Window, IDisposable
     private readonly INavigationService _navigation;
     private readonly IDispatcherQueueProvider _dispatcher;
     private readonly ISettingsService _settings;
+    private readonly IUpdateService _update;
     private MicaController? _micaController;
     private SystemBackdropConfiguration? _backdropConfig;
     private bool _initialNavComplete;
 
-    public MainWindow(INavigationService navigation, IDispatcherQueueProvider dispatcher, ISettingsService settings)
+    public MainWindow(INavigationService navigation, IDispatcherQueueProvider dispatcher, ISettingsService settings, IUpdateService update)
     {
         _navigation = navigation;
         _dispatcher = dispatcher;
         _settings = settings;
+        _update = update;
 
         InitializeComponent();
         ExtendsContentIntoTitleBar = true;
-        SetTitleBar(AppTitleBar);
+        SetTitleBar(AppTitleBarDragRegion);
         AppWindow.SetIcon("Assets/AppIcon.ico");
+
+        // The update pill must clear the system caption buttons, and reflect the update status.
+        RootGrid.SizeChanged += (_, _) => UpdateTitleBarInset();
+        RootGrid.Loaded += (_, _) => UpdateTitleBarInset();
+        _update.StatusChanged += OnUpdateStatusChanged;
+        OnUpdateStatusChanged(this, EventArgs.Empty);
 
         // Apply the saved theme to the content root and keep the Mica backdrop and caption
         // buttons in sync with the setting and, in System mode, the live OS theme.
@@ -44,6 +52,7 @@ public sealed partial class MainWindow : Window, IDisposable
         Closed += (_, _) =>
         {
             _settings.SettingsChanged -= OnSettingsChanged;
+            _update.StatusChanged -= OnUpdateStatusChanged;
             Dispose();
         };
 
@@ -78,6 +87,16 @@ public sealed partial class MainWindow : Window, IDisposable
         var first = (NavigationViewItem)NavView.MenuItems[0];
         NavigateTo(first);
         NavView.SelectedItem = first;
+
+        // Without this, initial focus falls on the first focusable element (the title-bar pane
+        // toggle); a keyboard-initiated launch then renders its focus rectangle. Set focus to the
+        // selected nav item with Programmatic state so no high-visibility ring shows on launch. If
+        // the pane is collapsed (Minimal mode) the item isn't realised, so fall back to clearing
+        // the ring on the toggle button itself.
+        if (!first.Focus(FocusState.Programmatic))
+        {
+            PaneToggleButton.Focus(FocusState.Programmatic);
+        }
     }
 
     public Task? InitializationTask { get; set; }
@@ -199,6 +218,48 @@ public sealed partial class MainWindow : Window, IDisposable
     private void OnPaneToggleClick(object sender, RoutedEventArgs e)
     {
         NavView.IsPaneOpen = !NavView.IsPaneOpen;
+    }
+
+    // Reserve room for the system caption buttons so the update pill never slides under them.
+    // RightInset is in physical pixels; divide by the rasterization scale to get DIPs.
+    private void UpdateTitleBarInset()
+    {
+        if (AppWindow?.TitleBar is not { } titleBar)
+        {
+            return;
+        }
+
+        var scale = RootGrid.XamlRoot?.RasterizationScale ?? 1.0;
+        var rightDip = scale > 0 ? titleBar.RightInset / scale : 138.0;
+        UpdateButton.Margin = new Thickness(0, 0, rightDip + 8, 0);
+    }
+
+    private void OnUpdateStatusChanged(object? sender, EventArgs e)
+    {
+        void Apply() => UpdateButton.Visibility =
+            _update.Status == UpdateStatus.UpdateAvailable ? Visibility.Visible : Visibility.Collapsed;
+
+        if (DispatcherQueue.HasThreadAccess)
+        {
+            Apply();
+        }
+        else
+        {
+            DispatcherQueue.TryEnqueue(Apply);
+        }
+    }
+
+    private void OnUpdateButtonClick(object sender, RoutedEventArgs e)
+    {
+        var url = _update.LatestReleaseUrl ?? AppInfo.ReleasesPageUrl;
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true });
+        }
+        catch
+        {
+            // Opening the browser is best-effort; a failure here shouldn't crash the UI.
+        }
     }
 
     private void NavigateTo(NavigationViewItem item)

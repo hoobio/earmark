@@ -4,6 +4,8 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Data;
 using Microsoft.UI.Xaml.Media;
 
+using Windows.UI;
+
 namespace Earmark.App.Converters;
 
 public sealed class BooleanToVisibilityConverter : IValueConverter
@@ -186,6 +188,15 @@ public sealed class VolumeFloatToPercentConverter : IValueConverter
 
     public object ConvertBack(object value, Type targetType, object parameter, string language) =>
         value is double d ? (float)Math.Clamp(d / 100.0, 0.0, 1.0) : 0f;
+}
+
+public sealed class ColorToBrushConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, string language) =>
+        new SolidColorBrush(value is Color c ? c : Microsoft.UI.Colors.Transparent);
+
+    public object ConvertBack(object value, Type targetType, object parameter, string language) =>
+        value is SolidColorBrush b ? b.Color : Microsoft.UI.Colors.Transparent;
 }
 
 public sealed class EnumToStringConverter : IValueConverter

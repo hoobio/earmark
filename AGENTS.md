@@ -27,24 +27,23 @@ tests/
 
 **Rebuild and re-launch after EVERY code change.** Not "after the last change in a batch", not "if it looked like a UI change" - every change to anything that ends up in a binary (`.cs`, `.xaml`, `.csproj`, etc.). A clean `dotnet build` is not verification; the running app is. If you finish a task with only a build, the task is not finished. Report what the relaunched binary actually did (log lines, observed behaviour) before declaring success. Doc-only edits (`.md`, comments-only) are exempt.
 
-The app holds open file handles on its own DLLs while running, which makes incremental builds fail with `MSB3027`. **Always kill before building.** Standard inner loop:
+The app holds open file handles on its own DLLs while running, which makes incremental builds fail with `MSB3027`. **Always kill before building.** The whole inner loop is one command: kill -> build -> (only if the build is green) relaunch -> tail the new log.
 
 ```bash
-taskkill //F //IM Earmark.App.exe 2>&1 | head -2
-sleep 1
-dotnet build src/Earmark.App/Earmark.App.csproj -c Debug -p:Platform=x64 --no-restore 2>&1 | tail -10
-EXE="src/Earmark.App/bin/x64/Debug/net10.0-windows10.0.26100.0/win-x64/Earmark.App.exe"
-nohup "$EXE" >/dev/null 2>&1 & disown 2>/dev/null
-sleep 4
-LOGFILE=$(ls -t /c/Users/AlexHoogeveen-Hill/AppData/Local/Earmark/logs/*.log 2>/dev/null | head -1)
-head -15 "$LOGFILE"
+set -o pipefail
+taskkill //F //IM Earmark.App.exe >/dev/null 2>&1; sleep 1
+dotnet build src/Earmark.App/Earmark.App.csproj -c Debug -p:Platform=x64 --no-restore 2>&1 | tail -10 \
+  && { EXE="src/Earmark.App/bin/x64/Debug/net10.0-windows10.0.26100.0/win-x64/Earmark.App.exe"; \
+       nohup "$EXE" >/dev/null 2>&1 & disown; sleep 4; \
+       ls -t /c/Users/AlexHoogeveen-Hill/AppData/Local/Earmark/logs/*.log | head -1 | xargs head -20; }
 ```
 
-- `taskkill` is harmless when nothing is running (you'll see "not found"); the `head -2` keeps output bounded.
+- `set -o pipefail` makes the `| tail` keep the build's exit code, so the `&&` launch fires only on a green build - you never relaunch a stale binary or read a misleading log after a failed build. On failure the command stops after printing the errors.
+- `taskkill` is harmless when nothing is running (its output is discarded).
 - Always pass `-p:Platform=x64` (also valid: `ARM64`). The csproj declares `<Platforms>x64;ARM64</Platforms>` and has no `AnyCPU` configuration.
 - `--no-restore` keeps the loop fast once dependencies are already pulled.
 - Launch via `nohup ... & disown` so the app is parented to the system, not the shell - the shell can return without killing the app.
-- Read the latest log file with PowerShell when the file path needs Windows-style resolution: `Get-ChildItem "$env:LocalAppData\Earmark\logs\*.log" | Sort-Object LastWriteTime -Descending | Select-Object -First 1 | Get-Content`.
+- Drop the trailing `xargs head -20` (the log tail) if you only need to confirm the relaunch. To read the latest log separately, PowerShell handles the Windows path: `Get-ChildItem "$env:LocalAppData\Earmark\logs\*.log" | Sort-Object LastWriteTime -Descending | Select-Object -First 1 | Get-Content`.
 
 If you only edited `Earmark.Core` or `Earmark.Audio` you can build those individually for fast iteration without killing the app, but a final `Earmark.App` build still requires the kill.
 
@@ -129,6 +128,14 @@ The UI follows current [Fluent 2](https://fluent2.microsoft.design) standards. B
 - **`Padding`/`Margin` want a `Thickness`, not a `double`.** The `Spacing*` resources are `x:Double` (sized for `StackPanel.Spacing` and `Grid.ColumnSpacing`/`RowSpacing`, which are doubles). Binding one to a `Thickness` property throws at page load (`Failed to assign to property ... Border.Padding`) - it is NOT caught at build time. For padding/margins use a `Thickness` resource (`PagePadding`, `SectionPadding`) or a literal (`Padding="16"`). Same trap with an `x:Double PagePadding` bound to `Grid.Padding`.
 - **Editor disposable analyzer rules**: `CA1001`, `CA1816`, `CA1848`, `CA1873` etc are silenced in `.editorconfig`. Don't add them back unless you also fix the call sites.
 - **`Microsoft.Win32.Registry`**: don't add as a separate package. Already provided by the windows TFM (`net10.0-windows10.0.26100.0`); adding the package triggers `NU1510`.
+
+## Version, About, and the update check
+
+- The app version is the release-please-managed `version.txt` -> `<Version>` ([Directory.Build.props](Directory.Build.props)), read at runtime by [`Services/AppInfo`](src/Earmark.App/Services/AppInfo.cs). Don't hardcode a version string in the UI.
+- `Directory.Build.props` stamps `AssemblyMetadata("BuildChannel")` plus the git commit (via `SourceRevisionId`) onto **Earmark.App only**. Channel is `Dev` locally, `Release` under GitHub Actions, and `Prerelease` when CI passes `-p:EarmarkBuildChannel=Prerelease` (the release-please PR's MSI publish, which also passes `-p:InformationalVersion=<ver>-pre.<run>` so the build carries its full pre-release identity). `AppInfo.DisplayVersion` turns this into the `(Dev)` / `(Pre-release)` marker in Settings > About.
+- [`IUpdateService`](src/Earmark.App/Services/IUpdateService.cs) reads the releases list (not `releases/latest`) and is **channel-aware**: a `Release`/`Dev` build compares only against stable releases, while a `Prerelease` build tracks the newest release of any kind (a newer stable still wins, by the `SemVer` precedence in that file). It drives the title-bar "Update available" pill and the Settings > About controls, and is **gated to unpackaged builds**: `AppInfo.IsPackaged` (a `GetCurrentPackageFullName` probe) is true for the MSIX/Store build, where the whole update UX is hidden (the Store handles updates) and no network call is made. For `Dev` builds the auto-check is skipped entirely and the shared `CheckForUpdates` setting is never read or written (a dev build shares settings.json with any side-by-side install); the manual "Check now" button still works. Other channels' auto-check honours the setting.
+- The title-bar pill is a **sibling of `AppTitleBarDragRegion`, not a child** - the `SetTitleBar` element swallows pointer input (same reason the pane toggle is a sibling). Its right margin is set from `AppWindow.TitleBar.RightInset` so it clears the caption buttons.
+- Pre-release builds: `build.yaml`'s `pre-release` job runs on the `release-please--branches--main` PR, publishing `v<ver>-pre.<run>` GitHub prereleases (MSIX + MSI) and pruning to the latest 3. These never affect the in-app update check.
 
 ## Conventional commits & release-please hygiene
 

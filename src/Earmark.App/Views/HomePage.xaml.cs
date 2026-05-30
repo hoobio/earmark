@@ -1,17 +1,20 @@
 using System.Runtime.InteropServices.WindowsRuntime;
 
+using Earmark.App.Controls;
 using Earmark.App.ViewModels;
-using Earmark.Core.Models;
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.UI.Composition;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Hosting;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 
 using Windows.ApplicationModel.DataTransfer;
+using Windows.Foundation;
 using Windows.Graphics.Imaging;
 using Windows.System;
 using Windows.UI;
@@ -31,7 +34,6 @@ public sealed partial class HomePage : Page
     /// </summary>
     private readonly Dictionary<Slider, (float Volume, bool Muted)> _sliderDragStart = new();
 
-
     public HomePage(HomeViewModel viewModel, RulesViewModel rulesViewModel, MainWindow mainWindow)
     {
         ViewModel = viewModel;
@@ -49,6 +51,686 @@ public sealed partial class HomePage : Page
     }
 
     public HomeViewModel ViewModel { get; }
+
+    private BlockWrapLayout? Layout => DevicesRepeater.Layout as BlockWrapLayout;
+
+    // ---- Block reorder + move-whole-group ----
+    //
+    // The top level is a list of blocks (a lone DeviceCard or a DeviceGroupCard section). A reorder
+    // drag lifts one block and the others slide to open a gap; the dropped block lands at the gap.
+    // A group is one block, so a reorder can never split it. Drag sources: a lone card's Border, and
+    // a group's title band (header handle). Payloads: "earmark:card:{endpointId}" /
+    // "earmark:group:{groupId}". The drop is committed at the container (OnBlocksDrop) using the
+    // layout's frozen no-gap geometry, so the insert point is stable while blocks slide.
+
+    private const string DragPayloadCardPrefix = "earmark:card:";
+    private const string DragPayloadGroupPrefix = "earmark:group:";
+
+    /// <summary>The card being dragged (a lone card or a group member), or null. App-chip drags leave
+    /// this null (they're handled per card).</summary>
+    private DeviceCard? _draggedCard;
+
+    /// <summary>The group the dragged card belongs to when it's a member; null for a lone card.</summary>
+    private DeviceGroupCard? _draggedCardGroup;
+
+    /// <summary>The group being dragged by its header handle, or null.</summary>
+    private DeviceGroupCard? _draggedGroup;
+
+    /// <summary>The lone card currently highlighted as a create-group target (accent dotted outline).</summary>
+    private DeviceCard? _createTarget;
+
+    /// <summary>The group currently highlighted as a join target (accent outline).</summary>
+    private DeviceGroupCard? _joinTarget;
+
+    /// <summary>True between a reorder drag start and its completion; gates whether newly realised
+    /// blocks get the implicit slide animation attached as they scroll into view.</summary>
+    private bool _reorderActive;
+
+    /// <summary>The group's inner layout currently showing a member make-space gap (within-group
+    /// reorder) or a phantom join slot, or null.</summary>
+    private WrapByRowLayout? _activeInnerLayout;
+
+    /// <summary>The inner member repeater currently carrying the implicit slide animation, or null.</summary>
+    private ItemsRepeater? _animatedInner;
+
+    /// <summary>The group whose title is currently being edited, or null. Used to commit the edit when
+    /// the user clicks away onto a non-focusable area (which wouldn't otherwise blur the text box).</summary>
+    private DeviceGroupCard? _editingGroup;
+
+    private async void OnDeviceCardDragStarting(UIElement sender, DragStartingEventArgs args)
+    {
+        if (sender is not FrameworkElement { Tag: DeviceCard card } element) return;
+
+        _draggedCard = card;
+        _draggedCardGroup = card.IsGroupMember ? FindGroupOf(card) : null;
+        args.Data.SetText($"{DragPayloadCardPrefix}{card.Endpoint.Id}");
+        args.Data.RequestedOperation = DataPackageOperation.Move;
+
+        EnableReorderAnimations(true);
+        SetDragInProgress(true);
+
+        // Opaque drag bitmap (the card fill is translucent, so lifted off the backdrop it reads as
+        // see-through). Render before hiding the source.
+        var deferral = args.GetDeferral();
+        try
+        {
+            var bitmap = await RenderCardOpaqueAsync(element);
+            if (bitmap is not null) args.DragUI.SetContentFromSoftwareBitmap(bitmap);
+        }
+        catch { /* keep the default visual if the snapshot fails */ }
+        finally { deferral.Complete(); }
+
+        card.IsBeingDragged = true;
+    }
+
+    private void OnDeviceCardDropCompleted(UIElement sender, DropCompletedEventArgs args)
+    {
+        if (_draggedCard is not null) _draggedCard.IsBeingDragged = false;
+        EndDrag();
+    }
+
+    private async void OnGroupHeaderDragStarting(UIElement sender, DragStartingEventArgs args)
+    {
+        if (sender is not FrameworkElement { Tag: DeviceGroupCard group }) return;
+
+        _draggedGroup = group;
+        args.Data.SetText($"{DragPayloadGroupPrefix}{group.Id}");
+        args.Data.RequestedOperation = DataPackageOperation.Move;
+
+        EnableReorderAnimations(true);
+        SetDragInProgress(true);   // reveals the dotted outline + drag padding on every group
+
+        // Drag visual: a snapshot of the group BOX (cards + title + its dotted outline), bounded to
+        // the members' extent - not the full-width section. The box is the block element's first
+        // child (the left-aligned, member-width Grid). Render after the outline + padding apply, and
+        // before hiding the source.
+        var index = ViewModel.Blocks.IndexOf(group);
+        var element = index >= 0 ? DevicesRepeater.TryGetElement(index) : null;
+        var box = (element as Panel)?.Children.FirstOrDefault() as FrameworkElement ?? element as FrameworkElement;
+        if (box is not null)
+        {
+            var deferral = args.GetDeferral();
+            try
+            {
+                box.UpdateLayout();
+                var bitmap = await RenderCardOpaqueAsync(box);
+                if (bitmap is not null) args.DragUI.SetContentFromSoftwareBitmap(bitmap);
+            }
+            catch { /* keep the default visual if the snapshot fails */ }
+            finally { deferral.Complete(); }
+        }
+
+        group.IsBeingDragged = true;
+    }
+
+    private void OnGroupHeaderDropCompleted(UIElement sender, DropCompletedEventArgs args)
+    {
+        if (_draggedGroup is not null) _draggedGroup.IsBeingDragged = false;
+        EndDrag();
+    }
+
+    // ---- Group title editing + context menu ----
+
+    private void OnGroupTitleDoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: DeviceGroupCard group } header) return;
+        group.IsEditingTitle = true;
+        _editingGroup = group;
+        FocusTitleEditor(header);
+        e.Handled = true;
+    }
+
+    private void OnRenameGroupClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement fe || GroupFromTag(fe.Tag) is not { } group) return;
+        group.IsEditingTitle = true;
+        _editingGroup = group;
+        // The flyout item isn't in the header's tree; focus the editor via the realised block element.
+        var idx = ViewModel.Blocks.IndexOf(group);
+        if (idx >= 0 && DevicesRepeater.TryGetElement(idx) is FrameworkElement blockEl)
+        {
+            FocusTitleEditor(blockEl);
+        }
+    }
+
+    private void OnUngroupAllClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement fe && GroupFromTag(fe.Tag) is { } group)
+        {
+            ViewModel.UngroupAll(group.Id);
+        }
+    }
+
+    /// <summary>Resolves the group a flyout item targets: directly when invoked from a group header
+    /// (tag = the group), or the parent group when invoked from a member card (tag = the card).</summary>
+    private DeviceGroupCard? GroupFromTag(object? tag) => tag switch
+    {
+        DeviceGroupCard group => group,
+        DeviceCard card => FindGroupOf(card),
+        _ => null,
+    };
+
+    private void OnUngroupDeviceClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: DeviceCard card })
+        {
+            ViewModel.UngroupDevice(card.Endpoint.Id);
+        }
+    }
+
+    private void OnGroupTitleKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key != VirtualKey.Enter) return;
+        e.Handled = true;
+        // Move focus off the TextBox so the two-way binding commits (via LostFocus), as if clicked away.
+        DevicesRepeater.Focus(FocusState.Programmatic);
+    }
+
+    private void OnGroupTitleEditLostFocus(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: DeviceGroupCard group })
+        {
+            group.IsEditingTitle = false;   // the two-way binding already committed the title on focus loss
+            if (ReferenceEquals(_editingGroup, group)) _editingGroup = null;
+        }
+    }
+
+    /// <summary>Commits an in-progress title edit when the user clicks anywhere outside the editor.
+    /// Clicking a non-focusable area (empty space, a card body) wouldn't otherwise blur the text box,
+    /// so move focus off it - which fires its LostFocus, committing the rename and leaving edit mode.</summary>
+    private void OnContentTapped(object sender, TappedRoutedEventArgs e)
+    {
+        if (_editingGroup is null) return;
+        if (e.OriginalSource is DependencyObject node && IsWithinTextBox(node)) return;   // tapped the editor itself
+        DevicesRepeater.Focus(FocusState.Programmatic);
+    }
+
+    private static bool IsWithinTextBox(DependencyObject node)
+    {
+        for (var current = node; current is not null; current = VisualTreeHelper.GetParent(current))
+        {
+            if (current is TextBox) return true;
+        }
+        return false;
+    }
+
+    /// <summary>Focuses + selects the group's title text box once it becomes visible.</summary>
+    private void FocusTitleEditor(FrameworkElement root)
+    {
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (FindDescendant<TextBox>(root) is { } box)
+            {
+                box.Focus(FocusState.Programmatic);
+                box.SelectAll();
+            }
+        });
+    }
+
+    /// <summary>Shared teardown for any reorder / reparent drag (committed or cancelled): drop the gap,
+    /// clear highlights + outlines, detach the slide animation, and reset the dragged state.</summary>
+    private void EndDrag()
+    {
+        _draggedCard = null;
+        _draggedCardGroup = null;
+        _draggedGroup = null;
+        ClearHighlights();
+        ClearActiveInnerGap();
+        ClearInnerAnimations();
+        Layout?.ClearReorderState();
+        SetDragInProgress(false);
+        EnableReorderAnimations(false);
+    }
+
+    private void OnBlocksDragOver(object sender, DragEventArgs e)
+    {
+        if (Layout is null)
+        {
+            e.AcceptedOperation = DataPackageOperation.None;
+            return;
+        }
+
+        var point = e.GetPosition(DevicesRepeater);
+
+        // Whole-group reorder (dragging the header).
+        if (_draggedGroup is not null)
+        {
+            ClearHighlights();
+            SetReorderGap(_draggedGroup, point);
+            SetDragCaption(e, "Move group");
+            e.AcceptedOperation = DataPackageOperation.Move;
+            e.Handled = true;
+            return;
+        }
+
+        if (_draggedCard is null)
+        {
+            e.AcceptedOperation = DataPackageOperation.None;
+            return;
+        }
+
+        if (_draggedCardGroup is not null)
+        {
+            // Member drag: inside its group box -> reorder within (members bump to show the gap);
+            // outside -> leave.
+            var box = Layout.GetContentRect(ViewModel.Blocks.IndexOf(_draggedCardGroup));
+            ClearHighlights();
+            Layout.ClearReorderState();   // member moves don't open a block-level gap
+
+            if (box.Contains(point)
+                && InnerRepeaterOf(_draggedCardGroup) is { Layout: WrapByRowLayout innerLayout } inner)
+            {
+                EnsureInnerAnimations(inner);
+                var draggedIdx = _draggedCardGroup.Members.IndexOf(_draggedCard);
+                var raw = InnerInsertionIndex(inner, innerLayout, point);
+                innerLayout.SetReorderState(draggedIdx, raw > draggedIdx ? raw - 1 : raw);
+                SetActiveInnerGap(innerLayout);
+                SetDragCaption(e, "Move within group");
+            }
+            else
+            {
+                ClearActiveInnerGap();   // left the box - close the in-group gap
+                SetDragCaption(e, "Remove from group");
+            }
+
+            e.AcceptedOperation = DataPackageOperation.Move;
+            e.Handled = true;
+            return;
+        }
+
+        // Lone card: create (onto a card's centre) / join (onto a group) / reorder (elsewhere).
+        var targetIdx = Layout.GetBlockIndexAt(point);
+        var target = targetIdx >= 0 && targetIdx < ViewModel.Blocks.Count ? ViewModel.Blocks[targetIdx] : null;
+
+        if (target is DeviceGroupCard joinGroup && ResolveGroupIntent(targetIdx, point) == GroupDropIntent.Join)
+        {
+            Layout.ClearReorderState();
+            ClearCreateTarget();
+            SetJoinTarget(joinGroup);
+            // Open a phantom slot in the group so its members bump to preview where the card lands.
+            if (InnerRepeaterOf(joinGroup) is { Layout: WrapByRowLayout joinLayout } joinInner)
+            {
+                EnsureInnerAnimations(joinInner);
+                joinLayout.SetPhantomGap(InnerInsertionIndex(joinInner, joinLayout, point));
+                SetActiveInnerGap(joinLayout);
+            }
+            SetDragCaption(e, "Add to group");
+        }
+        else if (target is DeviceGroupCard)
+        {
+            // Top / bottom strip of a group section = insert the card before / after the group (a
+            // block reorder). This is the only way to drop above a first-in-row group.
+            ClearHighlights();
+            ClearActiveInnerGap();
+            var src = ViewModel.Blocks.IndexOf(_draggedCard);
+            var insertIdx = ResolveGroupIntent(targetIdx, point) == GroupDropIntent.Before ? targetIdx : targetIdx + 1;
+            if (src >= 0) Layout.SetReorderState(src, ToCompactIndex(insertIdx, src));
+            SetDragCaption(e, "Move");
+        }
+        else if (target is DeviceCard targetCard
+                 && !ReferenceEquals(targetCard, _draggedCard)
+                 && IsCentreZone(point, Layout.GetContentRect(targetIdx)))
+        {
+            Layout.ClearReorderState();
+            ClearActiveInnerGap();
+            ClearJoinTarget();
+            SetCreateTarget(targetCard);
+            SetDragCaption(e, "Group");
+        }
+        else
+        {
+            ClearHighlights();
+            ClearActiveInnerGap();
+            SetReorderGap(_draggedCard, point);
+            SetDragCaption(e, "Move");
+        }
+
+        e.AcceptedOperation = DataPackageOperation.Move;
+        e.Handled = true;
+    }
+
+    private async void OnBlocksDrop(object sender, DragEventArgs e)
+    {
+        if (Layout is null) return;
+        var point = e.GetPosition(DevicesRepeater);
+        e.Handled = true;
+
+        // Whole-group reorder.
+        if (_draggedGroup is not null)
+        {
+            var groupSource = ViewModel.Blocks.IndexOf(_draggedGroup);
+            Layout.ClearReorderState();
+            if (groupSource >= 0)
+            {
+                _logger?.LogInformation("Group reorder: {Group}", _draggedGroup.Id);
+                ViewModel.ReorderBlock(_draggedGroup.Id, ToCompactIndex(Layout.GetInsertionIndex(point), groupSource));
+            }
+            return;
+        }
+
+        if (_draggedCard is null) return;
+        var sourceId = _draggedCard.Endpoint.Id;
+
+        // Member drag: leave the group (with disband confirm) or reorder within it.
+        if (_draggedCardGroup is not null)
+        {
+            var group = _draggedCardGroup;
+            var box = Layout.GetContentRect(ViewModel.Blocks.IndexOf(group));
+            Layout.ClearReorderState();
+            ClearHighlights();
+
+            if (box.Contains(point))
+            {
+                var anchor = MemberAnchorBefore(group, point, sourceId);
+                _logger?.LogInformation("Reorder within group {Group}: {Member}", group.Id, sourceId);
+                ViewModel.ReorderWithinGroup(sourceId, anchor);
+            }
+            else
+            {
+                var anchorId = InsertionAnchorBlockId(point);
+                if (ViewModel.GroupMemberCount(group.Id) <= 2 && !await ConfirmDisbandAsync())
+                {
+                    return;   // cancelled - the member stays in the group
+                }
+                _logger?.LogInformation("Leave group {Group}: {Member}", group.Id, sourceId);
+                ViewModel.RemoveFromGroup(sourceId, anchorId);
+            }
+            return;
+        }
+
+        // Lone card: create / join / reorder.
+        var targetIdx = Layout.GetBlockIndexAt(point);
+        var target = targetIdx >= 0 && targetIdx < ViewModel.Blocks.Count ? ViewModel.Blocks[targetIdx] : null;
+        Layout.ClearReorderState();
+        ClearHighlights();
+
+        if (target is DeviceGroupCard joinGroup)
+        {
+            var intent = ResolveGroupIntent(targetIdx, point);
+            if (intent == GroupDropIntent.Join)
+            {
+                var anchor = MemberAnchorBefore(joinGroup, point, draggedMemberId: null);
+                _logger?.LogInformation("Join group {Group}: {Source}", joinGroup.Id, sourceId);
+                ViewModel.AddToGroup(sourceId, joinGroup.Id, anchor);
+            }
+            else
+            {
+                // Top / bottom strip: reorder the card before / after the group block.
+                var src = ViewModel.Blocks.IndexOf(_draggedCard);
+                var insertIdx = intent == GroupDropIntent.Before ? targetIdx : targetIdx + 1;
+                if (src >= 0)
+                {
+                    _logger?.LogInformation("Reorder around group {Group}: {Source} ({Intent})", joinGroup.Id, sourceId, intent);
+                    ViewModel.ReorderBlock(sourceId, ToCompactIndex(insertIdx, src));
+                }
+            }
+            return;
+        }
+        if (target is DeviceCard targetCard
+            && !ReferenceEquals(targetCard, _draggedCard)
+            && IsCentreZone(point, Layout.GetContentRect(targetIdx)))
+        {
+            _logger?.LogInformation("Create group: {Source} + {Target}", sourceId, targetCard.Endpoint.Id);
+            ViewModel.CreateGroup(sourceId, targetCard.Endpoint.Id);
+            return;
+        }
+
+        var cardSource = ViewModel.Blocks.IndexOf(_draggedCard);
+        if (cardSource >= 0)
+        {
+            _logger?.LogInformation("Block reorder: {Source}", sourceId);
+            ViewModel.ReorderBlock(sourceId, ToCompactIndex(Layout.GetInsertionIndex(point), cardSource));
+        }
+    }
+
+    /// <summary>Opens the block-level make-space gap for <paramref name="block"/> at the pointer.</summary>
+    private void SetReorderGap(object block, Point point)
+    {
+        var source = ViewModel.Blocks.IndexOf(block);
+        if (source < 0) { Layout?.ClearReorderState(); return; }
+        Layout?.SetReorderState(source, ToCompactIndex(Layout.GetInsertionIndex(point), source));
+    }
+
+    /// <summary>The block id to insert before for a member leaving its group (null = at the end).</summary>
+    private string? InsertionAnchorBlockId(Point point)
+    {
+        var raw = Layout!.GetInsertionIndex(point);
+        return raw >= 0 && raw < ViewModel.Blocks.Count ? PageBlockId(ViewModel.Blocks[raw]) : null;
+    }
+
+    /// <summary>The group's inner member repeater, or null if not realised.</summary>
+    private ItemsRepeater? InnerRepeaterOf(DeviceGroupCard group)
+    {
+        var blockIndex = ViewModel.Blocks.IndexOf(group);
+        return blockIndex >= 0 && DevicesRepeater.TryGetElement(blockIndex) is FrameworkElement blockEl
+            ? FindDescendant<ItemsRepeater>(blockEl)
+            : null;
+    }
+
+    /// <summary>The member insertion index ([0, memberCount]) for a pointer, using the inner layout's
+    /// stable no-gap geometry (so an open gap / phantom doesn't make the answer jitter).</summary>
+    private int InnerInsertionIndex(ItemsRepeater inner, WrapByRowLayout layout, Point point)
+    {
+        var local = DevicesRepeater.TransformToVisual(inner).TransformPoint(point);
+        return layout.GetInsertionIndex(local);
+    }
+
+    /// <summary>The member endpoint id the pointer sits before within <paramref name="group"/> (null =
+    /// at the end), skipping <paramref name="draggedMemberId"/> if set (within-group reorder).</summary>
+    private string? MemberAnchorBefore(DeviceGroupCard group, Point point, string? draggedMemberId)
+    {
+        if (InnerRepeaterOf(group) is not { Layout: WrapByRowLayout layout } inner) return null;
+        var raw = InnerInsertionIndex(inner, layout, point);
+        for (var k = raw; k < group.Members.Count; k++)
+        {
+            var id = group.Members[k].Endpoint.Id;
+            if (draggedMemberId is null || !string.Equals(id, draggedMemberId, StringComparison.OrdinalIgnoreCase))
+            {
+                return id;
+            }
+        }
+        return null;
+    }
+
+    /// <summary>Switches which inner layout is showing a member gap / phantom, clearing the previous.</summary>
+    private void SetActiveInnerGap(WrapByRowLayout layout)
+    {
+        if (ReferenceEquals(_activeInnerLayout, layout)) return;
+        _activeInnerLayout?.ClearReorderState();
+        _activeInnerLayout = layout;
+    }
+
+    private void ClearActiveInnerGap()
+    {
+        _activeInnerLayout?.ClearReorderState();
+        _activeInnerLayout = null;
+    }
+
+    /// <summary>Attaches the implicit slide animation to a group's member elements so they bump
+    /// smoothly when the gap / phantom moves. One inner repeater is animated per drag.</summary>
+    private void EnsureInnerAnimations(ItemsRepeater inner)
+    {
+        if (ReferenceEquals(_animatedInner, inner)) return;
+        ClearInnerAnimations();
+        _animatedInner = inner;
+        var count = inner.ItemsSourceView?.Count ?? 0;
+        for (var i = 0; i < count; i++)
+        {
+            if (inner.TryGetElement(i) is UIElement el) ApplyReorderAnimation(el, true);
+        }
+    }
+
+    private void ClearInnerAnimations()
+    {
+        if (_animatedInner is null) return;
+        var count = _animatedInner.ItemsSourceView?.Count ?? 0;
+        for (var i = 0; i < count; i++)
+        {
+            if (_animatedInner.TryGetElement(i) is UIElement el) ApplyReorderAnimation(el, false);
+        }
+        _animatedInner = null;
+    }
+
+    private static T? FindDescendant<T>(DependencyObject root) where T : DependencyObject
+    {
+        var count = VisualTreeHelper.GetChildrenCount(root);
+        for (var i = 0; i < count; i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is T match) return match;
+            if (FindDescendant<T>(child) is { } nested) return nested;
+        }
+        return null;
+    }
+
+    private static string? PageBlockId(object block) => block switch
+    {
+        DeviceCard card => card.Endpoint.Id,
+        DeviceGroupCard group => group.Id,
+        _ => null,
+    };
+
+    private DeviceGroupCard? FindGroupOf(DeviceCard card)
+    {
+        foreach (var block in ViewModel.Blocks)
+        {
+            if (block is DeviceGroupCard group && group.Members.Contains(card)) return group;
+        }
+        return null;
+    }
+
+    /// <summary>Inner 40% of a rect counts as "centre" (30% inset each side); the surrounding frame
+    /// reads as reorder so the two gestures don't fight at the boundary.</summary>
+    private static bool IsCentreZone(Point p, Rect r)
+    {
+        if (r.Width <= 0 || r.Height <= 0) return false;
+        var insetX = r.Width * 0.3;
+        var insetY = r.Height * 0.3;
+        return p.X >= r.Left + insetX && p.X <= r.Right - insetX
+            && p.Y >= r.Top + insetY && p.Y <= r.Bottom - insetY;
+    }
+
+    private enum GroupDropIntent { Before, Join, After }
+
+    /// <summary>For a lone card dragged over a group section: the thin top strip (its title band) =
+    /// insert before, the bottom strip = insert after, the middle = join. The top strip is the only
+    /// way to drop a card above a first-in-row group (nothing sits above it to aim at).</summary>
+    private GroupDropIntent ResolveGroupIntent(int groupIndex, Point point)
+    {
+        var r = Layout!.GetContentRect(groupIndex);
+        if (r.Height <= 0) return GroupDropIntent.Join;
+        var edge = Math.Min(28.0, r.Height * 0.25);
+        if (point.Y < r.Top + edge) return GroupDropIntent.Before;
+        if (point.Y > r.Bottom - edge) return GroupDropIntent.After;
+        return GroupDropIntent.Join;
+    }
+
+    private void SetCreateTarget(DeviceCard card)
+    {
+        if (ReferenceEquals(_createTarget, card)) return;
+        ClearCreateTarget();
+        _createTarget = card;
+        card.IsGroupDropTarget = true;
+    }
+
+    private void ClearCreateTarget()
+    {
+        if (_createTarget is null) return;
+        _createTarget.IsGroupDropTarget = false;
+        _createTarget = null;
+    }
+
+    private void SetJoinTarget(DeviceGroupCard group)
+    {
+        if (ReferenceEquals(_joinTarget, group)) return;
+        ClearJoinTarget();
+        _joinTarget = group;
+        group.IsJoinTarget = true;
+    }
+
+    private void ClearJoinTarget()
+    {
+        if (_joinTarget is null) return;
+        _joinTarget.IsJoinTarget = false;
+        _joinTarget = null;
+    }
+
+    private void ClearHighlights()
+    {
+        ClearCreateTarget();
+        ClearJoinTarget();
+    }
+
+    /// <summary>Confirms a group disband (removing this member leaves only one). Returns true to proceed.</summary>
+    private async Task<bool> ConfirmDisbandAsync()
+    {
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = "Disband group?",
+            Content = "Removing this device leaves the group with a single device, so the group will be disbanded.",
+            PrimaryButtonText = "Disband",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Close,
+        };
+        return await dialog.ShowAsync() == ContentDialogResult.Primary;
+    }
+
+    /// <summary>Compacts a raw "insert before block index" into the source-excluded space the gap and
+    /// <see cref="HomeViewModel.ReorderBlock"/> both use.</summary>
+    private int ToCompactIndex(int raw, int source)
+    {
+        var compact = raw > source ? raw - 1 : raw;
+        return Math.Clamp(compact, 0, Math.Max(0, ViewModel.Blocks.Count - 1));
+    }
+
+    /// <summary>Shows a drag caption (e.g. "Move", "Move group") on the OS drag cursor.</summary>
+    private static void SetDragCaption(DragEventArgs e, string caption)
+    {
+        e.DragUIOverride.Caption = caption;
+        e.DragUIOverride.IsCaptionVisible = true;
+        e.DragUIOverride.IsContentVisible = true;
+        e.DragUIOverride.IsGlyphVisible = true;
+    }
+
+    /// <summary>Attaches (or removes) a Composition implicit Offset animation on each realised block so
+    /// any layout re-arrange slides smoothly. On only during a reorder drag.</summary>
+    private void EnableReorderAnimations(bool enable)
+    {
+        _reorderActive = enable;
+        for (var i = 0; i < ViewModel.Blocks.Count; i++)
+        {
+            if (DevicesRepeater.TryGetElement(i) is UIElement element)
+            {
+                ApplyReorderAnimation(element, enable);
+            }
+        }
+    }
+
+    private static void ApplyReorderAnimation(UIElement element, bool enable)
+    {
+        var visual = ElementCompositionPreview.GetElementVisual(element);
+        if (!enable)
+        {
+            visual.ImplicitAnimations = null;
+            return;
+        }
+
+        var compositor = visual.Compositor;
+        var offset = compositor.CreateVector3KeyFrameAnimation();
+        offset.Target = "Offset";
+        offset.InsertExpressionKeyFrame(1.0f, "this.FinalValue");
+        offset.Duration = TimeSpan.FromMilliseconds(220);
+
+        var animations = compositor.CreateImplicitAnimationCollection();
+        animations["Offset"] = offset;
+        visual.ImplicitAnimations = animations;
+    }
+
+    private void OnBlockElementPrepared(ItemsRepeater sender, ItemsRepeaterElementPreparedEventArgs args)
+    {
+        if (_reorderActive) ApplyReorderAnimation(args.Element, true);
+    }
 
     private void OnUndoInvoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
     {
@@ -158,6 +840,8 @@ public sealed partial class HomePage : Page
     private void OnLockedSliderPointerReleased(object sender, PointerRoutedEventArgs e) =>
         (sender as UIElement)?.ReleasePointerCapture(e.Pointer);
 
+#pragma warning restore CA1822
+
     // ---- App chip drag / drop ----
     //
     // In-process drag of an AppChip onto a render DeviceCard rebinds the session's per-app
@@ -170,12 +854,6 @@ public sealed partial class HomePage : Page
     // target, or dropping back on the source card). No custom cursor work needed.
 
     private const string DragPayloadPrefix = "earmark:chip:";
-    private const string DragPayloadCardPrefix = "earmark:card:";
-
-    /// <summary>The card currently showing a reorder insertion rule. The page lights exactly
-    /// one card at a time during a card drag; this tracks it so each new DragOver / Drop /
-    /// DropCompleted can clear the previous one without scanning every card.</summary>
-    private DeviceCard? _reorderHighlightCard;
 
     private void OnAppChipDragStarting(UIElement sender, DragStartingEventArgs args)
     {
@@ -192,114 +870,32 @@ public sealed partial class HomePage : Page
         var payload = $"{DragPayloadPrefix}{chip.ProcessId}|{chip.SourceEndpointId}";
         args.Data.SetText(payload);
         args.Data.RequestedOperation = DataPackageOperation.Move;
+
+        SetDragInProgress(true);
     }
 
     private void OnAppChipDropCompleted(UIElement sender, DropCompletedEventArgs args)
     {
-        // Nothing to clean up - the payload is value-typed text. Hook exists so future
-        // affordances (e.g. flash the source card on a successful move) have a place to land.
+        SetDragInProgress(false);
     }
 
-    // ---- Device card reorder drag ----
-    //
-    // The card Border is both a drag source (reorder) and a drop target (app chips + reorder).
-    // CanDrag="True" yields the drag to interactive children that capture the pointer (slider,
-    // mute button, app chips, rule chips) while a grab on the card background / labels starts a
-    // reorder. Payload is "earmark:card:{endpointId}"; the Drop handler disambiguates strictly
-    // by prefix against the chip payload above.
-
-    private async void OnDeviceCardDragStarting(UIElement sender, DragStartingEventArgs args)
+    /// <summary>Reveals every group container's dotted outline while a drag is in flight, so groups
+    /// read as transparent at rest and show their bounds only while dragging.</summary>
+    private void SetDragInProgress(bool active)
     {
-        if (sender is not FrameworkElement { Tag: DeviceCard card } element) return;
-        args.Data.SetText($"{DragPayloadCardPrefix}{card.Endpoint.Id}");
-        args.Data.RequestedOperation = DataPackageOperation.Move;
-
-        // Shrink every other card so the dragged one reads as "lifted".
-        ViewModel.SetReorderInProgress(true, card.Endpoint.Id);
-
-        // The default drag bitmap is translucent: the card fill is a semi-transparent layer brush
-        // meant to sit over Mica, so lifted off the backdrop it reads as see-through. Render an
-        // opaque snapshot and use that as the drag visual instead.
-        var deferral = args.GetDeferral();
-        try
+        foreach (var block in ViewModel.Blocks)
         {
-            var bitmap = await RenderCardOpaqueAsync(element);
-            if (bitmap is not null)
-            {
-                args.DragUI.SetContentFromSoftwareBitmap(bitmap);
-            }
+            if (block is DeviceGroupCard group) group.ShowOutline = active;
         }
-        catch
-        {
-            // Keep the default (translucent) visual if the snapshot fails.
-        }
-        finally
-        {
-            deferral.Complete();
-        }
-    }
-
-    private void OnDeviceCardDropCompleted(UIElement sender, DropCompletedEventArgs args)
-    {
-        // Drag finished (dropped on a card, dropped on empty space, or cancelled) - drop any
-        // lingering insertion rule and un-shrink the other cards. The Drop handler also clears the
-        // rule, but a cancelled drag never reaches it, so this is the catch-all.
-        ClearReorderHighlight();
-        ViewModel.SetReorderInProgress(false);
-    }
-
-    /// <summary>Renders the card to an opaque bitmap for use as the drag visual. The card's own
-    /// fill is a translucent layer brush, so each premultiplied pixel is composited over the
-    /// theme's solid background colour to make the lifted card read as solid.</summary>
-    private static async Task<SoftwareBitmap?> RenderCardOpaqueAsync(FrameworkElement element)
-    {
-        var rtb = new RenderTargetBitmap();
-        await rtb.RenderAsync(element);
-        if (rtb.PixelWidth <= 0 || rtb.PixelHeight <= 0) return null;
-
-        var bytes = (await rtb.GetPixelsAsync()).ToArray();   // BGRA8, premultiplied alpha
-        var baseColor = element.ActualTheme == ElementTheme.Light
-            ? Color.FromArgb(255, 0xF3, 0xF3, 0xF3)           // SolidBackgroundFillColorBase (light)
-            : Color.FromArgb(255, 0x20, 0x20, 0x20);          // SolidBackgroundFillColorBase (dark)
-
-        for (var i = 0; i + 3 < bytes.Length; i += 4)
-        {
-            var a = bytes[i + 3];
-            if (a == 255) continue;
-            var inv = 255 - a;
-            bytes[i + 0] = (byte)(bytes[i + 0] + (baseColor.B * inv / 255));
-            bytes[i + 1] = (byte)(bytes[i + 1] + (baseColor.G * inv / 255));
-            bytes[i + 2] = (byte)(bytes[i + 2] + (baseColor.R * inv / 255));
-            bytes[i + 3] = 255;
-        }
-
-        var bitmap = new SoftwareBitmap(BitmapPixelFormat.Bgra8, rtb.PixelWidth, rtb.PixelHeight, BitmapAlphaMode.Premultiplied);
-        bitmap.CopyFromBuffer(bytes.AsBuffer());
-        return bitmap;
-    }
-
-    private void SetReorderHighlight(DeviceCard card, bool insertAfter)
-    {
-        if (!ReferenceEquals(_reorderHighlightCard, card))
-        {
-            ClearReorderHighlight();
-            _reorderHighlightCard = card;
-        }
-        card.ShowInsertBefore = !insertAfter;
-        card.ShowInsertAfter = insertAfter;
-    }
-
-    private void ClearReorderHighlight()
-    {
-        if (_reorderHighlightCard is null) return;
-        _reorderHighlightCard.ShowInsertBefore = false;
-        _reorderHighlightCard.ShowInsertAfter = false;
-        _reorderHighlightCard = null;
     }
 
     private void OnDeviceCardDragOver(object sender, DragEventArgs e)
     {
-        if (sender is not FrameworkElement { Tag: DeviceCard card } border) return;
+        if (sender is not FrameworkElement { Tag: DeviceCard card }) return;
+
+        // A card / group drag (our own) is positioned at the container (OnBlocksDragOver); bubble
+        // immediately without touching the DataView so the blocking payload read only runs for chips.
+        if (_draggedCard is not null || _draggedGroup is not null) return;
 
         // Bail early when the drag isn't ours. Other drags (file drops onto the window, etc.)
         // shouldn't get our acceptance.
@@ -309,31 +905,10 @@ public sealed partial class HomePage : Page
             return;
         }
 
-        // Read the payload once, then branch on prefix: card-reorder vs app-chip move.
         var text = TryReadText(e.DataView);
         if (text is null)
         {
             e.AcceptedOperation = DataPackageOperation.None;
-            return;
-        }
-
-        if (text.StartsWith(DragPayloadCardPrefix, StringComparison.Ordinal))
-        {
-            var sourceId = text.Substring(DragPayloadCardPrefix.Length);
-            // Dropping a card on itself is a no-op; no insertion rule.
-            if (string.Equals(card.Endpoint.Id, sourceId, StringComparison.OrdinalIgnoreCase))
-            {
-                ClearReorderHighlight();
-                e.AcceptedOperation = DataPackageOperation.None;
-            }
-            else
-            {
-                // Insert side = which half of the card the pointer is over.
-                var insertAfter = e.GetPosition(border).X > border.ActualWidth / 2;
-                SetReorderHighlight(card, insertAfter);
-                e.AcceptedOperation = DataPackageOperation.Move;
-            }
-            e.Handled = true;
             return;
         }
 
@@ -361,25 +936,13 @@ public sealed partial class HomePage : Page
 
     private void OnDeviceCardDrop(object sender, DragEventArgs e)
     {
-        if (sender is not FrameworkElement { Tag: DeviceCard card } border) return;
+        if (sender is not FrameworkElement { Tag: DeviceCard card }) return;
+
+        // Card / group drops are committed at the container (OnBlocksDrop); bubble immediately.
+        if (_draggedCard is not null || _draggedGroup is not null) return;
 
         var text = TryReadText(e.DataView);
         if (text is null) return;
-
-        if (text.StartsWith(DragPayloadCardPrefix, StringComparison.Ordinal))
-        {
-            ClearReorderHighlight();
-            var sourceId = text.Substring(DragPayloadCardPrefix.Length);
-            if (string.Equals(card.Endpoint.Id, sourceId, StringComparison.OrdinalIgnoreCase)) return;
-
-            var insertAfter = e.GetPosition(border).X > border.ActualWidth / 2;
-            _logger?.LogInformation(
-                "Reorder: {Source} -> {Target} (after={After})",
-                sourceId, card.Endpoint.Id, insertAfter);
-            ViewModel.ReorderDevice(sourceId, card, insertAfter);
-            e.Handled = true;
-            return;
-        }
 
         if (card.IsCapture) return;
         if (!TryParseChipPayload(text, out var pid, out var sourceEndpointId)) return;
@@ -401,7 +964,7 @@ public sealed partial class HomePage : Page
 
     private AppChip? FindChipByPid(uint pid)
     {
-        foreach (var card in ViewModel.Devices)
+        foreach (var card in ViewModel.VisibleCards)
         {
             foreach (var chip in card.Apps)
             {
@@ -441,5 +1004,72 @@ public sealed partial class HomePage : Page
         sourceEndpointId = body.Substring(sep + 1);
         return true;
     }
-#pragma warning restore CA1822
+
+    /// <summary>Renders the card to an opaque bitmap for use as the drag visual. The card's own
+    /// fill is a translucent layer brush, so each premultiplied pixel is composited over the
+    /// theme's solid background colour to make the lifted card read as solid. The card's rounded
+    /// corners are then re-applied as an alpha mask: compositing over an opaque base fills the
+    /// transparent corner cut-outs with solid colour and squares the card off, so we punch them
+    /// back out.</summary>
+    private static async Task<SoftwareBitmap?> RenderCardOpaqueAsync(FrameworkElement element)
+    {
+        var rtb = new RenderTargetBitmap();
+        await rtb.RenderAsync(element);
+        var w = rtb.PixelWidth;
+        var h = rtb.PixelHeight;
+        if (w <= 0 || h <= 0) return null;
+
+        var bytes = (await rtb.GetPixelsAsync()).ToArray();   // BGRA8, premultiplied alpha
+        var baseColor = element.ActualTheme == ElementTheme.Light
+            ? Color.FromArgb(255, 0xF3, 0xF3, 0xF3)           // SolidBackgroundFillColorBase (light)
+            : Color.FromArgb(255, 0x20, 0x20, 0x20);          // SolidBackgroundFillColorBase (dark)
+
+        // Corner radius in physical pixels: the card's DIP radius scaled by the render's
+        // rasterization scale (rendered pixel width / layout width).
+        var radiusDip = (element as Border)?.CornerRadius.TopLeft ?? 8.0;
+        var scale = element.ActualWidth > 0 ? w / element.ActualWidth : 1.0;
+        var radius = radiusDip * scale;
+
+        for (var y = 0; y < h; y++)
+        {
+            for (var x = 0; x < w; x++)
+            {
+                var i = (y * w + x) * 4;
+                var coverage = RoundedRectCoverage(x + 0.5, y + 0.5, w, h, radius);
+                var a = bytes[i + 3];
+                if (a == 255 && coverage >= 1.0) continue;   // opaque interior - leave it
+
+                // Composite the (premultiplied) source over the opaque base, then re-premultiply
+                // by the corner coverage so the rounded cut-outs stay transparent.
+                var inv = 255 - a;
+                var b = bytes[i + 0] + baseColor.B * inv / 255.0;
+                var g = bytes[i + 1] + baseColor.G * inv / 255.0;
+                var r = bytes[i + 2] + baseColor.R * inv / 255.0;
+                bytes[i + 0] = (byte)(b * coverage);
+                bytes[i + 1] = (byte)(g * coverage);
+                bytes[i + 2] = (byte)(r * coverage);
+                bytes[i + 3] = (byte)(255 * coverage);
+            }
+        }
+
+        var bitmap = new SoftwareBitmap(BitmapPixelFormat.Bgra8, w, h, BitmapAlphaMode.Premultiplied);
+        bitmap.CopyFromBuffer(bytes.AsBuffer());
+        return bitmap;
+    }
+
+    /// <summary>Anti-aliased coverage [0,1] of a pixel centre against a rounded rectangle: 1 over
+    /// the straight edges and interior, a soft ramp across each corner arc, 0 outside it.</summary>
+    private static double RoundedRectCoverage(double px, double py, double w, double h, double r)
+    {
+        if (r <= 0) return 1.0;
+        // Pick the nearest corner-arc centre; bail to full coverage on the straight-edge bands.
+        double cx;
+        if (px < r) cx = r; else if (px > w - r) cx = w - r; else return 1.0;
+        double cy;
+        if (py < r) cy = r; else if (py > h - r) cy = h - r; else return 1.0;
+        var dx = px - cx;
+        var dy = py - cy;
+        var dist = Math.Sqrt(dx * dx + dy * dy);
+        return Math.Clamp(r - dist + 0.5, 0.0, 1.0);
+    }
 }

@@ -1,13 +1,18 @@
 using System.Collections.ObjectModel;
 
+using Earmark.App.Settings;
+
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+
+using Windows.UI;
 
 namespace Earmark.App.Controls;
 
 /// <summary>
 /// Renders a device's peak level as up to three stacked, colour-banded bars folded by channel
-/// count: 1 = mono, 2 = Left/Right, 3 = Left/Right/Centre+LFE. Sits behind the volume slider on a
+/// count: 1 = mono, 2 = Left/Right, 3 = Left/Centre+LFE/Right (top to bottom, so Centre+LFE sits
+/// between the two sides). Sits behind the volume slider on a
 /// device card (slider track brushes are made transparent in that scope so the bars show through).
 ///
 /// Also doubles as the app-chip underbar: set <see cref="ChannelCount"/> = 1, a small
@@ -124,15 +129,55 @@ public sealed partial class ChannelPeakMeter : UserControl
         set => SetValue(ShowHoldProperty, value);
     }
 
+    /// <summary>Colour scheme for the bars (gradient / blocks / single / off). Off is handled by
+    /// the host hiding the whole meter, so the meter itself just renders gradient when told Off.</summary>
+    public static readonly DependencyProperty ColourModeProperty = DependencyProperty.Register(
+        nameof(ColourMode), typeof(PeakMeterColourMode), typeof(ChannelPeakMeter),
+        new PropertyMetadata(PeakMeterColourMode.Gradient, OnColourChanged));
+
+    public PeakMeterColourMode ColourMode
+    {
+        get => (PeakMeterColourMode)GetValue(ColourModeProperty);
+        set => SetValue(ColourModeProperty, value);
+    }
+
+    /// <summary>Flat fill colour used when <see cref="ColourMode"/> is
+    /// <see cref="PeakMeterColourMode.Single"/>.</summary>
+    public static readonly DependencyProperty SingleColourProperty = DependencyProperty.Register(
+        nameof(SingleColour), typeof(Color), typeof(ChannelPeakMeter),
+        new PropertyMetadata(default(Color), OnColourChanged));
+
+    public Color SingleColour
+    {
+        get => (Color)GetValue(SingleColourProperty);
+        set => SetValue(SingleColourProperty, value);
+    }
+
+    /// <summary>Split (per-channel bars) or Single (one bar from the loudest channel).</summary>
+    public static readonly DependencyProperty ChannelModeProperty = DependencyProperty.Register(
+        nameof(ChannelMode), typeof(PeakMeterChannelMode), typeof(ChannelPeakMeter),
+        new PropertyMetadata(PeakMeterChannelMode.Split, OnShapeChanged));
+
+    public PeakMeterChannelMode ChannelMode
+    {
+        get => (PeakMeterChannelMode)GetValue(ChannelModeProperty);
+        set => SetValue(ChannelModeProperty, value);
+    }
+
     private static void OnLevelsChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
         => ((ChannelPeakMeter)d).UpdateBarValues();
 
     private static void OnShapeChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
         => ((ChannelPeakMeter)d).RebuildBars();
 
+    private static void OnColourChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+        => ((ChannelPeakMeter)d).ApplyColour();
+
     private void RebuildBars()
     {
-        var count = Math.Clamp(ChannelCount <= 0 ? 1 : ChannelCount, 1, 3);
+        var count = ChannelMode == PeakMeterChannelMode.Combined
+            ? 1
+            : Math.Clamp(ChannelCount <= 0 ? 1 : ChannelCount, 1, 3);
         if (Bars.Count != count)
         {
             Bars.Clear();
@@ -160,7 +205,22 @@ public sealed partial class ChannelPeakMeter : UserControl
 
         HoldBar.BarHeight = barHeight * count;
         HoldBar.ShowHold = ShowHold;
+        ApplyColour();
         UpdateBarValues();
+    }
+
+    /// <summary>Pushes the colour scheme onto every bar (and the hold bar, so its clip-red
+    /// threshold tracks the mode).</summary>
+    private void ApplyColour()
+    {
+        foreach (var bar in Bars)
+        {
+            bar.ColourMode = ColourMode;
+            bar.SingleColour = SingleColour;
+        }
+
+        HoldBar.ColourMode = ColourMode;
+        HoldBar.SingleColour = SingleColour;
     }
 
     private static CornerRadius CornersFor(int index, int count, double radius)
@@ -178,22 +238,36 @@ public sealed partial class ChannelPeakMeter : UserControl
             return;
         }
 
-        Bars[0].Volume = Volume;
-        Bars[0].Level = LeftLevel;
-        var maxHold = LeftHold;
-
-        if (Bars.Count >= 2)
+        double maxHold;
+        if (Bars.Count == 1)
         {
-            Bars[1].Volume = Volume;
-            Bars[1].Level = RightLevel;
-            maxHold = Math.Max(maxHold, RightHold);
+            // Mono device, or Single channel mode: one bar driven by the loudest channel.
+            Bars[0].Volume = Volume;
+            Bars[0].Level = Math.Max(LeftLevel, Math.Max(RightLevel, CentreLfeLevel));
+            maxHold = Math.Max(LeftHold, Math.Max(RightHold, CentreLfeHold));
         }
-
-        if (Bars.Count >= 3)
+        else
         {
-            Bars[2].Volume = Volume;
-            Bars[2].Level = CentreLfeLevel;
-            maxHold = Math.Max(maxHold, CentreLfeHold);
+            Bars[0].Volume = Volume;
+            Bars[0].Level = LeftLevel;
+            maxHold = LeftHold;
+
+            if (Bars.Count == 2)
+            {
+                // Stereo: Left on top, Right below.
+                Bars[1].Volume = Volume;
+                Bars[1].Level = RightLevel;
+                maxHold = Math.Max(maxHold, RightHold);
+            }
+            else
+            {
+                // Surround: Centre+LFE sits between Left and Right so the stack reads L / C / R.
+                Bars[1].Volume = Volume;
+                Bars[1].Level = CentreLfeLevel;
+                Bars[2].Volume = Volume;
+                Bars[2].Level = RightLevel;
+                maxHold = Math.Max(maxHold, Math.Max(CentreLfeHold, RightHold));
+            }
         }
 
         // One hold line for the whole stack, latched at the loudest channel.

@@ -186,6 +186,16 @@ jobs:
           PUBLISH_DIR: ${{ github.workspace }}\publish\${{ matrix.platform }}
         run: |
           New-Item -ItemType Directory -Path $env:PUBLISH_DIR -Force | Out-Null
+          # Stamp the in-app build channel (read by Services/AppInfo for the About box / update UI).
+          # The release-please PR build is the one the pre-release job publishes, so mark it
+          # "Prerelease" and bake its full "<ver>-pre.<run>" identity into InformationalVersion so
+          # the installed build can compare itself against newer pre-release tags. Everything else
+          # CI builds is "Release".
+          $channel = if ('${{ github.event_name }}' -eq 'pull_request' -and '${{ github.head_ref }}' -eq 'release-please--branches--main') { 'Prerelease' } else { 'Release' }
+          $extra = @()
+          if ($channel -eq 'Prerelease') {
+            $extra += "-p:InformationalVersion=$($env:APP_VERSION)-pre.$($env:GITHUB_RUN_NUMBER)"
+          }
           dotnet publish $env:PROJECT_PATH `
             -c Release `
             -p:Platform=$env:PLATFORM `
@@ -193,6 +203,8 @@ jobs:
             -p:WindowsPackageType=None `
             -p:WindowsAppSDKSelfContained=true `
             -p:SelfContained=true `
+            -p:EarmarkBuildChannel=$channel `
+            $extra `
             -o $env:PUBLISH_DIR
           if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed (exit $LASTEXITCODE)" }
           if (-not (Test-Path "$env:PUBLISH_DIR\Earmark.App.exe")) {
@@ -467,3 +479,108 @@ jobs:
         with:
           tag: ${{ needs.release-please.outputs.tag_name }}
           github-token: ${{ github.token }}
+
+  pre-release:
+    name: Pre-Release
+    # Runs on the release-please PR (which already carries the bumped version.txt + changelog),
+    # turning each push to that PR into an installable pre-release so the bumped build can be
+    # smoke-tested before the release PR merges. The in-app update check ignores these (it only
+    # compares against releases/latest, which excludes prereleases).
+    needs: [build-msix, build-msi, lint-and-test]
+    if: >-
+      always()
+      && github.event_name == 'pull_request'
+      && github.head_ref == 'release-please--branches--main'
+      && needs.build-msix.result == 'success'
+      && needs.build-msi.result == 'success'
+      && needs.lint-and-test.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Get version
+        id: version
+        run: |
+          VERSION=$(cat version.txt)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Version: $VERSION"
+
+      - name: Generate release notes
+        run: |
+          VERSION_PREFIX="v${{ steps.version.outputs.version }}-pre."
+          # Diff against the most recent pre-release for this version, else the last stable tag.
+          PREV_TAG=$(git tag --sort=-version:refname | grep -m1 "^${VERSION_PREFIX}" || true)
+          if [ -z "$PREV_TAG" ]; then
+            PREV_TAG=$(git tag --sort=-version:refname | grep -m1 '^v[0-9]' || true)
+          fi
+          if [ -n "$PREV_TAG" ]; then
+            NOTES=$(git log "${PREV_TAG}..HEAD" --pretty=format:"- %s" --no-merges)
+          else
+            NOTES=$(git log --pretty=format:"- %s" --no-merges -20)
+          fi
+          echo "$NOTES" > /tmp/release_notes.txt
+
+      - name: Download MSIX (x64)
+        uses: actions/download-artifact@v8
+        with:
+          name: msix-x64
+          path: release/msix-x64
+      - name: Download MSIX (ARM64)
+        uses: actions/download-artifact@v8
+        with:
+          name: msix-ARM64
+          path: release/msix-ARM64
+      - name: Download MSI (x64)
+        uses: actions/download-artifact@v8
+        with:
+          name: msi-x64
+          path: release/msi-x64
+      - name: Download MSI (ARM64)
+        uses: actions/download-artifact@v8
+        with:
+          name: msi-ARM64
+          path: release/msi-ARM64
+
+      # Create as a draft first so the asset upload completes even on repos with immutable
+      # releases, then flip to a published prerelease.
+      - name: Create pre-release (draft)
+        # Pinned to a commit SHA (third-party action). Bump via Dependabot/Renovate.
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda  # v3.0.0
+        with:
+          tag_name: v${{ steps.version.outputs.version }}-pre.${{ github.run_number }}
+          name: v${{ steps.version.outputs.version }}-pre.${{ github.run_number }}
+          prerelease: true
+          draft: true
+          make_latest: false
+          body_path: /tmp/release_notes.txt
+          files: |
+            release/**/*.msix
+            release/**/*.msi
+
+      - name: Publish pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: v${{ steps.version.outputs.version }}-pre.${{ github.run_number }}
+        run: gh release edit "$TAG" --repo "${{ github.repository }}" --draft=false --prerelease
+
+      - name: Prune old pre-releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          KEEP: 3
+        run: |
+          VERSION_PREFIX="v${{ steps.version.outputs.version }}-pre."
+          RELEASES=$(gh release list \
+            --repo ${{ github.repository }} \
+            --limit 100 \
+            --json tagName,isPrerelease \
+            --jq "[.[] | select(.isPrerelease == true and (.tagName | startswith(\"$VERSION_PREFIX\")))] | sort_by(.tagName) | reverse | .[${KEEP}:] | .[].tagName")
+          for TAG in $RELEASES; do
+            echo "Deleting old pre-release: $TAG"
+            gh release delete "$TAG" --repo ${{ github.repository }} --yes --cleanup-tag
+          done

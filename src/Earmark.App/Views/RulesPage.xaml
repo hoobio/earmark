@@ -537,7 +537,7 @@
                                                 ToolTipService.ToolTip="Duplicate this rule below">
                                             <StackPanel Orientation="Horizontal" Spacing="6">
                                                 <FontIcon Glyph="&#xE8C8;" FontSize="12" />
-                                                <TextBlock Text="Duplicate" />
+                                                <TextBlock Text="Duplicate rule" />
                                             </StackPanel>
                                         </Button>
                                         <Button Style="{StaticResource DangerButtonStyle}"

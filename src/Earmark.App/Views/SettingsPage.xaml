@@ -5,6 +5,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:vm="using:Earmark.App.ViewModels"
     xmlns:ctrl="using:CommunityToolkit.WinUI.Controls"
+    xmlns:ui="using:Windows.UI"
     Background="Transparent">
 
     <Grid Padding="{StaticResource PagePadding}">
@@ -31,6 +32,116 @@
                         <ComboBoxItem Content="Dark" />
                     </ComboBox>
                 </ctrl:SettingsCard>
+
+                <TextBlock Text="Devices" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,12,0,0" />
+                <ctrl:SettingsExpander Header="App indicators"
+                                       Description="Show a chip for each app playing through a device, on that device's card. Drag a chip onto another card to reroute the app."
+                                       IsExpanded="{x:Bind ViewModel.ShowAppIndicators, Mode=OneWay}">
+                    <ctrl:SettingsExpander.HeaderIcon>
+                        <FontIcon Glyph="&#xE71D;" />
+                    </ctrl:SettingsExpander.HeaderIcon>
+                    <ToggleSwitch IsOn="{x:Bind ViewModel.ShowAppIndicators, Mode=TwoWay}" />
+                    <ctrl:SettingsExpander.Items>
+                        <ctrl:SettingsCard Header="Volume meters"
+                                           Description="Show the thin peak-level bar under each app icon. Off drops the bar and makes the chips a little smaller."
+                                           IsEnabled="{x:Bind ViewModel.AppIndicatorChildrenEnabled, Mode=OneWay}">
+                            <ToggleSwitch IsOn="{x:Bind ViewModel.ShowAppPeakMeters, Mode=TwoWay}" />
+                        </ctrl:SettingsCard>
+                        <ctrl:SettingsCard Header="Hide audio forwarders"
+                                           Description="Hide virtual cables and mixers (Wave Link, VB-Cable, Voicemeeter, SteelSeries Sonar, and similar) that just relay other apps' audio. Off shows them like any other app."
+                                           IsEnabled="{x:Bind ViewModel.AppIndicatorChildrenEnabled, Mode=OneWay}">
+                            <ToggleSwitch IsOn="{x:Bind ViewModel.FilterAudioForwarders, Mode=TwoWay}" />
+                        </ctrl:SettingsCard>
+                        <ctrl:SettingsCard Header="Keep stopped apps visible"
+                                           Description="After an app stops playing or closes, its chip dims and lingers for this many seconds before it disappears. Closed apps also show a badge. Set 0 to remove a chip as soon as its app stops."
+                                           IsEnabled="{x:Bind ViewModel.AppIndicatorChildrenEnabled, Mode=OneWay}">
+                            <NumberBox Value="{x:Bind ViewModel.AppChipLingerSeconds, Mode=TwoWay}"
+                                       Minimum="0" Maximum="600"
+                                       SpinButtonPlacementMode="Inline"
+                                       SmallChange="5" LargeChange="30"
+                                       MinWidth="140" />
+                        </ctrl:SettingsCard>
+                    </ctrl:SettingsExpander.Items>
+                </ctrl:SettingsExpander>
+
+                <ctrl:SettingsExpander Header="Peak meter"
+                                       Description="The level meter behind each device's volume slider. Off hides it and shows a plain slider.">
+                    <ComboBox SelectedIndex="{x:Bind ViewModel.PeakMeterColourModeIndex, Mode=TwoWay}" MinWidth="150">
+                        <ComboBoxItem Content="Gradient" />
+                        <ComboBoxItem Content="Blocks" />
+                        <ComboBoxItem Content="Single colour" />
+                        <ComboBoxItem Content="Off" />
+                    </ComboBox>
+                    <ctrl:SettingsExpander.Items>
+                        <ctrl:SettingsCard Header="Bar colour"
+                                           Description="Colour for the Single colour mode. Pick a quick swatch or open the wheel for a custom colour."
+                                           IsEnabled="{x:Bind ViewModel.IsSingleColourMode, Mode=OneWay}">
+                            <Button MinWidth="140" HorizontalContentAlignment="Left">
+                                <StackPanel Orientation="Horizontal" Spacing="{StaticResource SpacingSmall}">
+                                    <Border Width="24" Height="16"
+                                            CornerRadius="{ThemeResource ControlCornerRadius}"
+                                            BorderThickness="1"
+                                            BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                                            Background="{x:Bind ViewModel.PeakMeterSingleColour, Mode=OneWay, Converter={StaticResource ColorToBrushConverter}}" />
+                                    <TextBlock Text="Choose…" VerticalAlignment="Center" />
+                                </StackPanel>
+                                <Button.Flyout>
+                                    <Flyout>
+                                        <StackPanel Spacing="{StaticResource SpacingMedium}" Width="296">
+                                            <TextBlock Text="Quick colours"
+                                                       Style="{StaticResource CaptionTextBlockStyle}"
+                                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                            <ItemsControl ItemsSource="{x:Bind MeterSwatches}">
+                                                <ItemsControl.ItemsPanel>
+                                                    <ItemsPanelTemplate>
+                                                        <StackPanel Orientation="Horizontal" Spacing="{StaticResource SpacingXSmall}" />
+                                                    </ItemsPanelTemplate>
+                                                </ItemsControl.ItemsPanel>
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate x:DataType="ui:Color">
+                                                        <Button Width="28" Height="28"
+                                                                Padding="0"
+                                                                Click="OnMeterSwatchClick"
+                                                                Tag="{x:Bind}"
+                                                                HorizontalContentAlignment="Stretch"
+                                                                VerticalContentAlignment="Stretch">
+                                                            <Border CornerRadius="{ThemeResource ControlCornerRadius}"
+                                                                    Background="{x:Bind Converter={StaticResource ColorToBrushConverter}}" />
+                                                        </Button>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                            <ColorPicker x:Name="MeterColorPicker"
+                                                         Color="{x:Bind ViewModel.PeakMeterSingleColour, Mode=TwoWay}"
+                                                         ColorSpectrumShape="Ring"
+                                                         IsAlphaEnabled="False"
+                                                         IsMoreButtonVisible="True"
+                                                         IsColorSliderVisible="True"
+                                                         IsColorChannelTextInputVisible="False"
+                                                         IsHexInputVisible="True" />
+                                            <Button Content="Reset to default"
+                                                    Click="OnResetMeterColour"
+                                                    HorizontalAlignment="Right" />
+                                        </StackPanel>
+                                    </Flyout>
+                                </Button.Flyout>
+                            </Button>
+                        </ctrl:SettingsCard>
+                        <ctrl:SettingsCard Header="Channels"
+                                           Description="Split shows a bar per channel group (L / Centre+LFE / R); Single shows one combined bar from the loudest channel."
+                                           IsEnabled="{x:Bind ViewModel.IsMeterEnabled, Mode=OneWay}">
+                            <ComboBox SelectedIndex="{x:Bind ViewModel.PeakMeterChannelModeIndex, Mode=TwoWay}" MinWidth="150">
+                                <ComboBoxItem Content="Split" />
+                                <ComboBoxItem Content="Single" />
+                            </ComboBox>
+                        </ctrl:SettingsCard>
+                        <ctrl:SettingsCard Header="Peak-hold tick"
+                                           Description="Show the line that marks the recent loudest peak (it turns red on clipping)."
+                                           IsEnabled="{x:Bind ViewModel.IsMeterEnabled, Mode=OneWay}">
+                            <ToggleSwitch IsOn="{x:Bind ViewModel.PeakMeterShowHold, Mode=TwoWay}" />
+                        </ctrl:SettingsCard>
+                    </ctrl:SettingsExpander.Items>
+                </ctrl:SettingsExpander>
 
                 <TextBlock Text="System tray" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,12,0,0" />
                 <ctrl:SettingsExpander Header="Show tray icon"
@@ -92,6 +203,65 @@
                 <TextBlock Text="Diagnostics" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,12,0,0" />
                 <ctrl:SettingsCard Header="Verbose logging" Description="Write debug-level diagnostics to the log file. Leave off for normal use.">
                     <ToggleSwitch IsOn="{x:Bind ViewModel.VerboseLogging, Mode=TwoWay}" />
+                </ctrl:SettingsCard>
+                <ctrl:SettingsCard Header="Logs"
+                                   Description="Open the folder with Earmark's log files (one per launch). To capture a useful log for a bug report, turn on Verbose logging above, reproduce the issue, then attach the latest file.">
+                    <ctrl:SettingsCard.HeaderIcon>
+                        <FontIcon Glyph="&#xE8B7;" />
+                    </ctrl:SettingsCard.HeaderIcon>
+                    <Button Content="Open logs folder" Click="OnOpenLogsFolder" />
+                </ctrl:SettingsCard>
+
+                <TextBlock Text="Help &amp; feedback" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,12,0,0" />
+                <ctrl:SettingsCard Header="Report a bug"
+                                   Description="Open a pre-filled bug report on GitHub.">
+                    <ctrl:SettingsCard.HeaderIcon>
+                        <FontIcon Glyph="&#xED15;" />
+                    </ctrl:SettingsCard.HeaderIcon>
+                    <Button Content="Report a bug" Click="OnReportBug" />
+                </ctrl:SettingsCard>
+                <ctrl:SettingsCard Header="Request a feature"
+                                   Description="Suggest an improvement or a new rule type.">
+                    <ctrl:SettingsCard.HeaderIcon>
+                        <FontIcon Glyph="&#xE710;" />
+                    </ctrl:SettingsCard.HeaderIcon>
+                    <Button Content="Request a feature" Click="OnRequestFeature" />
+                </ctrl:SettingsCard>
+                <ctrl:SettingsCard Header="Project on GitHub"
+                                   Description="Source, releases, and existing issues.">
+                    <ctrl:SettingsCard.HeaderIcon>
+                        <FontIcon Glyph="&#xE8A7;" />
+                    </ctrl:SettingsCard.HeaderIcon>
+                    <Button Content="View on GitHub" Click="OnOpenGitHub" />
+                </ctrl:SettingsCard>
+
+                <TextBlock Text="About" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,12,0,0" />
+                <ctrl:SettingsCard Header="Earmark" Description="{x:Bind About.BuildInfo}">
+                    <ctrl:SettingsCard.HeaderIcon>
+                        <FontIcon Glyph="&#xE946;" />
+                    </ctrl:SettingsCard.HeaderIcon>
+                </ctrl:SettingsCard>
+                <ctrl:SettingsCard Header="Check for updates"
+                                   Description="{x:Bind About.UpdateStatusText, Mode=OneWay}"
+                                   Visibility="{x:Bind About.IsUpdateCheckSupported, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <ctrl:SettingsCard.HeaderIcon>
+                        <FontIcon Glyph="&#xE895;" />
+                    </ctrl:SettingsCard.HeaderIcon>
+                    <StackPanel Orientation="Horizontal" Spacing="{StaticResource SpacingSmall}">
+                        <Button Content="View release"
+                                Click="OnOpenLatestRelease"
+                                Style="{ThemeResource AccentButtonStyle}"
+                                Visibility="{x:Bind About.UpdateAvailable, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                        <Button Content="Check now"
+                                Click="OnCheckForUpdates"
+                                IsEnabled="{x:Bind About.CanCheck, Mode=OneWay}" />
+                    </StackPanel>
+                </ctrl:SettingsCard>
+                <ctrl:SettingsCard Header="Check automatically on launch"
+                                   Description="{x:Bind About.AutoCheckDescription}"
+                                   IsEnabled="{x:Bind About.IsAutoCheckEnabled}"
+                                   Visibility="{x:Bind About.IsUpdateCheckSupported, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <ToggleSwitch IsOn="{x:Bind About.AutoCheckForUpdates, Mode=TwoWay}" />
                 </ctrl:SettingsCard>
 
             </StackPanel>

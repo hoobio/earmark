@@ -5,7 +5,6 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:vm="using:Earmark.App.ViewModels"
     xmlns:controls="using:Earmark.App.Controls"
-    xmlns:animations="using:CommunityToolkit.WinUI.Animations"
     Background="Transparent"
     KeyboardAcceleratorPlacementMode="Hidden">
 
@@ -43,6 +42,638 @@
                     </StackPanel>
                 </StackPanel>
             </Button>
+        </DataTemplate>
+
+        <!-- Lone device card. Shared between the top-level block list (a lone card) and a group
+             container's inner member repeater, so both render identically. The card Border is an
+             app-chip drop target; the chip itself is the drag source. -->
+        <DataTemplate x:Key="DeviceCardTemplate" x:DataType="vm:DeviceCard">
+            <Border Style="{StaticResource SectionCardStyle}"
+                    Padding="0"
+                    Opacity="{x:Bind CardOpacity, Mode=OneWay}"
+                    controls:WrapByRowLayout.IsCustomSized="{x:Bind IsLayoutCustomSized, Mode=OneWay}"
+                    AllowDrop="True"
+                    CanDrag="True"
+                    Tag="{x:Bind}"
+                    DragStarting="OnDeviceCardDragStarting"
+                    DropCompleted="OnDeviceCardDropCompleted"
+                    DragOver="OnDeviceCardDragOver"
+                    Drop="OnDeviceCardDrop">
+                <!-- Right-click to show / hide the device. Replaces the always-on
+                     eye button that used to sit top-right of every card. -->
+                <Border.ContextFlyout>
+                    <MenuFlyout>
+                        <MenuFlyoutItem Text="{x:Bind HideToggleTooltip, Mode=OneWay}"
+                                        Command="{x:Bind ToggleUserVisibilityCommand}">
+                            <MenuFlyoutItem.Icon>
+                                <FontIcon Glyph="{x:Bind HideToggleGlyph, Mode=OneWay}" />
+                            </MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+                        <!-- Hide the slider + mute for devices whose volume Windows can drive but
+                             that ignore it (e.g. a USB DAC/amp with an analog volume knob). -->
+                        <MenuFlyoutItem Text="{x:Bind VolumeControlsToggleLabel, Mode=OneWay}"
+                                        Command="{x:Bind ToggleVolumeControlsCommand}">
+                            <MenuFlyoutItem.Icon>
+                                <FontIcon Glyph="{x:Bind VolumeControlsToggleGlyph, Mode=OneWay}" />
+                            </MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+                        <!-- Group-level actions, shown only for a grouped device, separated from the
+                             device-level options above. -->
+                        <MenuFlyoutSeparator Visibility="{x:Bind IsGroupMember, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                        <MenuFlyoutItem Text="Rename group"
+                                        Click="OnRenameGroupClicked"
+                                        Tag="{x:Bind}"
+                                        Visibility="{x:Bind IsGroupMember, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <MenuFlyoutItem.Icon>
+                                <FontIcon Glyph="&#xE8AC;" />
+                            </MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+                        <MenuFlyoutItem Text="Ungroup device"
+                                        Click="OnUngroupDeviceClicked"
+                                        Tag="{x:Bind}"
+                                        Visibility="{x:Bind IsGroupMember, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <MenuFlyoutItem.Icon>
+                                <FontIcon Glyph="&#xF0B4;" />
+                            </MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+                        <MenuFlyoutItem Text="Ungroup all"
+                                        Click="OnUngroupAllClicked"
+                                        Tag="{x:Bind}"
+                                        Visibility="{x:Bind IsGroupMember, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <MenuFlyoutItem.Icon>
+                                <FontIcon Glyph="&#xF0B4;" />
+                            </MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+                    </MenuFlyout>
+                </Border.ContextFlyout>
+                <Grid>
+                    <!-- Muted tint fills the whole card. {ThemeResource} so it tracks
+                         light/dark; shown only when muted, otherwise the card's own
+                         LayerFill (from SectionCardStyle) shows through. -->
+                    <Border Background="{ThemeResource SystemFillColorCriticalBackgroundBrush}"
+                            CornerRadius="{StaticResource CardCornerRadius}"
+                            Visibility="{x:Bind IsMuted, Mode=OneWay}" />
+                <StackPanel Spacing="{StaticResource SpacingMedium}" Margin="{StaticResource SectionPadding}">
+                    <!-- Header: mute toggle (icon) + name + chips -->
+                    <Grid ColumnSpacing="{StaticResource SpacingMedium}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+
+                        <!-- The Border wrapper carries ToolTipService.ToolTip so the lock-reason
+                             tooltip still fires when the inner Button is disabled (rule-locked).
+                             WinUI suppresses tooltips on disabled controls; a transparent
+                             hit-testable parent is the standard workaround. -->
+                        <Border Grid.Column="0"
+                                Background="Transparent"
+                                ToolTipService.ToolTip="{x:Bind MuteTooltip, Mode=OneWay}">
+                            <!-- Accent / colour lives on a Border behind the button so the button's
+                                 pointer-over / pressed states composite a subtle overlay *over* the
+                                 accent, instead of the default theme grey replacing it (which reads as
+                                 a jarring flash on a coloured tile). -->
+                            <Grid Width="56" Height="56">
+                                <!-- Default tile uses {ThemeResource} so it tracks light/dark;
+                                     the accent tile is an absolute Wave Link colour (or white for
+                                     a mix) and is deliberately theme-independent. -->
+                                <Border CornerRadius="{StaticResource CardCornerRadius}"
+                                        Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                                        Visibility="{x:Bind ShowDefaultTile, Mode=OneWay}" />
+                                <Border CornerRadius="{StaticResource CardCornerRadius}"
+                                        Background="{x:Bind WaveLinkTileBrush, Mode=OneWay}"
+                                        Visibility="{x:Bind ShowAccentTile, Mode=OneWay}" />
+                                <Button Width="56" Height="56"
+                                        Padding="0"
+                                        Background="Transparent"
+                                        BorderBrush="Transparent"
+                                        CornerRadius="{StaticResource CardCornerRadius}"
+                                        Tag="{x:Bind}"
+                                        IsEnabled="{x:Bind IsMuteToggleEnabled, Mode=OneWay}"
+                                        IsHitTestVisible="{x:Bind ShowVolumeControls, Mode=OneWay}"
+                                        Click="OnMuteToggleClicked"
+                                        ToolTipService.ToolTip="{x:Bind MuteTooltip, Mode=OneWay}">
+                                    <!-- Transparent in every state but hover/press, where a faint white
+                                         overlay lifts whatever colour sits behind. Disabled stays
+                                         transparent so a rule-locked tile reads as non-interactive. -->
+                                    <Button.Resources>
+                                        <SolidColorBrush x:Key="ButtonBackground" Color="Transparent" />
+                                        <SolidColorBrush x:Key="ButtonBackgroundDisabled" Color="Transparent" />
+                                        <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#20FFFFFF" />
+                                        <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="#33FFFFFF" />
+                                        <SolidColorBrush x:Key="ButtonBorderBrushDisabled" Color="Transparent" />
+                                        <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="Transparent" />
+                                        <SolidColorBrush x:Key="ButtonBorderBrushPressed" Color="Transparent" />
+                                    </Button.Resources>
+                                    <!-- Fluent glyph by default; a Wave Link channel icon replaces it
+                                         (not alongside) when the Icons style is selected. Three glyph
+                                         variants so the two theme-dependent colours stay {ThemeResource}
+                                         (which repaints on a light/dark switch); the accent-tile glyph
+                                         is an absolute contrast colour. Exactly one is ever visible. -->
+                                    <Grid>
+                                        <FontIcon Glyph="{x:Bind Glyph, Mode=OneWay}"
+                                                  FontSize="28"
+                                                  Visibility="{x:Bind GlyphOnAccent, Mode=OneWay}"
+                                                  Foreground="{x:Bind GlyphContrastBrush, Mode=OneWay}" />
+                                        <FontIcon Glyph="{x:Bind Glyph, Mode=OneWay}"
+                                                  FontSize="28"
+                                                  Visibility="{x:Bind GlyphNormalThemed, Mode=OneWay}"
+                                                  Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                                        <FontIcon Glyph="{x:Bind Glyph, Mode=OneWay}"
+                                                  FontSize="28"
+                                                  Visibility="{x:Bind GlyphMutedThemed, Mode=OneWay}"
+                                                  Foreground="{ThemeResource SystemFillColorCriticalBrush}" />
+                                        <Image Source="{x:Bind WaveLinkIconSource, Mode=OneWay}"
+                                               Width="40" Height="40"
+                                               Visibility="{x:Bind ShowWaveLinkIcon, Mode=OneWay}" />
+                                    </Grid>
+                                </Button>
+                            </Grid>
+                        </Border>
+
+                        <StackPanel Grid.Column="1" Spacing="{StaticResource SpacingXXSmall}" VerticalAlignment="Center">
+                            <TextBlock Text="{x:Bind DeviceNameOnly}"
+                                       Style="{StaticResource BodyStrongTextBlockStyle}"
+                                       TextWrapping="NoWrap"
+                                       TextTrimming="CharacterEllipsis"
+                                       ToolTipService.ToolTip="{x:Bind DisplayName}" />
+                            <TextBlock Text="{x:Bind DeviceIdSubtext}"
+                                       Style="{StaticResource CaptionTextBlockStyle}"
+                                       Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                       TextWrapping="NoWrap"
+                                       TextTrimming="CharacterEllipsis"
+                                       Visibility="{x:Bind HasDeviceIdSubtext}" />
+                            <!-- Negative left margin compensates for the ChipBorderStyle's 8px
+                                 horizontal padding so pill text starts on the same x as the
+                                 subtitle above it. Top margin gives the row a little breathing
+                                 space below the subtitle so the three lines don't read crammed. -->
+                            <StackPanel Orientation="Horizontal"
+                                        Spacing="6"
+                                        Margin="-8,4,0,0">
+                                <Border Padding="8,2"
+                                        VerticalAlignment="Center"
+                                        Visibility="{x:Bind ShowFlowLabel}">
+                                    <TextBlock Text="{x:Bind FlowLabel}"
+                                               Style="{StaticResource CaptionTextBlockStyle}"
+                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                </Border>
+                                <Border Style="{StaticResource ChipBorderStyle}"
+                                        Visibility="{x:Bind IsDefault}">
+                                    <TextBlock Text="{x:Bind DefaultPillText}"
+                                               Style="{StaticResource CaptionTextBlockStyle}" />
+                                </Border>
+                                <Border Style="{StaticResource ChipBorderStyle}"
+                                        Visibility="{x:Bind IsDefaultCommunications}">
+                                    <TextBlock Text="{x:Bind CommunicationsPillText}"
+                                               Style="{StaticResource CaptionTextBlockStyle}" />
+                                </Border>
+                            </StackPanel>
+                        </StackPanel>
+                    </Grid>
+
+                    <!-- Volume row. "Hide volume controls" hides the slider + readout + lock
+                         annotations but NOT the peak meter, which has its own setting. The row
+                         only collapses entirely when both are off (ShowVolumeRow). -->
+                    <Grid ColumnSpacing="{StaticResource SpacingSmall}"
+                          Visibility="{x:Bind ShowVolumeRow, Mode=OneWay}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <!-- Peak meter sits behind the slider; the meter slider's track brushes are
+                             overridden to be transparent so the meter shows through. When the meter is
+                             Off a plain standard slider is shown instead. Opacity dims when muted
+                             (still hit-testable so a drag unmutes). -->
+                        <Grid Grid.Column="0" Height="28"
+                              Grid.ColumnSpan="{x:Bind VolumeMeterColumnSpan, Mode=OneWay}"
+                              Opacity="{x:Bind VolumeAreaOpacity, Mode=OneWay}">
+
+                            <!-- Meter mode: per-channel peak meter (1-3 stacked colour-banded bars)
+                                 behind a transparent-track slider. Hidden when the meter is Off. -->
+                            <Grid Visibility="{x:Bind MeterOptions.ShowMeter, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                <controls:ChannelPeakMeter Margin="{x:Bind MeterMargin, Mode=OneWay}"
+                                                           VerticalAlignment="Center"
+                                                           ChannelCount="{x:Bind ChannelCount, Mode=OneWay}"
+                                                           ColourMode="{x:Bind MeterOptions.ColourMode, Mode=OneWay}"
+                                                           SingleColour="{x:Bind MeterOptions.SingleColour, Mode=OneWay}"
+                                                           ChannelMode="{x:Bind MeterOptions.ChannelMode, Mode=OneWay}"
+                                                           ShowHold="{x:Bind MeterOptions.ShowHold, Mode=OneWay}"
+                                                           LeftLevel="{x:Bind LeftLevel, Mode=OneWay}"
+                                                           RightLevel="{x:Bind RightLevel, Mode=OneWay}"
+                                                           CentreLfeLevel="{x:Bind CentreLfeLevel, Mode=OneWay}"
+                                                           LeftHold="{x:Bind LeftHold, Mode=OneWay}"
+                                                           RightHold="{x:Bind RightHold, Mode=OneWay}"
+                                                           CentreLfeHold="{x:Bind CentreLfeHold, Mode=OneWay}"
+                                                           Volume="{x:Bind MeterVolume, Mode=OneWay}" />
+
+                                <!-- Padding insets the thumb travel inside the slider's own clip bounds
+                                     (the control clips its thumb at the edge), so the thumb stays fully
+                                     round at 0% / 100% instead of having its outer ring shaved off. -->
+                                <Slider Minimum="0"
+                                        Maximum="100"
+                                        StepFrequency="1"
+                                        SmallChange="1"
+                                        LargeChange="5"
+                                        Margin="0,0,2,0"
+                                        Padding="8,0,8,0"
+                                        Value="{x:Bind VolumePercent, Mode=TwoWay}"
+                                        IsEnabled="{x:Bind IsVolumeEditable, Mode=OneWay}"
+                                        Visibility="{x:Bind ShowVolumeControls, Mode=OneWay}"
+                                        ToolTipService.ToolTip="{x:Bind ChannelMeterTooltip, Mode=OneWay}"
+                                        Tag="{x:Bind}"
+                                        PointerPressed="OnSliderPointerPressed"
+                                        PointerCaptureLost="OnSliderReleased"
+                                        KeyDown="OnSliderKeyDown"
+                                        KeyUp="OnSliderKeyUp"
+                                        LostFocus="OnSliderLostFocus"
+                                        VerticalAlignment="Center"
+                                        Background="Transparent">
+                                    <Slider.Resources>
+                                        <SolidColorBrush x:Key="SliderTrackFill" Color="Transparent" />
+                                        <SolidColorBrush x:Key="SliderTrackValueFill" Color="Transparent" />
+                                        <SolidColorBrush x:Key="SliderTrackFillPointerOver" Color="Transparent" />
+                                        <SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="Transparent" />
+                                        <SolidColorBrush x:Key="SliderTrackFillPressed" Color="Transparent" />
+                                        <SolidColorBrush x:Key="SliderTrackValueFillPressed" Color="Transparent" />
+                                        <SolidColorBrush x:Key="SliderTrackFillDisabled" Color="Transparent" />
+                                        <SolidColorBrush x:Key="SliderTrackValueFillDisabled" Color="Transparent" />
+                                        <!-- Thumb kept at the WinUI default colours (incl. the greyed disabled
+                                             thumb), sized down to 14 so it sits comfortably inside the 20px bar
+                                             stack and clears the column edge at 100%. -->
+                                        <x:Double x:Key="SliderHorizontalThumbWidth">14</x:Double>
+                                        <x:Double x:Key="SliderHorizontalThumbHeight">14</x:Double>
+                                    </Slider.Resources>
+                                    <!-- The Slider control's thumb sits a couple of px below its layout
+                                         centre; nudge the whole control up so the thumb centres on the
+                                         bar stack behind it. RenderTransform doesn't affect layout. -->
+                                    <Slider.RenderTransform>
+                                        <TranslateTransform Y="-2" />
+                                    </Slider.RenderTransform>
+                                </Slider>
+
+                                <!-- The meter itself is IsHitTestVisible=False (so it never steals the
+                                     slider's pointer). When the slider is hidden there's nothing left to
+                                     surface the channel tooltip, so this transparent layer carries it -
+                                     shown only while the controls are hidden. -->
+                                <Border Background="Transparent"
+                                        ToolTipService.ToolTip="{x:Bind ChannelMeterTooltip, Mode=OneWay}"
+                                        Visibility="{x:Bind IsVolumeControlsHiddenByUser, Mode=OneWay}" />
+                            </Grid>
+
+                            <!-- Off mode: a standard volume slider (normal track + default thumb). -->
+                            <Slider Minimum="0"
+                                    Maximum="100"
+                                    StepFrequency="1"
+                                    SmallChange="1"
+                                    LargeChange="5"
+                                    Value="{x:Bind VolumePercent, Mode=TwoWay}"
+                                    IsEnabled="{x:Bind IsVolumeEditable, Mode=OneWay}"
+                                    Tag="{x:Bind}"
+                                    PointerPressed="OnSliderPointerPressed"
+                                    PointerCaptureLost="OnSliderReleased"
+                                    KeyDown="OnSliderKeyDown"
+                                    KeyUp="OnSliderKeyUp"
+                                    LostFocus="OnSliderLostFocus"
+                                    VerticalAlignment="Center"
+                                    Visibility="{x:Bind ShowPlainSlider, Mode=OneWay}" />
+
+                            <Border Background="Transparent"
+                                    Tapped="OnLockedSliderTapped"
+                                    PointerPressed="OnLockedSliderPointerPressed"
+                                    PointerReleased="OnLockedSliderPointerReleased"
+                                    ToolTipService.ToolTip="{x:Bind VolumeLockedTooltip, Mode=OneWay}"
+                                    Visibility="{x:Bind ShowVolumeLockOverlay, Mode=OneWay}" />
+                        </Grid>
+
+                        <TextBlock Grid.Column="1"
+                                   Text="{x:Bind VolumePercentText, Mode=OneWay}"
+                                   Style="{StaticResource CaptionTextBlockStyle}"
+                                   MinWidth="38"
+                                   TextAlignment="Right"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                   VerticalAlignment="Center"
+                                   Visibility="{x:Bind ShowVolumeControls, Mode=OneWay}" />
+
+                        <FontIcon Grid.Column="2"
+                                  Glyph="&#xE72E;" FontSize="12"
+                                  Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                  VerticalAlignment="Center"
+                                  ToolTipService.ToolTip="{x:Bind VolumeLockedTooltip, Mode=OneWay}"
+                                  Visibility="{x:Bind ShowVolumeLockIcon, Mode=OneWay}" />
+                    </Grid>
+
+                    <!-- Rules section. First rule chip is always visible; for cards with
+                         multiple rules the chip has an inline chevron on the right that
+                         toggles a panel beneath with the additional rules. Saves the
+                         vertical space a separate "N more rules" Expander would consume. -->
+                    <StackPanel Spacing="{StaticResource SpacingXSmall}" Visibility="{x:Bind HasRules}">
+                        <TextBlock Text="Rules"
+                                   Style="{StaticResource CaptionTextBlockStyle}"
+                                   Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+
+                        <!-- First rule chip + chevron, as one ExpanderPill (the
+                             shared expander control, also used on the Rules page).
+                             Body opens the rule in Rules (ToggleOnBodyTap=False);
+                             the chevron toggles the additional-rules panel and is
+                             shown only when there's more than one rule. -->
+                        <controls:ExpanderPill Margin="0,2,0,0"
+                                               IsExpanded="{x:Bind IsRulesExpanded, Mode=TwoWay}"
+                                               ChevronVisible="{x:Bind HasMultipleRules, Mode=OneWay}"
+                                               ToggleTooltip="{x:Bind AdditionalRulesLabel}"
+                                               ToggleOnBodyTap="False">
+                            <controls:ExpanderPill.PillContent>
+                                <Button Style="{StaticResource SubtleRuleChipButtonStyle}"
+                                        Background="Transparent"
+                                        Opacity="{x:Bind FirstRule.Opacity, FallbackValue=1.0, Mode=OneWay}"
+                                        DataContext="{x:Bind FirstRule, Mode=OneWay}"
+                                        Click="OnRuleChipClicked"
+                                        ToolTipService.ToolTip="Open in Rules">
+                                    <StackPanel Spacing="{StaticResource SpacingXXSmall}">
+                                        <TextBlock Text="{x:Bind FirstRule.Name, Mode=OneWay, FallbackValue=''}"
+                                                   Style="{StaticResource BodyStrongTextBlockStyle}"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   TextWrapping="NoWrap" />
+                                        <StackPanel Orientation="Horizontal" Spacing="6">
+                                            <TextBlock Text="{x:Bind FirstRule.StatusMessage, Mode=OneWay, FallbackValue=''}"
+                                                       Style="{StaticResource CaptionTextBlockStyle}"
+                                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                            <TextBlock Text="·"
+                                                       Style="{StaticResource CaptionTextBlockStyle}"
+                                                       Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                       Visibility="{x:Bind FirstRule.HasMatchSummary, Mode=OneWay, FallbackValue=Collapsed}" />
+                                            <TextBlock Text="{x:Bind FirstRule.MatchSummary, Mode=OneWay, FallbackValue=''}"
+                                                       Style="{StaticResource CaptionTextBlockStyle}"
+                                                       Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                       Visibility="{x:Bind FirstRule.HasMatchSummary, Mode=OneWay, FallbackValue=Collapsed}" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Button>
+                            </controls:ExpanderPill.PillContent>
+                        </controls:ExpanderPill>
+
+                        <!-- Additional rules, shown only when expanded. -->
+                        <ItemsControl ItemsSource="{x:Bind AdditionalRules}"
+                                      HorizontalAlignment="Stretch"
+                                      HorizontalContentAlignment="Stretch"
+                                      Visibility="{x:Bind IsRulesExpanded, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <ItemsControl.ItemContainerStyle>
+                                <Style TargetType="ContentPresenter">
+                                    <Setter Property="HorizontalAlignment" Value="Stretch" />
+                                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                </Style>
+                            </ItemsControl.ItemContainerStyle>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="vm:RuleSummary">
+                                    <ContentControl HorizontalAlignment="Stretch"
+                                                    HorizontalContentAlignment="Stretch"
+                                                    Content="{x:Bind}"
+                                                    ContentTemplate="{StaticResource RuleChipTemplate}" />
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+
+                    <TextBlock Text="No rules target this device."
+                               Style="{StaticResource MutedCaptionTextStyle}"
+                               Visibility="{x:Bind HasNoRules}" />
+
+                    <!-- Apps row sits BELOW the rules section so chevron-style expanders on
+                         rules don't have to fight an apps-section overlay above them. Visible
+                         on render cards only (HasApps stays false on capture). Each chip is the
+                         application's icon with a thin peak-level underbar; tooltip carries
+                         display name + executable path. Implicit show/hide animations fade
+                         chips in when a session appears and out when it closes so the row
+                         doesn't pop. The card-level Border carries AllowDrop+DragOver+Drop to
+                         receive the chip; the chip itself is a drag source (when not
+                         rule-locked) and carries PID + source endpoint id in the DataPackage
+                         Text payload. -->
+                    <StackPanel x:Name="AppsSection" Spacing="{StaticResource SpacingXSmall}" Visibility="{x:Bind ShowAppsSection, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <!-- Plain ItemsControl over a non-virtualizing WrapPanel (not ItemsRepeater).
+                             ItemsRepeater + a virtualizing layout can't run WinUI's built-in theme
+                             transitions and mis-targets recycled tiles on removal; a plain Panel lets
+                             ChildrenTransitions do the Fluent work: AddDelete fades chips in/out on the
+                             CORRECT element, Reorder/Reposition slide them when the weighted sort moves a
+                             chip (the "swap" animation). Chip counts per card are tiny, so no virtualization
+                             is needed. -->
+                        <ItemsControl ItemsSource="{x:Bind Apps}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <controls:WrapPanel HorizontalSpacing="{StaticResource SpacingMedium}" VerticalSpacing="{StaticResource SpacingSmall}">
+                                        <controls:WrapPanel.ChildrenTransitions>
+                                            <TransitionCollection>
+                                                <AddDeleteThemeTransition />
+                                                <ReorderThemeTransition />
+                                                <RepositionThemeTransition />
+                                            </TransitionCollection>
+                                        </controls:WrapPanel.ChildrenTransitions>
+                                    </controls:WrapPanel>
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="vm:AppChip">
+                                    <Border Width="32"
+                                            Background="Transparent"
+                                            Padding="0"
+                                            CanDrag="{x:Bind CanDrag}"
+                                            Tag="{x:Bind}"
+                                            DragStarting="OnAppChipDragStarting"
+                                            DropCompleted="OnAppChipDropCompleted"
+                                            AutomationProperties.Name="{x:Bind DisplayLabel, Mode=OneWay}"
+                                            ToolTipService.ToolTip="{x:Bind Tooltip}">
+                                        <!-- Dim lives on this inner Grid, not the Border / container: the
+                                             theme transitions drive the container's Opacity/Offset on
+                                             add/remove/reorder, so binding the dim here keeps the idle /
+                                             closed dim from fighting the transition. The icon row is a fixed
+                                             35px so the chip height is deterministic; the meter underbar
+                                             carries its own 2px top gap. With the meter hidden the chip is
+                                             just the 35px icon (5px thinner), with it shown it's the prior 40. -->
+                                        <Grid Opacity="{x:Bind ChipOpacity, Mode=OneWay}">
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="35" />
+                                                <RowDefinition Height="Auto" />
+                                            </Grid.RowDefinitions>
+
+                                            <Grid Grid.Row="0">
+                                                <FontIcon Glyph="{x:Bind FallbackGlyph}" FontSize="26"
+                                                          Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                          Visibility="{x:Bind HasNoIcon, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                                <Image Source="{x:Bind Icon, Mode=OneWay}"
+                                                       Stretch="Uniform"
+                                                       HorizontalAlignment="Center"
+                                                       VerticalAlignment="Center"
+                                                       Visibility="{x:Bind HasIcon, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                            </Grid>
+
+                                            <!-- Single colour-banded peak bar - same control + dB bands as
+                                                 the device meter (one short bar, no volume scale, no hold).
+                                                 Hidden by the "App volume meters" setting; collapsing the
+                                                 Auto row (and its margin) shrinks the chip. -->
+                                            <controls:ChannelPeakMeter Grid.Row="1"
+                                                                       Margin="0,2,0,0"
+                                                                       ChannelCount="1"
+                                                                       BarHeightOverride="3"
+                                                                       ShowHold="False"
+                                                                       Volume="1.0"
+                                                                       Visibility="{x:Bind MeterOptions.ShowAppMeters, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                                                       LeftLevel="{x:Bind PeakLevelScalar, Mode=OneWay}" />
+
+                                            <!-- Small corner badges. InfoBadge (the "official" status badge) is
+                                                 sized for nav items and overwhelms a 32px chip, so these are compact
+                                                 custom circles: a subtle neutral disc with a small glyph, the glyph
+                                                 colour carrying the meaning (neutral lock vs caution-amber close). -->
+                                            <Border Grid.Row="0"
+                                                    Background="{ThemeResource SmokeFillColorDefaultBrush}"
+                                                    CornerRadius="7"
+                                                    Width="14" Height="14"
+                                                    HorizontalAlignment="Right"
+                                                    VerticalAlignment="Top"
+                                                    Margin="0,-3,-3,0"
+                                                    ToolTipService.ToolTip="{x:Bind LockTooltip}"
+                                                    Visibility="{x:Bind IsRuleLocked, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                <FontIcon Glyph="&#xE72E;"
+                                                          FontSize="8"
+                                                          Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                                                          HorizontalAlignment="Center"
+                                                          VerticalAlignment="Center" />
+                                            </Border>
+
+                                            <!-- Closed badge: shown once the app has exited but the chip is still
+                                                 lingering. Top-left so it never collides with the lock badge. The
+                                                 caution-amber glyph signals "on its way out". Binds OneWay
+                                                 (MarkClosed / Revive flip it at runtime). -->
+                                            <Border Grid.Row="0"
+                                                    Background="{ThemeResource SmokeFillColorDefaultBrush}"
+                                                    CornerRadius="7"
+                                                    Width="14" Height="14"
+                                                    HorizontalAlignment="Left"
+                                                    VerticalAlignment="Top"
+                                                    Margin="-3,-3,0,0"
+                                                    ToolTipService.ToolTip="App closed - no longer running"
+                                                    Visibility="{x:Bind ShowClosedBadge, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                <FontIcon Glyph="&#xE711;"
+                                                          FontSize="9"
+                                                          Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                          HorizontalAlignment="Center"
+                                                          VerticalAlignment="Center" />
+                                            </Border>
+                                        </Grid>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </StackPanel>
+
+                    <!-- Transient accent dotted outline shown while a drag hovers
+                         this card's centre with intent to group onto it. -->
+                    <Rectangle RadiusX="{StaticResource CardCornerRadiusValue}" RadiusY="{StaticResource CardCornerRadiusValue}"
+                               Stroke="{ThemeResource AccentFillColorDefaultBrush}"
+                               StrokeThickness="2"
+                               StrokeDashArray="3,3"
+                               IsHitTestVisible="False"
+                               Visibility="{x:Bind IsGroupDropTarget, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                </Grid>
+            </Border>
+        </DataTemplate>
+
+        <!-- Group container block. Transparent at rest; the dotted outline shows only while a drag
+             is in flight. The title sits in a band above its members, which are laid out by a nested
+             WrapByRowLayout - because the outer BlockWrapLayout sizes this container to exactly
+             span*columnWidth+gaps, the inner layout recomputes the same column width and the members
+             line up with lone cards. -->
+        <DataTemplate x:Key="DeviceGroupCardTemplate" x:DataType="vm:DeviceGroupCard">
+            <!-- Block root: a full-width section (it claims its own row), but the group box inside is
+                 left-aligned and sized to the members' real extent, so the dotted outline + drag
+                 snapshot bound to the cards, not the empty trailing columns. -->
+            <Grid Opacity="{x:Bind Opacity, Mode=OneWay}">
+                <Grid HorizontalAlignment="Left">
+                    <!-- Padded content: a fixed 28px title band then the members. ContentPadding gives
+                         the outline breathing room around the cards while dragging (zero at rest). -->
+                    <Grid Padding="{x:Bind ContentPadding, Mode=OneWay}">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="28" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <!-- Title band. Doubles as the group's drag handle (drag to reorder the whole
+                             section); double-tap / context "Rename" edits the title; context "Ungroup
+                             all" disbands the group. -->
+                        <Grid Grid.Row="0" Padding="2,0,4,0"
+                              Background="Transparent"
+                              CanDrag="True"
+                              Tag="{x:Bind}"
+                              DragStarting="OnGroupHeaderDragStarting"
+                              DropCompleted="OnGroupHeaderDropCompleted"
+                              DoubleTapped="OnGroupTitleDoubleTapped"
+                              ToolTipService.ToolTip="Drag to move the group · double-click to rename">
+                            <Grid.ContextFlyout>
+                                <MenuFlyout>
+                                    <MenuFlyoutItem Text="Rename" Click="OnRenameGroupClicked" Tag="{x:Bind}">
+                                        <MenuFlyoutItem.Icon>
+                                            <FontIcon Glyph="&#xE8AC;" />
+                                        </MenuFlyoutItem.Icon>
+                                    </MenuFlyoutItem>
+                                    <MenuFlyoutItem Text="Ungroup all" Click="OnUngroupAllClicked" Tag="{x:Bind}">
+                                        <MenuFlyoutItem.Icon>
+                                            <FontIcon Glyph="&#xF0B4;" />
+                                        </MenuFlyoutItem.Icon>
+                                    </MenuFlyoutItem>
+                                </MenuFlyout>
+                            </Grid.ContextFlyout>
+                            <TextBlock Text="{x:Bind Title, Mode=OneWay}"
+                                       VerticalAlignment="Center"
+                                       FontWeight="SemiBold"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                       TextTrimming="CharacterEllipsis"
+                                       TextWrapping="NoWrap"
+                                       Visibility="{x:Bind ShowTitleLabel, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                            <TextBox Text="{x:Bind Title, Mode=TwoWay}"
+                                     Visibility="{x:Bind IsEditingTitle, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                     Tag="{x:Bind}"
+                                     MinHeight="0"
+                                     PlaceholderText="Group name"
+                                     KeyDown="OnGroupTitleKeyDown"
+                                     LostFocus="OnGroupTitleEditLostFocus"
+                                     Background="Transparent"
+                                     BorderThickness="0"
+                                     Padding="0"
+                                     VerticalContentAlignment="Center"
+                                     FontWeight="SemiBold"
+                                     Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        </Grid>
+
+                        <!-- Members. The inner repeater reuses the lone-card template + WrapByRowLayout
+                             so members render identically and align to the same column grid; left-
+                             aligned + content-width so the box hugs them. -->
+                        <ItemsRepeater Grid.Row="1"
+                                       HorizontalAlignment="Left"
+                                       ItemsSource="{x:Bind Members}"
+                                       ItemTemplate="{StaticResource DeviceCardTemplate}">
+                            <ItemsRepeater.Layout>
+                                <controls:WrapByRowLayout MinItemWidth="320"
+                                                          ColumnSpacing="{StaticResource SpacingMedium}"
+                                                          RowSpacing="{StaticResource SpacingMedium}" />
+                            </ItemsRepeater.Layout>
+                        </ItemsRepeater>
+                    </Grid>
+
+                    <!-- Dotted outline at the group-box bounds (non-interactive). Only one is ever
+                         visible: neutral while dragging, accent when this group is the join target. -->
+                    <Rectangle RadiusX="{StaticResource CardCornerRadiusValue}" RadiusY="{StaticResource CardCornerRadiusValue}"
+                               Stroke="{ThemeResource TextFillColorTertiaryBrush}"
+                               StrokeThickness="1"
+                               StrokeDashArray="3,3"
+                               IsHitTestVisible="False"
+                               Visibility="{x:Bind ShowNeutralOutline, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                    <Rectangle RadiusX="{StaticResource CardCornerRadiusValue}" RadiusY="{StaticResource CardCornerRadiusValue}"
+                               Stroke="{ThemeResource AccentFillColorDefaultBrush}"
+                               StrokeThickness="2"
+                               StrokeDashArray="3,3"
+                               IsHitTestVisible="False"
+                               Visibility="{x:Bind IsJoinTarget, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                </Grid>
+            </Grid>
         </DataTemplate>
     </Page.Resources>
 
@@ -109,451 +740,37 @@
                 </StackPanel>
             </Border>
 
+            <!-- Right padding insets the cards from the scrollbar so the (overlay) scrollbar sits in
+                 the gutter beside them instead of hugging the cards' right edge. -->
             <ScrollViewer Visibility="{x:Bind ViewModel.HasItems, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
                           VerticalScrollBarVisibility="Auto"
                           HorizontalScrollBarVisibility="Disabled"
+                          Padding="0,0,16,0"
                           VerticalContentAlignment="Top">
-                <ItemsRepeater ItemsSource="{x:Bind ViewModel.Devices}"
-                               VerticalAlignment="Top">
-                    <ItemsRepeater.Layout>
-                        <controls:WrapByRowLayout MinItemWidth="320"
-                                                  ColumnSpacing="{StaticResource SpacingMedium}"
-                                                  RowSpacing="{StaticResource SpacingMedium}" />
-                    </ItemsRepeater.Layout>
-                    <ItemsRepeater.ItemTemplate>
-                        <DataTemplate x:DataType="vm:DeviceCard">
-                            <Border Style="{StaticResource SectionCardStyle}"
-                                    Padding="0"
-                                    Opacity="{x:Bind CardOpacity, Mode=OneWay}"
-                                    controls:WrapByRowLayout.IsCustomSized="{x:Bind IsLayoutCustomSized, Mode=OneWay}"
-                                    AllowDrop="True"
-                                    CanDrag="True"
-                                    Tag="{x:Bind}"
-                                    RenderTransformOrigin="0.5,0.5"
-                                    DragStarting="OnDeviceCardDragStarting"
-                                    DropCompleted="OnDeviceCardDropCompleted"
-                                    DragOver="OnDeviceCardDragOver"
-                                    Drop="OnDeviceCardDrop">
-                                <!-- Shrinks slightly while another card is being dragged for reorder,
-                                     giving the dragged card a lifted look. RenderTransform doesn't
-                                     affect layout, so cards keep their grid slots. -->
-                                <Border.RenderTransform>
-                                    <ScaleTransform ScaleX="{x:Bind ReorderScaleFactor, Mode=OneWay}"
-                                                    ScaleY="{x:Bind ReorderScaleFactor, Mode=OneWay}" />
-                                </Border.RenderTransform>
-                                <!-- Right-click to show / hide the device. Replaces the always-on
-                                     eye button that used to sit top-right of every card. -->
-                                <Border.ContextFlyout>
-                                    <MenuFlyout>
-                                        <MenuFlyoutItem Text="{x:Bind HideToggleTooltip, Mode=OneWay}"
-                                                        Command="{x:Bind ToggleUserVisibilityCommand}">
-                                            <MenuFlyoutItem.Icon>
-                                                <FontIcon Glyph="{x:Bind HideToggleGlyph, Mode=OneWay}" />
-                                            </MenuFlyoutItem.Icon>
-                                        </MenuFlyoutItem>
-                                    </MenuFlyout>
-                                </Border.ContextFlyout>
-                                <Grid>
-                                    <!-- Muted tint fills the whole card. {ThemeResource} so it tracks
-                                         light/dark; shown only when muted, otherwise the card's own
-                                         LayerFill (from SectionCardStyle) shows through. -->
-                                    <Border Background="{ThemeResource SystemFillColorCriticalBackgroundBrush}"
-                                            CornerRadius="{StaticResource CardCornerRadius}"
-                                            Visibility="{x:Bind IsMuted, Mode=OneWay}" />
-                                <StackPanel Spacing="{StaticResource SpacingMedium}" Margin="{StaticResource SectionPadding}">
-                                    <!-- Header: mute toggle (icon) + name + chips -->
-                                    <Grid ColumnSpacing="{StaticResource SpacingMedium}">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="*" />
-                                        </Grid.ColumnDefinitions>
-
-                                        <!-- The Border wrapper carries ToolTipService.ToolTip so the lock-reason
-                                             tooltip still fires when the inner Button is disabled (rule-locked).
-                                             WinUI suppresses tooltips on disabled controls; a transparent
-                                             hit-testable parent is the standard workaround. -->
-                                        <Border Grid.Column="0"
-                                                Background="Transparent"
-                                                ToolTipService.ToolTip="{x:Bind MuteTooltip, Mode=OneWay}">
-                                            <!-- Accent / colour lives on a Border behind the button so the button's
-                                                 pointer-over / pressed states composite a subtle overlay *over* the
-                                                 accent, instead of the default theme grey replacing it (which reads as
-                                                 a jarring flash on a coloured tile). -->
-                                            <Grid Width="56" Height="56">
-                                                <!-- Default tile uses {ThemeResource} so it tracks light/dark;
-                                                     the accent tile is an absolute Wave Link colour (or white for
-                                                     a mix) and is deliberately theme-independent. -->
-                                                <Border CornerRadius="{StaticResource CardCornerRadius}"
-                                                        Background="{ThemeResource SubtleFillColorSecondaryBrush}"
-                                                        Visibility="{x:Bind ShowDefaultTile, Mode=OneWay}" />
-                                                <Border CornerRadius="{StaticResource CardCornerRadius}"
-                                                        Background="{x:Bind WaveLinkTileBrush, Mode=OneWay}"
-                                                        Visibility="{x:Bind ShowAccentTile, Mode=OneWay}" />
-                                                <Button Width="56" Height="56"
-                                                        Padding="0"
-                                                        Background="Transparent"
-                                                        BorderBrush="Transparent"
-                                                        CornerRadius="{StaticResource CardCornerRadius}"
-                                                        Tag="{x:Bind}"
-                                                        IsEnabled="{x:Bind IsMuteToggleEnabled, Mode=OneWay}"
-                                                        Click="OnMuteToggleClicked"
-                                                        ToolTipService.ToolTip="{x:Bind MuteTooltip, Mode=OneWay}">
-                                                    <!-- Transparent in every state but hover/press, where a faint white
-                                                         overlay lifts whatever colour sits behind. Disabled stays
-                                                         transparent so a rule-locked tile reads as non-interactive. -->
-                                                    <Button.Resources>
-                                                        <SolidColorBrush x:Key="ButtonBackground" Color="Transparent" />
-                                                        <SolidColorBrush x:Key="ButtonBackgroundDisabled" Color="Transparent" />
-                                                        <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#20FFFFFF" />
-                                                        <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="#33FFFFFF" />
-                                                        <SolidColorBrush x:Key="ButtonBorderBrushDisabled" Color="Transparent" />
-                                                        <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="Transparent" />
-                                                        <SolidColorBrush x:Key="ButtonBorderBrushPressed" Color="Transparent" />
-                                                    </Button.Resources>
-                                                    <!-- Fluent glyph by default; a Wave Link channel icon replaces it
-                                                         (not alongside) when the Icons style is selected. Three glyph
-                                                         variants so the two theme-dependent colours stay {ThemeResource}
-                                                         (which repaints on a light/dark switch); the accent-tile glyph
-                                                         is an absolute contrast colour. Exactly one is ever visible. -->
-                                                    <Grid>
-                                                        <FontIcon Glyph="{x:Bind Glyph, Mode=OneWay}"
-                                                                  FontSize="28"
-                                                                  Visibility="{x:Bind GlyphOnAccent, Mode=OneWay}"
-                                                                  Foreground="{x:Bind GlyphContrastBrush, Mode=OneWay}" />
-                                                        <FontIcon Glyph="{x:Bind Glyph, Mode=OneWay}"
-                                                                  FontSize="28"
-                                                                  Visibility="{x:Bind GlyphNormalThemed, Mode=OneWay}"
-                                                                  Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
-                                                        <FontIcon Glyph="{x:Bind Glyph, Mode=OneWay}"
-                                                                  FontSize="28"
-                                                                  Visibility="{x:Bind GlyphMutedThemed, Mode=OneWay}"
-                                                                  Foreground="{ThemeResource SystemFillColorCriticalBrush}" />
-                                                        <Image Source="{x:Bind WaveLinkIconSource, Mode=OneWay}"
-                                                               Width="40" Height="40"
-                                                               Visibility="{x:Bind ShowWaveLinkIcon, Mode=OneWay}" />
-                                                    </Grid>
-                                                </Button>
-                                            </Grid>
-                                        </Border>
-
-                                        <StackPanel Grid.Column="1" Spacing="{StaticResource SpacingXXSmall}" VerticalAlignment="Center">
-                                            <TextBlock Text="{x:Bind DeviceNameOnly}"
-                                                       Style="{StaticResource BodyStrongTextBlockStyle}"
-                                                       TextWrapping="NoWrap"
-                                                       TextTrimming="CharacterEllipsis"
-                                                       ToolTipService.ToolTip="{x:Bind DisplayName}" />
-                                            <TextBlock Text="{x:Bind DeviceIdSubtext}"
-                                                       Style="{StaticResource CaptionTextBlockStyle}"
-                                                       Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                                       TextWrapping="NoWrap"
-                                                       TextTrimming="CharacterEllipsis"
-                                                       Visibility="{x:Bind HasDeviceIdSubtext}" />
-                                            <!-- Negative left margin compensates for the ChipBorderStyle's 8px
-                                                 horizontal padding so pill text starts on the same x as the
-                                                 subtitle above it. Top margin gives the row a little breathing
-                                                 space below the subtitle so the three lines don't read crammed. -->
-                                            <StackPanel Orientation="Horizontal"
-                                                        Spacing="6"
-                                                        Margin="-8,4,0,0">
-                                                <Border Padding="8,2"
-                                                        VerticalAlignment="Center"
-                                                        Visibility="{x:Bind ShowFlowLabel}">
-                                                    <TextBlock Text="{x:Bind FlowLabel}"
-                                                               Style="{StaticResource CaptionTextBlockStyle}"
-                                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                                </Border>
-                                                <Border Style="{StaticResource ChipBorderStyle}"
-                                                        Visibility="{x:Bind IsDefault}">
-                                                    <TextBlock Text="{x:Bind DefaultPillText}"
-                                                               Style="{StaticResource CaptionTextBlockStyle}" />
-                                                </Border>
-                                                <Border Style="{StaticResource ChipBorderStyle}"
-                                                        Visibility="{x:Bind IsDefaultCommunications}">
-                                                    <TextBlock Text="{x:Bind CommunicationsPillText}"
-                                                               Style="{StaticResource CaptionTextBlockStyle}" />
-                                                </Border>
-                                            </StackPanel>
-                                        </StackPanel>
-                                    </Grid>
-
-                                    <!-- Volume row -->
-                                    <Grid ColumnSpacing="{StaticResource SpacingSmall}">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-
-                                        <!-- Peak meter sits behind the slider; slider track brushes are
-                                             overridden in scope to be transparent so the meter shows through.
-                                             Opacity dims when muted (still hit-testable so a drag unmutes). -->
-                                        <Grid Grid.Column="0" Height="28"
-                                              Opacity="{x:Bind VolumeAreaOpacity, Mode=OneWay}">
-                                            <Grid.Resources>
-                                                <SolidColorBrush x:Key="SliderTrackFill" Color="Transparent" />
-                                                <SolidColorBrush x:Key="SliderTrackValueFill" Color="Transparent" />
-                                                <SolidColorBrush x:Key="SliderTrackFillPointerOver" Color="Transparent" />
-                                                <SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="Transparent" />
-                                                <SolidColorBrush x:Key="SliderTrackFillPressed" Color="Transparent" />
-                                                <SolidColorBrush x:Key="SliderTrackValueFillPressed" Color="Transparent" />
-                                                <SolidColorBrush x:Key="SliderTrackFillDisabled" Color="Transparent" />
-                                                <SolidColorBrush x:Key="SliderTrackValueFillDisabled" Color="Transparent" />
-                                                <!-- Thumb kept at the WinUI default colours (incl. the greyed disabled
-                                                     thumb), sized down to 14 so it sits comfortably inside the 20px bar
-                                                     stack and clears the column edge at 100%. -->
-                                                <x:Double x:Key="SliderHorizontalThumbWidth">14</x:Double>
-                                                <x:Double x:Key="SliderHorizontalThumbHeight">14</x:Double>
-                                            </Grid.Resources>
-
-                                            <!-- Per-channel peak meter (1-3 stacked colour-banded bars) sitting behind
-                                                 the slider; the slider track is transparent in this scope so the bars
-                                                 show through. Bar stack height tracks the slider thumb. -->
-                                            <controls:ChannelPeakMeter Margin="8,0"
-                                                                       VerticalAlignment="Center"
-                                                                       ChannelCount="{x:Bind ChannelCount, Mode=OneWay}"
-                                                                       LeftLevel="{x:Bind LeftLevel, Mode=OneWay}"
-                                                                       RightLevel="{x:Bind RightLevel, Mode=OneWay}"
-                                                                       CentreLfeLevel="{x:Bind CentreLfeLevel, Mode=OneWay}"
-                                                                       LeftHold="{x:Bind LeftHold, Mode=OneWay}"
-                                                                       RightHold="{x:Bind RightHold, Mode=OneWay}"
-                                                                       CentreLfeHold="{x:Bind CentreLfeHold, Mode=OneWay}"
-                                                                       Volume="{x:Bind MeterVolume, Mode=OneWay}" />
-
-                                            <!-- Right margin = thumb radius so the thumb visual at 100% isn't
-                                                 clipped by the column edge. Left margin kept at 0; the thumb
-                                                 at 0% sits inside the existing peak-meter 8px inset. -->
-                                            <!-- Padding insets the thumb travel inside the slider's own clip bounds
-                                                 (the control clips its thumb at the edge), so the thumb stays fully
-                                                 round at 0% / 100% instead of having its outer ring shaved off. -->
-                                            <Slider Minimum="0"
-                                                    Maximum="100"
-                                                    StepFrequency="1"
-                                                    SmallChange="1"
-                                                    LargeChange="5"
-                                                    Margin="0,0,2,0"
-                                                    Padding="8,0,8,0"
-                                                    Value="{x:Bind VolumePercent, Mode=TwoWay}"
-                                                    IsEnabled="{x:Bind IsVolumeEditable, Mode=OneWay}"
-                                                    Tag="{x:Bind}"
-                                                    PointerPressed="OnSliderPointerPressed"
-                                                    PointerCaptureLost="OnSliderReleased"
-                                                    KeyDown="OnSliderKeyDown"
-                                                    KeyUp="OnSliderKeyUp"
-                                                    LostFocus="OnSliderLostFocus"
-                                                    VerticalAlignment="Center"
-                                                    Background="Transparent">
-                                                <!-- The Slider control's thumb sits a couple of px below its layout
-                                                     centre; nudge the whole control up so the thumb centres on the
-                                                     bar stack behind it. RenderTransform doesn't affect layout. -->
-                                                <Slider.RenderTransform>
-                                                    <TranslateTransform Y="-2" />
-                                                </Slider.RenderTransform>
-                                            </Slider>
-
-                                            <Border Background="Transparent"
-                                                    Tapped="OnLockedSliderTapped"
-                                                    PointerPressed="OnLockedSliderPointerPressed"
-                                                    PointerReleased="OnLockedSliderPointerReleased"
-                                                    ToolTipService.ToolTip="{x:Bind VolumeLockedTooltip, Mode=OneWay}"
-                                                    Visibility="{x:Bind IsVolumeLocked, Mode=OneWay}" />
-                                        </Grid>
-
-                                        <TextBlock Grid.Column="1"
-                                                   Text="{x:Bind VolumePercentText, Mode=OneWay}"
-                                                   Style="{StaticResource CaptionTextBlockStyle}"
-                                                   MinWidth="38"
-                                                   TextAlignment="Right"
-                                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                   VerticalAlignment="Center" />
-
-                                        <FontIcon Grid.Column="2"
-                                                  Glyph="&#xE72E;" FontSize="12"
-                                                  Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                                  VerticalAlignment="Center"
-                                                  ToolTipService.ToolTip="{x:Bind VolumeLockedTooltip, Mode=OneWay}"
-                                                  Visibility="{x:Bind IsVolumeLockedByRule, Mode=OneWay}" />
-                                    </Grid>
-
-                                    <!-- Rules section. First rule chip is always visible; for cards with
-                                         multiple rules the chip has an inline chevron on the right that
-                                         toggles a panel beneath with the additional rules. Saves the
-                                         vertical space a separate "N more rules" Expander would consume. -->
-                                    <StackPanel Spacing="{StaticResource SpacingXSmall}" Visibility="{x:Bind HasRules}">
-                                        <TextBlock Text="Rules"
-                                                   Style="{StaticResource CaptionTextBlockStyle}"
-                                                   Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
-
-                                        <!-- First rule chip + chevron, as one ExpanderPill (the
-                                             shared expander control, also used on the Rules page).
-                                             Body opens the rule in Rules (ToggleOnBodyTap=False);
-                                             the chevron toggles the additional-rules panel and is
-                                             shown only when there's more than one rule. -->
-                                        <controls:ExpanderPill Margin="0,2,0,0"
-                                                               IsExpanded="{x:Bind IsRulesExpanded, Mode=TwoWay}"
-                                                               ChevronVisible="{x:Bind HasMultipleRules, Mode=OneWay}"
-                                                               ToggleTooltip="{x:Bind AdditionalRulesLabel}"
-                                                               ToggleOnBodyTap="False">
-                                            <controls:ExpanderPill.PillContent>
-                                                <Button Style="{StaticResource SubtleRuleChipButtonStyle}"
-                                                        Background="Transparent"
-                                                        Opacity="{x:Bind FirstRule.Opacity, FallbackValue=1.0, Mode=OneWay}"
-                                                        DataContext="{x:Bind FirstRule, Mode=OneWay}"
-                                                        Click="OnRuleChipClicked"
-                                                        ToolTipService.ToolTip="Open in Rules">
-                                                    <StackPanel Spacing="{StaticResource SpacingXXSmall}">
-                                                        <TextBlock Text="{x:Bind FirstRule.Name, Mode=OneWay, FallbackValue=''}"
-                                                                   Style="{StaticResource BodyStrongTextBlockStyle}"
-                                                                   TextTrimming="CharacterEllipsis"
-                                                                   TextWrapping="NoWrap" />
-                                                        <StackPanel Orientation="Horizontal" Spacing="6">
-                                                            <TextBlock Text="{x:Bind FirstRule.StatusMessage, Mode=OneWay, FallbackValue=''}"
-                                                                       Style="{StaticResource CaptionTextBlockStyle}"
-                                                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                                            <TextBlock Text="·"
-                                                                       Style="{StaticResource CaptionTextBlockStyle}"
-                                                                       Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                                                       Visibility="{x:Bind FirstRule.HasMatchSummary, Mode=OneWay, FallbackValue=Collapsed}" />
-                                                            <TextBlock Text="{x:Bind FirstRule.MatchSummary, Mode=OneWay, FallbackValue=''}"
-                                                                       Style="{StaticResource CaptionTextBlockStyle}"
-                                                                       Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                                                       Visibility="{x:Bind FirstRule.HasMatchSummary, Mode=OneWay, FallbackValue=Collapsed}" />
-                                                        </StackPanel>
-                                                    </StackPanel>
-                                                </Button>
-                                            </controls:ExpanderPill.PillContent>
-                                        </controls:ExpanderPill>
-
-                                        <!-- Additional rules, shown only when expanded. -->
-                                        <ItemsControl ItemsSource="{x:Bind AdditionalRules}"
-                                                      HorizontalAlignment="Stretch"
-                                                      HorizontalContentAlignment="Stretch"
-                                                      Visibility="{x:Bind IsRulesExpanded, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                            <ItemsControl.ItemContainerStyle>
-                                                <Style TargetType="ContentPresenter">
-                                                    <Setter Property="HorizontalAlignment" Value="Stretch" />
-                                                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                                                </Style>
-                                            </ItemsControl.ItemContainerStyle>
-                                            <ItemsControl.ItemTemplate>
-                                                <DataTemplate x:DataType="vm:RuleSummary">
-                                                    <ContentControl HorizontalAlignment="Stretch"
-                                                                    HorizontalContentAlignment="Stretch"
-                                                                    Content="{x:Bind}"
-                                                                    ContentTemplate="{StaticResource RuleChipTemplate}" />
-                                                </DataTemplate>
-                                            </ItemsControl.ItemTemplate>
-                                        </ItemsControl>
-                                    </StackPanel>
-
-                                    <TextBlock Text="No rules target this device."
-                                               Style="{StaticResource MutedCaptionTextStyle}"
-                                               Visibility="{x:Bind HasNoRules}" />
-
-                                    <!-- Apps row sits BELOW the rules section so chevron-style expanders on
-                                         rules don't have to fight an apps-section overlay above them. Visible
-                                         on render cards only (HasApps stays false on capture). Each chip is the
-                                         application's icon with a thin peak-level underbar; tooltip carries
-                                         display name + executable path. Implicit show/hide animations fade
-                                         chips in when a session appears and out when it closes so the row
-                                         doesn't pop. The card-level Border carries AllowDrop+DragOver+Drop to
-                                         receive the chip; the chip itself is a drag source (when not
-                                         rule-locked) and carries PID + source endpoint id in the DataPackage
-                                         Text payload. -->
-                                    <StackPanel x:Name="AppsSection" Spacing="{StaticResource SpacingXSmall}" Visibility="{x:Bind HasApps, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                        <ItemsRepeater ItemsSource="{x:Bind Apps}">
-                                            <ItemsRepeater.Layout>
-                                                <controls:WrapByRowLayout MinItemWidth="32" ColumnSpacing="{StaticResource SpacingXSmall}" RowSpacing="6" />
-                                            </ItemsRepeater.Layout>
-                                            <ItemsRepeater.ItemTemplate>
-                                                <DataTemplate x:DataType="vm:AppChip">
-                                                    <Border Width="32" Height="40"
-                                                            Background="Transparent"
-                                                            Padding="0"
-                                                            CanDrag="{x:Bind CanDrag}"
-                                                            Tag="{x:Bind}"
-                                                            DragStarting="OnAppChipDragStarting"
-                                                            DropCompleted="OnAppChipDropCompleted"
-                                                            ToolTipService.ToolTip="{x:Bind Tooltip}">
-                                                        <animations:Implicit.ShowAnimations>
-                                                            <animations:OpacityAnimation Duration="0:0:0.18" From="0" To="1" />
-                                                        </animations:Implicit.ShowAnimations>
-                                                        <animations:Implicit.HideAnimations>
-                                                            <animations:OpacityAnimation Duration="0:0:0.14" From="1" To="0" />
-                                                        </animations:Implicit.HideAnimations>
-                                                        <!-- Dim lives on the content, not the Border: the Border's implicit
-                                                             show animation animates its Opacity to 1 and pins it there, which
-                                                             would override a dim bound on the Border. Binding the inner Grid
-                                                             instead lets the fade-in and the idle/locked dim compose. -->
-                                                        <Grid RowSpacing="2" Opacity="{x:Bind ChipOpacity, Mode=OneWay}">
-                                                            <Grid.RowDefinitions>
-                                                                <RowDefinition Height="*" />
-                                                                <RowDefinition Height="Auto" />
-                                                            </Grid.RowDefinitions>
-
-                                                            <Grid Grid.Row="0">
-                                                                <FontIcon Glyph="&#xECAA;" FontSize="26"
-                                                                          Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                                                          Visibility="{x:Bind HasNoIcon, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                                                <Image Source="{x:Bind Icon, Mode=OneWay}"
-                                                                       Stretch="Uniform"
-                                                                       HorizontalAlignment="Center"
-                                                                       VerticalAlignment="Center"
-                                                                       Visibility="{x:Bind HasIcon, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                                            </Grid>
-
-                                                            <!-- Single colour-banded peak bar - same control + dB bands as
-                                                                 the device meter (one short bar, no volume scale, no hold). -->
-                                                            <controls:ChannelPeakMeter Grid.Row="1"
-                                                                                       ChannelCount="1"
-                                                                                       BarHeightOverride="3"
-                                                                                       ShowHold="False"
-                                                                                       Volume="1.0"
-                                                                                       LeftLevel="{x:Bind PeakLevelScalar, Mode=OneWay}" />
-
-                                                            <Border Grid.Row="0"
-                                                                    Background="{ThemeResource SmokeFillColorDefaultBrush}"
-                                                                    CornerRadius="6"
-                                                                    Width="14" Height="14"
-                                                                    HorizontalAlignment="Right"
-                                                                    VerticalAlignment="Top"
-                                                                    Margin="0,-3,-3,0"
-                                                                    ToolTipService.ToolTip="{x:Bind LockTooltip}"
-                                                                    Visibility="{x:Bind IsRuleLocked, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                                                <FontIcon Glyph="&#xE72E;"
-                                                                          FontSize="8"
-                                                                          Foreground="{ThemeResource TextFillColorPrimaryBrush}"
-                                                                          HorizontalAlignment="Center"
-                                                                          VerticalAlignment="Center" />
-                                                            </Border>
-                                                        </Grid>
-                                                    </Border>
-                                                </DataTemplate>
-                                            </ItemsRepeater.ItemTemplate>
-                                        </ItemsRepeater>
-                                    </StackPanel>
-                                </StackPanel>
-
-                                    <!-- Reorder drop indicators: a thin accent rule on the edge the
-                                         dragged card would land against. Non-hit-testable so they
-                                         never interfere with the drag; collapsed unless the page lights
-                                         one up during a card-reorder DragOver. -->
-                                    <Border Width="3"
-                                            HorizontalAlignment="Left"
-                                            CornerRadius="{StaticResource CardCornerRadius}"
-                                            Background="{ThemeResource AccentFillColorDefaultBrush}"
-                                            IsHitTestVisible="False"
-                                            Visibility="{x:Bind ShowInsertBefore, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                    <Border Width="3"
-                                            HorizontalAlignment="Right"
-                                            CornerRadius="{StaticResource CardCornerRadius}"
-                                            Background="{ThemeResource AccentFillColorDefaultBrush}"
-                                            IsHitTestVisible="False"
-                                            Visibility="{x:Bind ShowInsertAfter, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                </Grid>
-                            </Border>
-                        </DataTemplate>
-                    </ItemsRepeater.ItemTemplate>
-                </ItemsRepeater>
+                <!-- Transparent drop surface around the repeater: block reorder is handled here (not
+                     per-card) so the insertion point is computed from the layout's frozen no-gap
+                     geometry. That keeps it stable while blocks slide to open the gap, and catches a
+                     drop over the empty gap or past the last block. App-chip drops stay per-card. -->
+                <Grid Background="Transparent"
+                      AllowDrop="True"
+                      DragOver="OnBlocksDragOver"
+                      Drop="OnBlocksDrop"
+                      Tapped="OnContentTapped">
+                    <ItemsRepeater x:Name="DevicesRepeater"
+                                   ItemsSource="{x:Bind ViewModel.Blocks}"
+                                   ElementPrepared="OnBlockElementPrepared"
+                                   VerticalAlignment="Top">
+                        <ItemsRepeater.Layout>
+                            <controls:BlockWrapLayout MinItemWidth="320"
+                                                      ColumnSpacing="{StaticResource SpacingMedium}"
+                                                      RowSpacing="{StaticResource SpacingMedium}" />
+                        </ItemsRepeater.Layout>
+                        <ItemsRepeater.ItemTemplate>
+                            <controls:BlockTemplateSelector CardTemplate="{StaticResource DeviceCardTemplate}"
+                                                            GroupTemplate="{StaticResource DeviceGroupCardTemplate}" />
+                        </ItemsRepeater.ItemTemplate>
+                    </ItemsRepeater>
+                </Grid>
             </ScrollViewer>
         </Grid>
     </Grid>

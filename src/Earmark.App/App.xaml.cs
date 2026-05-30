@@ -113,6 +113,10 @@ public partial class App : Application
             _ = initTask.ContinueWith(
                 t => _logger.LogError(t.Exception, "Background startup failed"),
                 TaskContinuationOptions.OnlyOnFaulted);
+
+            // Background update check (unpackaged builds only; the service self-gates on packaged
+            // identity and the CheckForUpdates setting). Fire-and-forget so it never blocks startup.
+            _ = _host.Services.GetRequiredService<IUpdateService>().CheckForUpdatesAsync(manual: false);
         }
         catch (Exception ex)
         {
