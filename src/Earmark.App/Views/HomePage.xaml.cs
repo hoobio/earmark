@@ -115,7 +115,7 @@ public sealed partial class HomePage : Page
         EndBlockReorder();
     }
 
-    private void OnGroupHeaderDragStarting(UIElement sender, DragStartingEventArgs args)
+    private async void OnGroupHeaderDragStarting(UIElement sender, DragStartingEventArgs args)
     {
         if (sender is not FrameworkElement { Tag: DeviceGroupCard group }) return;
 
@@ -124,9 +124,30 @@ public sealed partial class HomePage : Page
 
         _draggedBlock = group;
         _draggedBlockId = group.Id;
-        group.IsBeingDragged = true;
         EnableReorderAnimations(true);
-        SetDragInProgress(true);
+        SetDragInProgress(true);   // reveals the dotted outline + drag padding on every group
+
+        // Drag visual: a snapshot of the group BOX (cards + title + its dotted outline), bounded to
+        // the members' extent - not the full-width section. The box is the block element's first
+        // child (the left-aligned, member-width Grid). Render after the outline + padding apply, and
+        // before hiding the source.
+        var index = ViewModel.Blocks.IndexOf(group);
+        var element = index >= 0 ? DevicesRepeater.TryGetElement(index) : null;
+        var box = (element as Panel)?.Children.FirstOrDefault() as FrameworkElement ?? element as FrameworkElement;
+        if (box is not null)
+        {
+            var deferral = args.GetDeferral();
+            try
+            {
+                box.UpdateLayout();
+                var bitmap = await RenderCardOpaqueAsync(box);
+                if (bitmap is not null) args.DragUI.SetContentFromSoftwareBitmap(bitmap);
+            }
+            catch { /* keep the default visual if the snapshot fails */ }
+            finally { deferral.Complete(); }
+        }
+
+        group.IsBeingDragged = true;
     }
 
     private void OnGroupHeaderDropCompleted(UIElement sender, DropCompletedEventArgs args)

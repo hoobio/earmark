@@ -556,60 +556,67 @@
              span*columnWidth+gaps, the inner layout recomputes the same column width and the members
              line up with lone cards. -->
         <DataTemplate x:Key="DeviceGroupCardTemplate" x:DataType="vm:DeviceGroupCard">
-            <!-- Two explicit rows: a fixed 28px title band (matching BlockWrapLayout.GroupTitleBand,
-                 which the outer layout reserves so lone cards on the same row align with the members)
-                 then the members. No inter-row spacing so the members start at exactly 28px. -->
+            <!-- Block root: a full-width section (it claims its own row), but the group box inside is
+                 left-aligned and sized to the members' real extent, so the dotted outline + drag
+                 snapshot bound to the cards, not the empty trailing columns. -->
             <Grid Opacity="{x:Bind Opacity, Mode=OneWay}">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="28" />
-                    <RowDefinition Height="Auto" />
-                </Grid.RowDefinitions>
+                <Grid HorizontalAlignment="Left">
+                    <!-- Padded content: a fixed 28px title band then the members. ContentPadding gives
+                         the outline breathing room around the cards while dragging (zero at rest). -->
+                    <Grid Padding="{x:Bind ContentPadding, Mode=OneWay}">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="28" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
 
-                <!-- Title band. Doubles as the group's drag handle: dragging it reorders the whole
-                     group section among the other blocks. -->
-                <Grid Grid.Row="0" Padding="2,0,4,0"
-                      Background="Transparent"
-                      CanDrag="True"
-                      Tag="{x:Bind}"
-                      DragStarting="OnGroupHeaderDragStarting"
-                      DropCompleted="OnGroupHeaderDropCompleted"
-                      ToolTipService.ToolTip="Drag to move the group">
-                    <TextBlock Text="{x:Bind Title, Mode=OneWay}"
-                               VerticalAlignment="Center"
-                               FontWeight="SemiBold"
-                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                               TextTrimming="CharacterEllipsis"
-                               TextWrapping="NoWrap"
-                               Visibility="{x:Bind ShowTitleLabel, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                        <!-- Title band. Doubles as the group's drag handle: dragging it reorders the
+                             whole group section among the other blocks. -->
+                        <Grid Grid.Row="0" Padding="2,0,4,0"
+                              Background="Transparent"
+                              CanDrag="True"
+                              Tag="{x:Bind}"
+                              DragStarting="OnGroupHeaderDragStarting"
+                              DropCompleted="OnGroupHeaderDropCompleted"
+                              ToolTipService.ToolTip="Drag to move the group">
+                            <TextBlock Text="{x:Bind Title, Mode=OneWay}"
+                                       VerticalAlignment="Center"
+                                       FontWeight="SemiBold"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                       TextTrimming="CharacterEllipsis"
+                                       TextWrapping="NoWrap"
+                                       Visibility="{x:Bind ShowTitleLabel, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                        </Grid>
+
+                        <!-- Members. The inner repeater reuses the lone-card template + WrapByRowLayout
+                             so members render identically and align to the same column grid; left-
+                             aligned + content-width so the box hugs them. -->
+                        <ItemsRepeater Grid.Row="1"
+                                       HorizontalAlignment="Left"
+                                       ItemsSource="{x:Bind Members}"
+                                       ItemTemplate="{StaticResource DeviceCardTemplate}">
+                            <ItemsRepeater.Layout>
+                                <controls:WrapByRowLayout MinItemWidth="320"
+                                                          ColumnSpacing="{StaticResource SpacingMedium}"
+                                                          RowSpacing="{StaticResource SpacingMedium}" />
+                            </ItemsRepeater.Layout>
+                        </ItemsRepeater>
+                    </Grid>
+
+                    <!-- Dotted outline at the group-box bounds (non-interactive). Only one is ever
+                         visible: neutral while dragging, accent when this group is the join target. -->
+                    <Rectangle RadiusX="8" RadiusY="8"
+                               Stroke="{ThemeResource TextFillColorTertiaryBrush}"
+                               StrokeThickness="1"
+                               StrokeDashArray="3,3"
+                               IsHitTestVisible="False"
+                               Visibility="{x:Bind ShowNeutralOutline, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                    <Rectangle RadiusX="8" RadiusY="8"
+                               Stroke="{ThemeResource AccentFillColorDefaultBrush}"
+                               StrokeThickness="2"
+                               StrokeDashArray="3,3"
+                               IsHitTestVisible="False"
+                               Visibility="{x:Bind IsJoinTarget, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
                 </Grid>
-
-                <!-- Members. The inner repeater reuses the lone-card template + WrapByRowLayout
-                     so members render identically and align to the same column grid. -->
-                <ItemsRepeater Grid.Row="1"
-                               ItemsSource="{x:Bind Members}"
-                               ItemTemplate="{StaticResource DeviceCardTemplate}">
-                    <ItemsRepeater.Layout>
-                        <controls:WrapByRowLayout MinItemWidth="320"
-                                                  ColumnSpacing="{StaticResource SpacingMedium}"
-                                                  RowSpacing="{StaticResource SpacingMedium}" />
-                    </ItemsRepeater.Layout>
-                </ItemsRepeater>
-
-                <!-- Dotted outline overlays (drawn over the whole container, non-interactive). Only
-                     one is ever visible: neutral while dragging, accent when this group is the join
-                     drop target. -->
-                <Rectangle Grid.RowSpan="2" RadiusX="8" RadiusY="8"
-                           Stroke="{ThemeResource TextFillColorTertiaryBrush}"
-                           StrokeThickness="1"
-                           StrokeDashArray="3,3"
-                           IsHitTestVisible="False"
-                           Visibility="{x:Bind ShowNeutralOutline, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                <Rectangle Grid.RowSpan="2" RadiusX="8" RadiusY="8"
-                           Stroke="{ThemeResource AccentFillColorDefaultBrush}"
-                           StrokeThickness="2"
-                           StrokeDashArray="3,3"
-                           IsHitTestVisible="False"
-                           Visibility="{x:Bind IsJoinTarget, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
             </Grid>
         </DataTemplate>
     </Page.Resources>

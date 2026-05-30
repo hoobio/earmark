@@ -4,6 +4,8 @@ using CommunityToolkit.Mvvm.ComponentModel;
 
 using Earmark.App.Controls;
 
+using Microsoft.UI.Xaml;
+
 namespace Earmark.App.ViewModels;
 
 /// <summary>
@@ -81,7 +83,17 @@ public partial class DeviceGroupCard : ObservableObject, IBlockLayoutInfo
 
     public bool ShowNeutralOutline => ShowOutline && !IsJoinTarget;
 
-    partial void OnShowOutlineChanged(bool value) => OnPropertyChanged(nameof(ShowNeutralOutline));
+    /// <summary>Inset applied to the members while a drag is in flight, so the dotted outline (drawn
+    /// at the group-box bounds) has breathing room around the cards instead of hugging them. Left /
+    /// right / bottom only - the title band already supplies the top gap. Zero at rest.</summary>
+    public Thickness ContentPadding => ShowOutline ? new Thickness(8, 0, 8, 8) : new Thickness(0);
+
+    partial void OnShowOutlineChanged(bool value)
+    {
+        OnPropertyChanged(nameof(ShowNeutralOutline));
+        OnPropertyChanged(nameof(ContentPadding));
+    }
+
     partial void OnIsJoinTargetChanged(bool value) => OnPropertyChanged(nameof(ShowNeutralOutline));
 
     /// <summary>Refreshes the title from the persisted record without firing the change callback

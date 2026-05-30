@@ -232,9 +232,14 @@ public sealed class WrapByRowLayout : VirtualizingLayout
 
         var identity = new int[context.ItemCount];
         for (var i = 0; i < identity.Length; i++) identity[i] = i;
-        ComputeSlotRects(context, availableSize.Width, identity, out var totalHeight);
+        var rects = ComputeSlotRects(context, availableSize.Width, identity, out var totalHeight);
 
-        return new Size(availableSize.Width, totalHeight);
+        // Report the actual content width (the widest row), not the full available width, so a host
+        // that left-aligns this repeater (a group section with fewer members than columns) sizes to
+        // the members' real extent instead of stretching empty trailing space.
+        var contentWidth = 0.0;
+        foreach (var r in rects) contentWidth = Math.Max(contentWidth, r.Right);
+        return new Size(Math.Min(contentWidth, availableSize.Width), totalHeight);
     }
 
     protected override Size ArrangeOverride(VirtualizingLayoutContext context, Size finalSize)
