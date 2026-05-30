@@ -1,4 +1,5 @@
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 
 using Earmark.App.Services;
 using Earmark.Core.Audio;
@@ -76,13 +77,17 @@ public partial class AppChip : ObservableObject
         return true;
     }
 
-    public AppChip(AudioSession session, string placementEndpointId, ISessionIconService iconService, PeakMeterOptions meterOptions, RoutingRule? lockingRule, bool startsActive = true)
+    private readonly Action<AppChip>? _onHide;
+
+    public AppChip(AudioSession session, string placementEndpointId, ISessionIconService iconService, PeakMeterOptions meterOptions, RoutingRule? lockingRule, bool startsActive = true, DeviceCard? ownerCard = null, Action<AppChip>? onHide = null)
     {
         Session = session ?? throw new ArgumentNullException(nameof(session));
         PlacementEndpointId = placementEndpointId ?? throw new ArgumentNullException(nameof(placementEndpointId));
         _iconService = iconService ?? throw new ArgumentNullException(nameof(iconService));
         MeterOptions = meterOptions ?? throw new ArgumentNullException(nameof(meterOptions));
         LockingRule = lockingRule;
+        OwnerCard = ownerCard;
+        _onHide = onHide;
         // An audible chip is treated as having started its run the moment we first see it (we can't
         // know when it truly started before observing). A silent rule-pinned chip starts with both
         // timestamps null - "never produced audio" - so it sits in the back tier, dimmed, until it
@@ -164,6 +169,16 @@ public partial class AppChip : ObservableObject
     /// </summary>
     public string PlacementEndpointId { get; }
     public string SourceEndpointId => PlacementEndpointId;
+
+    /// <summary>The device card this chip lives on. Set at construction (a chip never migrates cards -
+    /// a card change spawns a fresh chip), so the chip's context menu can offer the owning card's
+    /// device / group actions alongside the app-specific "Hide this app".</summary>
+    public DeviceCard? OwnerCard { get; }
+
+    /// <summary>Permanently hides this app from every device card's chip row (it still routes and plays;
+    /// only the chip is suppressed). Persisted via <c>HomeViewModel</c>; reversible from Settings.</summary>
+    [RelayCommand]
+    private void Hide() => _onHide?.Invoke(this);
 
     public string LockTooltip
     {

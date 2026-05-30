@@ -481,6 +481,59 @@
                                             DropCompleted="OnAppChipDropCompleted"
                                             AutomationProperties.Name="{x:Bind DisplayLabel, Mode=OneWay}"
                                             ToolTipService.ToolTip="{x:Bind Tooltip}">
+                                        <!-- Right-click a chip: the app-specific "Hide this app" sits ABOVE the
+                                             owning card's device / group actions (bound through OwnerCard), so a
+                                             chip's menu is a superset of the card's. The device / group block
+                                             mirrors the card's ContextFlyout above - keep the two in sync. -->
+                                        <Border.ContextFlyout>
+                                            <MenuFlyout>
+                                                <MenuFlyoutItem Text="Hide this app"
+                                                                Command="{x:Bind HideCommand}"
+                                                                ToolTipService.ToolTip="Permanently hide this app's chip from every device. Unhide it from Settings &#x2192; App indicators.">
+                                                    <MenuFlyoutItem.Icon>
+                                                        <FontIcon Glyph="&#xED1A;" />
+                                                    </MenuFlyoutItem.Icon>
+                                                </MenuFlyoutItem>
+                                                <MenuFlyoutSeparator />
+                                                <MenuFlyoutItem Text="{x:Bind OwnerCard.HideToggleTooltip, Mode=OneWay}"
+                                                                Command="{x:Bind OwnerCard.ToggleUserVisibilityCommand}">
+                                                    <MenuFlyoutItem.Icon>
+                                                        <FontIcon Glyph="{x:Bind OwnerCard.HideToggleGlyph, Mode=OneWay}" />
+                                                    </MenuFlyoutItem.Icon>
+                                                </MenuFlyoutItem>
+                                                <MenuFlyoutItem Text="{x:Bind OwnerCard.VolumeControlsToggleLabel, Mode=OneWay}"
+                                                                Command="{x:Bind OwnerCard.ToggleVolumeControlsCommand}">
+                                                    <MenuFlyoutItem.Icon>
+                                                        <FontIcon Glyph="{x:Bind OwnerCard.VolumeControlsToggleGlyph, Mode=OneWay}" />
+                                                    </MenuFlyoutItem.Icon>
+                                                </MenuFlyoutItem>
+                                                <MenuFlyoutSeparator Visibility="{x:Bind OwnerCard.IsGroupMember, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                                <MenuFlyoutItem Text="Rename group"
+                                                                Click="OnRenameGroupClicked"
+                                                                Tag="{x:Bind OwnerCard}"
+                                                                Visibility="{x:Bind OwnerCard.IsGroupMember, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                    <MenuFlyoutItem.Icon>
+                                                        <FontIcon Glyph="&#xE8AC;" />
+                                                    </MenuFlyoutItem.Icon>
+                                                </MenuFlyoutItem>
+                                                <MenuFlyoutItem Text="Ungroup device"
+                                                                Click="OnUngroupDeviceClicked"
+                                                                Tag="{x:Bind OwnerCard}"
+                                                                Visibility="{x:Bind OwnerCard.IsGroupMember, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                    <MenuFlyoutItem.Icon>
+                                                        <FontIcon Glyph="&#xF0B4;" />
+                                                    </MenuFlyoutItem.Icon>
+                                                </MenuFlyoutItem>
+                                                <MenuFlyoutItem Text="Ungroup all"
+                                                                Click="OnUngroupAllClicked"
+                                                                Tag="{x:Bind OwnerCard}"
+                                                                Visibility="{x:Bind OwnerCard.IsGroupMember, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                    <MenuFlyoutItem.Icon>
+                                                        <FontIcon Glyph="&#xF0B4;" />
+                                                    </MenuFlyoutItem.Icon>
+                                                </MenuFlyoutItem>
+                                            </MenuFlyout>
+                                        </Border.ContextFlyout>
                                         <!-- Dim lives on this inner Grid, not the Border / container: the
                                              theme transitions drive the container's Opacity/Offset on
                                              add/remove/reorder, so binding the dim here keeps the idle /

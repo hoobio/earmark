@@ -1,3 +1,5 @@
+using System.Collections.ObjectModel;
+
 using CommunityToolkit.Mvvm.ComponentModel;
 
 using Earmark.App.Services;
@@ -190,6 +192,67 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     /// <summary>Gates the app-indicator child settings - they only matter while the chips show.</summary>
     public bool AppIndicatorChildrenEnabled => ShowAppIndicators;
 
+    // ---- Hidden apps (chip "Hide this app" context menu) ----
+
+    /// <summary>Apps the user has permanently hidden from the device cards' chip rows. Populated by
+    /// <see cref="LoadHiddenApps"/> when the manage modal opens, and mutated by unhide / clear.</summary>
+    public ObservableCollection<HiddenAppRow> HiddenApps { get; } = new();
+
+    public bool HasHiddenApps => _settings.Current.HiddenApps.Count > 0;
+    public bool NoHiddenApps => !HasHiddenApps;
+
+    /// <summary>Card description that reflects how many apps are hidden.</summary>
+    public string HiddenAppsDescription
+    {
+        get
+        {
+            var n = _settings.Current.HiddenApps.Count;
+            return n == 0
+                ? "Apps you've hidden from the device cards with a chip's right-click menu. None hidden yet."
+                : $"{n} app{(n == 1 ? "" : "s")} hidden from the device cards. Manage to unhide.";
+        }
+    }
+
+    /// <summary>(Re)loads the manage list from settings - called when the modal opens so it reflects
+    /// hides made on the Devices page since the page was last shown.</summary>
+    public void LoadHiddenApps()
+    {
+        HiddenApps.Clear();
+        foreach (var app in _settings.Current.HiddenApps)
+        {
+            HiddenApps.Add(new HiddenAppRow(app.Key, app.Name));
+        }
+        RefreshHiddenAppsState();
+    }
+
+    /// <summary>Unhides one app: its chip can reappear on the device cards. Persists immediately;
+    /// <c>HomeViewModel</c> reconciles via the settings-changed event.</summary>
+    public void UnhideApp(HiddenAppRow row)
+    {
+        if (row is null) return;
+        HiddenApps.Remove(row);
+        Persist(s => s.HiddenApps.RemoveAll(h => string.Equals(h.Key, row.Key, StringComparison.OrdinalIgnoreCase)));
+        RefreshHiddenAppsState();
+    }
+
+    /// <summary>Unhides every app at once.</summary>
+    public void ClearAllHiddenApps()
+    {
+        if (_settings.Current.HiddenApps.Count == 0) return;
+        HiddenApps.Clear();
+        Persist(s => s.HiddenApps.Clear());
+        RefreshHiddenAppsState();
+    }
+
+    /// <summary>Refreshes the count-derived bindings. Also called by the page on navigation so the
+    /// card description tracks hides made from the Devices page.</summary>
+    public void RefreshHiddenAppsState()
+    {
+        OnPropertyChanged(nameof(HasHiddenApps));
+        OnPropertyChanged(nameof(NoHiddenApps));
+        OnPropertyChanged(nameof(HiddenAppsDescription));
+    }
+
     partial void OnAppChipLingerSecondsChanged(double value)
     {
         // NumberBox hands back NaN when cleared; ignore until it carries a real number again.
@@ -239,5 +302,40 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     public void Dispose()
     {
         _waveLink.StateChanged -= OnWaveLinkStateChanged;
+    }
+}
+
+/// <summary>A row in the "Hidden apps" manage list. <see cref="Name"/> is the friendly label (the
+/// session display name captured at hide time, falling back to the executable filename);
+/// <see cref="Detail"/> is the full identity key, shown as muted subtext when it differs.</summary>
+public sealed class HiddenAppRow
+{
+    public HiddenAppRow(string key, string? name)
+    {
+        Key = key ?? string.Empty;
+        Name = string.IsNullOrWhiteSpace(name) ? DeriveName(Key) : name!;
+    }
+
+    /// <summary>Match key (the app's identity key) used to remove the entry on unhide.</summary>
+    public string Key { get; }
+
+    public string Name { get; }
+
+    public string Detail => Key;
+
+    public bool HasDetail => !string.IsNullOrEmpty(Key) && !string.Equals(Key, Name, StringComparison.OrdinalIgnoreCase);
+
+    private static string DeriveName(string key)
+    {
+        if (string.IsNullOrEmpty(key)) return "Unknown app";
+        try
+        {
+            var file = System.IO.Path.GetFileName(key);
+            return string.IsNullOrEmpty(file) ? key : file;
+        }
+        catch
+        {
+            return key;
+        }
     }
 }
