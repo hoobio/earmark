@@ -504,11 +504,28 @@
                                          rule-locked) and carries PID + source endpoint id in the DataPackage
                                          Text payload. -->
                                     <StackPanel x:Name="AppsSection" Spacing="{StaticResource SpacingXSmall}" Visibility="{x:Bind HasApps, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                        <ItemsRepeater ItemsSource="{x:Bind Apps}">
-                                            <ItemsRepeater.Layout>
-                                                <controls:WrapByRowLayout MinItemWidth="32" ColumnSpacing="{StaticResource SpacingXSmall}" RowSpacing="6" />
-                                            </ItemsRepeater.Layout>
-                                            <ItemsRepeater.ItemTemplate>
+                                        <!-- Plain ItemsControl over a non-virtualizing WrapPanel (not ItemsRepeater).
+                                             ItemsRepeater + a virtualizing layout can't run WinUI's built-in theme
+                                             transitions and mis-targets recycled tiles on removal; a plain Panel lets
+                                             ChildrenTransitions do the Fluent work: AddDelete fades chips in/out on the
+                                             CORRECT element, Reorder/Reposition slide them when the weighted sort moves a
+                                             chip (the "swap" animation). Chip counts per card are tiny, so no virtualization
+                                             is needed. -->
+                                        <ItemsControl ItemsSource="{x:Bind Apps}">
+                                            <ItemsControl.ItemsPanel>
+                                                <ItemsPanelTemplate>
+                                                    <controls:WrapPanel HorizontalSpacing="{StaticResource SpacingMedium}" VerticalSpacing="{StaticResource SpacingSmall}">
+                                                        <controls:WrapPanel.ChildrenTransitions>
+                                                            <TransitionCollection>
+                                                                <AddDeleteThemeTransition />
+                                                                <ReorderThemeTransition />
+                                                                <RepositionThemeTransition />
+                                                            </TransitionCollection>
+                                                        </controls:WrapPanel.ChildrenTransitions>
+                                                    </controls:WrapPanel>
+                                                </ItemsPanelTemplate>
+                                            </ItemsControl.ItemsPanel>
+                                            <ItemsControl.ItemTemplate>
                                                 <DataTemplate x:DataType="vm:AppChip">
                                                     <Border Width="32" Height="40"
                                                             Background="Transparent"
@@ -517,20 +534,12 @@
                                                             Tag="{x:Bind}"
                                                             DragStarting="OnAppChipDragStarting"
                                                             DropCompleted="OnAppChipDropCompleted"
+                                                            AutomationProperties.Name="{x:Bind DisplayLabel, Mode=OneWay}"
                                                             ToolTipService.ToolTip="{x:Bind Tooltip}">
-                                                        <!-- Fade-in only. No HideAnimations: on a non-tail removal
-                                                             ItemsRepeater rebinds the head element and recycles the TAIL,
-                                                             so a hide animation fades the wrong tile (it made a still-playing
-                                                             chip look like it vanished when a sibling was pruned). Removal is
-                                                             instant; the dim + closed badge across the linger window carry the
-                                                             "going away" signal. -->
-                                                        <animations:Implicit.ShowAnimations>
-                                                            <animations:OpacityAnimation Duration="0:0:0.18" From="0" To="1" />
-                                                        </animations:Implicit.ShowAnimations>
-                                                        <!-- Dim lives on the content, not the Border: the Border's implicit
-                                                             show animation animates its Opacity to 1 and pins it there, which
-                                                             would override a dim bound on the Border. Binding the inner Grid
-                                                             instead lets the fade-in and the idle/locked dim compose. -->
+                                                        <!-- Dim lives on this inner Grid, not the Border / container: the
+                                                             theme transitions drive the container's Opacity/Offset on
+                                                             add/remove/reorder, so binding the dim here keeps the idle /
+                                                             closed dim from fighting the transition. -->
                                                         <Grid RowSpacing="2" Opacity="{x:Bind ChipOpacity, Mode=OneWay}">
                                                             <Grid.RowDefinitions>
                                                                 <RowDefinition Height="*" />
@@ -557,44 +566,50 @@
                                                                                        Volume="1.0"
                                                                                        LeftLevel="{x:Bind PeakLevelScalar, Mode=OneWay}" />
 
-                                                            <!-- Rule-lock badge. InfoBadge is the Fluent-recommended status-badge
-                                                                 control (built-in severity styles + icon slot), so both chip badges
-                                                                 use it rather than hand-rolled Borders. Neutral (Informational) here
-                                                                 since a pin is informational, not a warning. -->
-                                                            <InfoBadge Grid.Row="0"
-                                                                       Width="16" Height="16"
-                                                                       HorizontalAlignment="Right"
-                                                                       VerticalAlignment="Top"
-                                                                       Margin="0,-4,-4,0"
-                                                                       Style="{StaticResource InformationalIconInfoBadgeStyle}"
-                                                                       ToolTipService.ToolTip="{x:Bind LockTooltip}"
-                                                                       Visibility="{x:Bind IsRuleLocked, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                                                <InfoBadge.IconSource>
-                                                                    <FontIconSource Glyph="&#xE72E;" FontSize="10" />
-                                                                </InfoBadge.IconSource>
-                                                            </InfoBadge>
+                                                            <!-- Small corner badges. InfoBadge (the "official" status badge) is
+                                                                 sized for nav items and overwhelms a 32px chip, so these are compact
+                                                                 custom circles: a subtle neutral disc with a small glyph, the glyph
+                                                                 colour carrying the meaning (neutral lock vs caution-amber close). -->
+                                                            <Border Grid.Row="0"
+                                                                    Background="{ThemeResource SmokeFillColorDefaultBrush}"
+                                                                    CornerRadius="7"
+                                                                    Width="14" Height="14"
+                                                                    HorizontalAlignment="Right"
+                                                                    VerticalAlignment="Top"
+                                                                    Margin="0,-3,-3,0"
+                                                                    ToolTipService.ToolTip="{x:Bind LockTooltip}"
+                                                                    Visibility="{x:Bind IsRuleLocked, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                                <FontIcon Glyph="&#xE72E;"
+                                                                          FontSize="8"
+                                                                          Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                                                                          HorizontalAlignment="Center"
+                                                                          VerticalAlignment="Center" />
+                                                            </Border>
 
                                                             <!-- Closed badge: shown once the app has exited but the chip is still
-                                                                 lingering. Top-left so it never collides with the rule-lock badge
-                                                                 (top-right). Caution severity (amber) signals "this is on its way
-                                                                 out". Binds OneWay (MarkClosed / Revive flip it at runtime). -->
-                                                            <InfoBadge Grid.Row="0"
-                                                                       Width="16" Height="16"
-                                                                       HorizontalAlignment="Left"
-                                                                       VerticalAlignment="Top"
-                                                                       Margin="-4,-4,0,0"
-                                                                       Style="{StaticResource CautionIconInfoBadgeStyle}"
-                                                                       ToolTipService.ToolTip="App closed - no longer running"
-                                                                       Visibility="{x:Bind ShowClosedBadge, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                                                <InfoBadge.IconSource>
-                                                                    <FontIconSource Glyph="&#xE711;" FontSize="10" />
-                                                                </InfoBadge.IconSource>
-                                                            </InfoBadge>
+                                                                 lingering. Top-left so it never collides with the lock badge. The
+                                                                 caution-amber glyph signals "on its way out". Binds OneWay
+                                                                 (MarkClosed / Revive flip it at runtime). -->
+                                                            <Border Grid.Row="0"
+                                                                    Background="{ThemeResource SmokeFillColorDefaultBrush}"
+                                                                    CornerRadius="7"
+                                                                    Width="14" Height="14"
+                                                                    HorizontalAlignment="Left"
+                                                                    VerticalAlignment="Top"
+                                                                    Margin="-3,-3,0,0"
+                                                                    ToolTipService.ToolTip="App closed - no longer running"
+                                                                    Visibility="{x:Bind ShowClosedBadge, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                                <FontIcon Glyph="&#xE711;"
+                                                                          FontSize="9"
+                                                                          Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                                          HorizontalAlignment="Center"
+                                                                          VerticalAlignment="Center" />
+                                                            </Border>
                                                         </Grid>
                                                     </Border>
                                                 </DataTemplate>
-                                            </ItemsRepeater.ItemTemplate>
-                                        </ItemsRepeater>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
                                     </StackPanel>
                                 </StackPanel>
 
