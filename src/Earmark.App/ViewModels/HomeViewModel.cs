@@ -46,6 +46,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     private readonly IWaveLinkService _waveLink;
     private readonly IWaveLinkVisualService _waveLinkVisuals;
     private readonly IDispatcherQueueProvider _dispatcher;
+    private readonly IDeviceDefaultsService _deviceDefaults;
     private WaveLinkChannelStyle? _lastAppliedStyle;
     private bool? _lastFilterForwarders;
     private bool? _lastShowAppIndicators;
@@ -84,6 +85,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         IWaveLinkVisualService waveLinkVisuals,
         INotificationService notifications,
         IDispatcherQueueProvider dispatcher,
+        IDeviceDefaultsService deviceDefaults,
         ILogger<HomeViewModel> logger)
     {
         _rules = rules ?? throw new ArgumentNullException(nameof(rules));
@@ -102,6 +104,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         _waveLinkVisuals = waveLinkVisuals ?? throw new ArgumentNullException(nameof(waveLinkVisuals));
         _notifications = notifications ?? throw new ArgumentNullException(nameof(notifications));
         _dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
+        _deviceDefaults = deviceDefaults ?? throw new ArgumentNullException(nameof(deviceDefaults));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
         // Show-hidden is session-only: defaults to off on every launch.
@@ -144,6 +147,10 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         // place rather than rebuilding the grid (a rebuild flashes the ItemsRepeater). Filtered
         // to the style field so unrelated saves (hidden/pinned devices) don't trigger work.
         _settings.SettingsChanged += OnSettingsChanged;
+        // First-run seeding / the Settings "Reset to default" both mutate the persisted groups,
+        // order, and visibility behind our back. OnSettingsChanged deliberately doesn't rebuild on
+        // arbitrary saves, so the service signals a structural change explicitly -> rebuild.
+        _deviceDefaults.DefaultsApplied += OnAnythingChanged;
         SyncMeterOptions();
         RefreshHiddenApps();
 
@@ -1848,6 +1855,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         _waveLink.SnapshotChanged -= OnAnythingChanged;
         _waveLink.StateChanged -= OnAnythingChanged;
         _settings.SettingsChanged -= OnSettingsChanged;
+        _deviceDefaults.DefaultsApplied -= OnAnythingChanged;
         if (_peakTimer is not null)
         {
             _peakTimer.Tick -= OnPeakTick;
