@@ -17,9 +17,12 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <Grid x:Name="AppTitleBar"
-              Height="32"
-              Background="Transparent">
+        <!-- Only AppTitleBarDragRegion is handed to SetTitleBar. The pane toggle must NOT be
+             parented under it: the system treats the SetTitleBar element as the caption and
+             swallows pointer input to any control inside it, which made the toggle drop clicks
+             (including mid-animation). Keeping the button a sibling leaves it in the client area
+             so it always receives input. -->
+        <Grid x:Name="AppTitleBar" Height="32">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
@@ -38,24 +41,49 @@
                 <FontIcon Glyph="&#xE700;" FontSize="14" />
             </Button>
 
-            <StackPanel Grid.Column="1"
-                        Orientation="Horizontal"
-                        Spacing="8"
-                        VerticalAlignment="Center">
-                <Image Source="ms-appx:///Assets/logo.png"
-                       Width="16"
-                       Height="16"
-                       VerticalAlignment="Center" />
-                <TextBlock Text="Earmark"
-                           Style="{ThemeResource CaptionTextBlockStyle}"
-                           FontWeight="SemiBold"
-                           VerticalAlignment="Center"
-                           Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
-                <TextBlock Text="Audio rules engine"
-                           Style="{ThemeResource CaptionTextBlockStyle}"
-                           VerticalAlignment="Center"
-                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-            </StackPanel>
+            <Grid x:Name="AppTitleBarDragRegion"
+                  Grid.Column="1"
+                  Background="Transparent">
+                <StackPanel Orientation="Horizontal"
+                            Spacing="8"
+                            VerticalAlignment="Center">
+                    <TextBlock Text="Earmark"
+                               Style="{ThemeResource CaptionTextBlockStyle}"
+                               FontWeight="SemiBold"
+                               VerticalAlignment="Center"
+                               Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                    <TextBlock Text="Audio rules engine"
+                               Style="{ThemeResource CaptionTextBlockStyle}"
+                               VerticalAlignment="Center"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                </StackPanel>
+            </Grid>
+
+            <!-- "Update available" pill. A sibling of (not parented under) AppTitleBarDragRegion so
+                 it stays in the client area and receives clicks - the SetTitleBar element swallows
+                 pointer input. Its right margin is set in code from TitleBar.RightInset so it never
+                 slides under the system caption buttons. Hidden unless an update is found. -->
+            <Button x:Name="UpdateButton"
+                    Grid.Column="1"
+                    HorizontalAlignment="Right"
+                    VerticalAlignment="Center"
+                    Height="28"
+                    Padding="10,0"
+                    Margin="0,0,144,0"
+                    Visibility="Collapsed"
+                    Style="{ThemeResource AccentButtonStyle}"
+                    CornerRadius="{ThemeResource ControlCornerRadius}"
+                    Click="OnUpdateButtonClick"
+                    ToolTipService.ToolTip="A new version of Earmark is available. Click to view the release.">
+                <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                    <FontIcon Glyph="&#xE896;" FontSize="12" Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}" />
+                    <TextBlock Text="Update available"
+                               FontSize="12"
+                               FontWeight="SemiBold"
+                               Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}"
+                               VerticalAlignment="Center" />
+                </StackPanel>
+            </Button>
         </Grid>
 
         <NavigationView
