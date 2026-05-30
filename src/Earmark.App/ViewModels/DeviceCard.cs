@@ -4,6 +4,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
 using Earmark.App.Services;
+using Earmark.App.Settings;
 using Earmark.Core.Audio;
 using Earmark.Core.Models;
 
@@ -32,6 +33,7 @@ public partial class DeviceCard : ObservableObject
     private readonly IAudioEndpointService _endpoints;
     private readonly IEndpointWriter _writer;
     private readonly Action<DeviceCard, VisibilityState> _onVisibilityToggled;
+    private readonly Action<DeviceCard> _onVolumeControlsToggled;
     private bool _suppressVolumeWrite;
     private bool _showHidden;
     private float _leftHold;
@@ -61,11 +63,16 @@ public partial class DeviceCard : ObservableObject
         bool isHiddenByUser,
         bool isPinnedByUser,
         bool showHidden,
-        Action<DeviceCard, VisibilityState> onUserVisibilityToggled)
+        PeakMeterOptions meterOptions,
+        bool isVolumeControlsHiddenByUser,
+        Action<DeviceCard, VisibilityState> onUserVisibilityToggled,
+        Action<DeviceCard> onVolumeControlsToggled)
     {
         _endpoints = endpoints;
         _writer = writer;
         _onVisibilityToggled = onUserVisibilityToggled;
+        _onVolumeControlsToggled = onVolumeControlsToggled;
+        MeterOptions = meterOptions;
         Endpoint = endpoint;
         _split = SplitFriendlyName(endpoint.FriendlyName);
         // Resolve the thematic glyph once - the name doesn't change for the lifetime of
@@ -91,10 +98,25 @@ public partial class DeviceCard : ObservableObject
         _showHidden = showHidden;
         IsHiddenByUser = isHiddenByUser;
         IsPinnedByUser = isPinnedByUser;
+        IsVolumeControlsHiddenByUser = isVolumeControlsHiddenByUser;
     }
 
     public AudioEndpoint Endpoint { get; }
     public IReadOnlyList<RuleSummary> Rules { get; }
+
+    /// <summary>Shared peak-meter styling (colour mode / channels / hold), bound by the meter and
+    /// the slider layering. The same instance backs every card so a settings change applies live.</summary>
+    public PeakMeterOptions MeterOptions { get; }
+
+    /// <summary>Refreshes meter-style-derived bindings after <see cref="MeterOptions"/> changes.
+    /// Called by <c>HomeViewModel</c> so cards don't each subscribe to the shared options.</summary>
+    public void NotifyMeterStyleChanged()
+    {
+        OnPropertyChanged(nameof(ChannelMeterTooltip));
+        // ShowMeter feeds the row-collapse and off-mode-slider visibility.
+        OnPropertyChanged(nameof(ShowVolumeRow));
+        OnPropertyChanged(nameof(ShowPlainSlider));
+    }
 
     /// <summary>
     /// Live chips for sessions currently rendering on this endpoint. Populated and mutated
@@ -203,6 +225,52 @@ public partial class DeviceCard : ObservableObject
     /// but is itself overridden by <see cref="IsHiddenByUser"/>.</summary>
     [ObservableProperty]
     public partial bool IsPinnedByUser { get; set; }
+
+    /// <summary>User has hidden the volume slider + mute toggle for this device (the card itself
+    /// stays visible). For endpoints whose volume/mute don't affect output - e.g. a USB DAC/amp
+    /// with an analog volume knob - Windows still reports a normal, writable control, so this is a
+    /// manual opt-out rather than something we can auto-detect.</summary>
+    [ObservableProperty]
+    public partial bool IsVolumeControlsHiddenByUser { get; set; }
+
+    /// <summary>Inverse of <see cref="IsVolumeControlsHiddenByUser"/>: drives the visibility of the
+    /// slider + readout and whether the icon tile acts as a mute toggle. Deliberately does NOT
+    /// gate the peak meter - that has its own setting (<see cref="PeakMeterOptions.ShowMeter"/>).</summary>
+    public bool ShowVolumeControls => !IsVolumeControlsHiddenByUser;
+
+    /// <summary>The volume row collapses only when there's nothing left in it: no peak meter
+    /// (its own setting is off) AND the slider/readout are hidden. Otherwise the row stays so the
+    /// meter alone can show.</summary>
+    public bool ShowVolumeRow => MeterOptions.ShowMeter || ShowVolumeControls;
+
+    /// <summary>The plain "off-mode" slider (shown when the meter is off) is visible only when the
+    /// meter is off AND the user hasn't hidden the controls.</summary>
+    public bool ShowPlainSlider => !MeterOptions.ShowMeter && ShowVolumeControls;
+
+    /// <summary>The meter's left edge always sits flush with the card padding so it lines up with the
+    /// device icon and the rules card. While the slider shows, the right edge keeps an 8px inset to
+    /// match the slider thumb's travel (so the thumb at 100% isn't clipped); hidden, it goes flush
+    /// both sides and spans the row.</summary>
+    public Thickness MeterMargin => ShowVolumeControls ? new Thickness(0, 0, 8, 0) : new Thickness(0);
+
+    /// <summary>While the slider/readout/lock columns are populated the meter occupies just its own
+    /// column; once they're hidden it spans the full row so it reaches the card's right padding
+    /// instead of leaving the readout/lock column-spacing as dead space on the right.</summary>
+    public int VolumeMeterColumnSpan => ShowVolumeControls ? 1 : 3;
+
+    /// <summary>Rule-lock annotation (icon + click-catch overlay) only makes sense while the slider
+    /// it annotates is shown.</summary>
+    public bool ShowVolumeLockIcon => IsVolumeLockedByRule && ShowVolumeControls;
+    public bool ShowVolumeLockOverlay => IsVolumeLocked && ShowVolumeControls;
+
+    /// <summary>Context-menu label, flips with the current state.</summary>
+    public string VolumeControlsToggleLabel =>
+        IsVolumeControlsHiddenByUser ? "Show volume controls" : "Hide volume controls";
+
+    /// <summary>Context-menu glyph: speaker when controls can be shown, muted-speaker when hidden.</summary>
+    public string VolumeControlsToggleGlyph => IsVolumeControlsHiddenByUser
+        ? new string((char)0xE767, 1)   // Volume
+        : new string((char)0xE74F, 1);  // Volume Mute
 
     // ---- Reorder drag indicator ----
     //
@@ -348,6 +416,78 @@ public partial class DeviceCard : ObservableObject
 
     /// <summary>Volume as a double for the meter's bar-fill scale (the thumb bounds each bar).</summary>
     public double MeterVolume => Volume;
+
+    /// <summary>
+    /// Tooltip naming which channel(s) each stacked peak bar represents, top to bottom. Mirrors the
+    /// canonical WASAPI folding the audio layer applies (see <c>AudioEndpointService.Classify</c> and
+    /// <see cref="Earmark.App.Controls.ChannelPeakMeter"/>): mono -> one bar; stereo -> Left / Right;
+    /// surround -> Left (+ back/side L) / Right (+ back/side R) / Centre+LFE.
+    /// </summary>
+    public string ChannelMeterTooltip
+    {
+        get
+        {
+            if (MeterOptions.ChannelMode == PeakMeterChannelMode.Combined)
+            {
+                return "Peak meter: all channels combined";
+            }
+
+            var count = ChannelCount <= 0 ? 1 : ChannelCount;
+            if (count == 1)
+            {
+                return "Peak meter: Mono";
+            }
+
+            var left = new List<string>();
+            var right = new List<string>();
+            var centreLfe = new List<string>();
+            for (var i = 0; i < count; i++)
+            {
+                var (band, name) = ClassifyChannel(i, count);
+                switch (band)
+                {
+                    case 0: left.Add(name); break;
+                    case 1: right.Add(name); break;
+                    default: centreLfe.Add(name); break;
+                }
+            }
+
+            // Bars render top -> bottom as Left / Centre+LFE / Right (see ChannelPeakMeter).
+            var bars = new List<string> { string.Join(" + ", left) };
+            if (centreLfe.Count > 0)
+            {
+                // A 3-channel endpoint exposes only one of the pair (2.1 -> LFE, 3.0 -> Centre) and
+                // the count alone can't say which, so name the band rather than guess.
+                bars.Add(centreLfe.Count == 1 ? "Centre / LFE" : string.Join(" + ", centreLfe));
+            }
+            bars.Add(string.Join(" + ", right));
+
+            return "Peak meter (top to bottom):\n" + string.Join("\n", bars.Select(b => "• " + b));
+        }
+    }
+
+    // Mirrors AudioEndpointService.Classify so the tooltip names line up with the bars the meter
+    // folds the channels into, using canonical SPEAKER_* order. Band: 0 = Left bar, 1 = Right bar,
+    // 2 = Centre+LFE bar.
+    private static (int Band, string Name) ClassifyChannel(int index, int count)
+    {
+        if (count <= 2)
+        {
+            return index == 1 ? (1, "Right") : (0, "Left");
+        }
+        return index switch
+        {
+            0 => (0, "Left"),
+            1 => (1, "Right"),
+            2 => (2, "Centre"),
+            3 => (2, "LFE"),
+            4 => (0, "Back Left"),
+            5 => (1, "Back Right"),
+            6 => (0, "Side Left"),
+            7 => (1, "Side Right"),
+            _ => (index % 2 == 0) ? (0, $"Channel {index + 1}") : (1, $"Channel {index + 1}"),
+        };
+    }
 
     // ---- Icon visuals ----
 
@@ -529,6 +669,16 @@ public partial class DeviceCard : ObservableObject
         _onVisibilityToggled?.Invoke(this, prev);
     }
 
+    /// <summary>Toggles whether this device's volume slider + mute control are shown. Persisted by
+    /// the host; no undo entry (it's trivially reversed from the same menu, and the card stays
+    /// visible so nothing "disappears").</summary>
+    [RelayCommand]
+    public void ToggleVolumeControls()
+    {
+        IsVolumeControlsHiddenByUser = !IsVolumeControlsHiddenByUser;
+        _onVolumeControlsToggled?.Invoke(this);
+    }
+
     /// <summary>
     /// Restores explicit visibility state without invoking the toggle callback. Used by the
     /// undo path so reversing a hide/show doesn't push another entry onto the undo stack.
@@ -691,6 +841,8 @@ public partial class DeviceCard : ObservableObject
         OnPropertyChanged(nameof(IsVolumeEditable));
         OnPropertyChanged(nameof(IsVolumeLocked));
         OnPropertyChanged(nameof(VolumeLockedTooltip));
+        OnPropertyChanged(nameof(ShowVolumeLockIcon));
+        OnPropertyChanged(nameof(ShowVolumeLockOverlay));
     }
 
     partial void OnIsMuteLockedByRuleChanged(bool value)
@@ -700,6 +852,7 @@ public partial class DeviceCard : ObservableObject
         OnPropertyChanged(nameof(IsVolumeEditable));
         OnPropertyChanged(nameof(IsVolumeLocked));
         OnPropertyChanged(nameof(VolumeLockedTooltip));
+        OnPropertyChanged(nameof(ShowVolumeLockOverlay));
         OnPropertyChanged(nameof(ShowAccentTile));
         OnPropertyChanged(nameof(ShowDefaultTile));
         OnPropertyChanged(nameof(GlyphOnAccent));
@@ -711,6 +864,8 @@ public partial class DeviceCard : ObservableObject
     {
         OnPropertyChanged(nameof(IsLayoutCustomSized));
     }
+
+    partial void OnChannelCountChanged(int value) => OnPropertyChanged(nameof(ChannelMeterTooltip));
 
     // OnIsHiddenByUserChanged / OnIsPinnedByUserChanged do not fire the visibility callback
     // here: ToggleUserVisibility / SetUserVisibility own the callback so they can pass the
@@ -731,5 +886,18 @@ public partial class DeviceCard : ObservableObject
         OnPropertyChanged(nameof(CardOpacity));
         OnPropertyChanged(nameof(HideToggleGlyph));
         OnPropertyChanged(nameof(HideToggleTooltip));
+    }
+
+    partial void OnIsVolumeControlsHiddenByUserChanged(bool value)
+    {
+        OnPropertyChanged(nameof(ShowVolumeControls));
+        OnPropertyChanged(nameof(ShowVolumeRow));
+        OnPropertyChanged(nameof(ShowPlainSlider));
+        OnPropertyChanged(nameof(ShowVolumeLockIcon));
+        OnPropertyChanged(nameof(ShowVolumeLockOverlay));
+        OnPropertyChanged(nameof(MeterMargin));
+        OnPropertyChanged(nameof(VolumeMeterColumnSpan));
+        OnPropertyChanged(nameof(VolumeControlsToggleLabel));
+        OnPropertyChanged(nameof(VolumeControlsToggleGlyph));
     }
 }

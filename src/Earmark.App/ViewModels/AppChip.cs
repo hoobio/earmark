@@ -72,9 +72,9 @@ public partial class AppChip : ObservableObject
         PlacementEndpointId = placementEndpointId ?? throw new ArgumentNullException(nameof(placementEndpointId));
         _iconService = iconService ?? throw new ArgumentNullException(nameof(iconService));
         LockingRule = lockingRule;
-        // Audible chips start active with a fresh audible timestamp (drives the removal grace
-        // and full-strength brightness). Silent rule-pinned chips start idle and dimmed, with
-        // LastAudibleAt parked one active-window in the past so IsActive reads false at once.
+        // Audible chips start active with a fresh audible timestamp (drives full-strength
+        // brightness). Silent rule-pinned chips start idle and dimmed, with LastAudibleAt parked
+        // one active-window in the past so IsActive reads false at once.
         IsActive = startsActive;
         LastAudibleAt = startsActive ? DateTime.UtcNow : DateTime.UtcNow - ActiveWindow;
 
@@ -86,24 +86,38 @@ public partial class AppChip : ObservableObject
     }
 
     /// <summary>Wall-clock timestamp of the last tick whose peak crossed the audibility
-    /// threshold. Drives the "actively or recently produced audio" filter at the HomeViewModel
-    /// level - chips silent for longer than the grace window are removed from the card.</summary>
+    /// threshold. Drives the "currently playing" brightness window and, for idle (silent but
+    /// running) chips, the removal clock the HomeViewModel ages out against.</summary>
     public DateTime LastAudibleAt { get; private set; }
 
     /// <summary>Peak amplitude below which we treat the session as silent. -46 dBFS is comfortably
     /// below speech-noise but well above the digital-zero floor most clean exits land at.</summary>
     public const float AudibleAmplitudeThreshold = 0.005f;
 
-    /// <summary>Silence window after the last audible tick during which the chip still counts as
-    /// "active": full opacity and sorted first. Matches the 30s removal grace, so a chip dims at
-    /// the same moment an unpinned one would be pruned - "full while playing, dim after 30s of
-    /// silence". A brief track gap or pause keeps it bright.</summary>
-    public static readonly TimeSpan ActiveWindow = TimeSpan.FromSeconds(30);
+    /// <summary>How long a chip stays at full brightness after its last audible tick. Deliberately
+    /// short so opacity reads as a live "currently playing" indicator: a brief track gap, seek, or
+    /// quiet passage keeps it bright, but a sustained pause or stop dims it within a few seconds.
+    /// Removal is a separate, longer, user-configurable window owned by <c>HomeViewModel</c> - a
+    /// chip dims here but lingers (dimmed) until that window elapses.</summary>
+    public static readonly TimeSpan ActiveWindow = TimeSpan.FromSeconds(4);
 
     /// <summary>True while the session produced audio on its card within <see cref="ActiveWindow"/>.
     /// Drives brightness and sort order: active chips render full-strength and sort first; chips
-    /// silent past the window dim and sort last. Recomputed each peak tick from <see cref="LastAudibleAt"/>.</summary>
+    /// silent past the window dim and sort last. Always false once <see cref="IsClosed"/>.
+    /// Recomputed each peak tick from <see cref="LastAudibleAt"/>.</summary>
     public bool IsActive { get; private set; }
+
+    /// <summary>When the chip's app was detected to have exited (it owns no audio session and no
+    /// matching process is running). Null while the app is alive. A closed chip lingers - dimmed,
+    /// with a badge - until <c>HomeViewModel</c>'s removal window elapses, measured from here.</summary>
+    public DateTime? ClosedAt { get; private set; }
+
+    /// <summary>True once the app has exited. The chip stays on the card (dimmed, badged) for the
+    /// linger window so a closed app doesn't vanish the instant it quits.</summary>
+    public bool IsClosed => ClosedAt is not null;
+
+    /// <summary>Drives the small "closed" badge in the chip template.</summary>
+    public bool ShowClosedBadge => IsClosed;
 
     /// <summary>Set during the debounced card sync: an enabled <c>ApplicationOutput</c> rule pins
     /// this session to the owning card's endpoint. Keeps the chip on the card while the process
@@ -111,10 +125,11 @@ public partial class AppChip : ObservableObject
     [ObservableProperty]
     public partial bool RulePinnedHere { get; set; }
 
-    public AudioSession Session { get; }
-    public RoutingRule? LockingRule { get; }
+    public AudioSession Session { get; private set; }
+    public RoutingRule? LockingRule { get; private set; }
     public bool IsRuleLocked => LockingRule is not null;
-    public bool CanDrag => !IsRuleLocked && !Session.IsSystemSounds;
+    // Closed apps can't be rerouted (the process is gone), so the chip stops being a drag source.
+    public bool CanDrag => !IsRuleLocked && !IsClosed && !Session.IsSystemSounds;
     public uint ProcessId => Session.ProcessId;
 
     /// <summary>
@@ -138,6 +153,10 @@ public partial class AppChip : ObservableObject
             return string.Empty;
         }
     }
+
+    /// <summary>Bare app label (no path). Drives the chip's accessibility name and gives UI
+    /// automation a stable handle to find and order chips by.</summary>
+    public string DisplayLabel => Session.IsSystemSounds ? "System Sounds" : Session.DisplayName;
 
     /// <summary>Tooltip body: display name + path. The rule-lock explanation lives on the padlock
     /// badge's own tooltip (<see cref="LockTooltip"/>), so it isn't repeated here.</summary>
@@ -168,10 +187,10 @@ public partial class AppChip : ObservableObject
     [ObservableProperty]
     public partial float PeakLevel { get; set; }
 
-    /// <summary>Full opacity while the app is producing (or recently produced) audio; dimmed once
-    /// it falls silent past <see cref="ActiveWindow"/>. Only rule-pinned chips survive silence long
-    /// enough to show the dim - unpinned chips are pruned at the same threshold.</summary>
-    public double ChipOpacity => IsActive ? 1.0 : 0.4;
+    /// <summary>Three states drive opacity: full while producing (or recently produced) audio,
+    /// dimmed once silent past <see cref="ActiveWindow"/> (still running), and dimmer still once
+    /// closed. The chip lingers at the dimmed levels until <c>HomeViewModel</c> prunes it.</summary>
+    public double ChipOpacity => IsClosed ? 0.3 : IsActive ? 1.0 : 0.45;
 
     /// <summary>Tick entry point. Updates peak, refreshes the active/idle state from the clock,
     /// and, if the icon hasn't arrived yet, re-queries the cache (the icon service loads
@@ -182,6 +201,17 @@ public partial class AppChip : ObservableObject
         if (peak >= AudibleAmplitudeThreshold)
         {
             LastAudibleAt = DateTime.UtcNow;
+            // Audio is flowing for this app again - it reopened. Drop the closed badge now for
+            // snappy feedback; the next debounced reconcile adopts the live session so drag /
+            // metering identity follow the new process.
+            if (IsClosed)
+            {
+                ClosedAt = null;
+                OnPropertyChanged(nameof(IsClosed));
+                OnPropertyChanged(nameof(ShowClosedBadge));
+                OnPropertyChanged(nameof(CanDrag));
+                OnPropertyChanged(nameof(ChipOpacity));
+            }
         }
         RefreshActivity();
         if (Icon is null && !string.IsNullOrEmpty(Session.ExecutablePath))
@@ -192,14 +222,54 @@ public partial class AppChip : ObservableObject
 
     /// <summary>Recomputes <see cref="IsActive"/> from <see cref="LastAudibleAt"/> and raises the
     /// dependent change notifications when it flips, so the bound opacity updates live and the
-    /// owner can reorder the chip.</summary>
+    /// owner can reorder the chip. A closed chip is never active.</summary>
     private void RefreshActivity()
     {
-        var active = DateTime.UtcNow - LastAudibleAt < ActiveWindow;
+        var active = !IsClosed && DateTime.UtcNow - LastAudibleAt < ActiveWindow;
         if (active == IsActive) return;
         IsActive = active;
         OnPropertyChanged(nameof(IsActive));
         OnPropertyChanged(nameof(ChipOpacity));
+    }
+
+    /// <summary>Marks the chip closed (its app exited). Idempotent. Drops it out of the active
+    /// tier, dims it, shows the badge, and starts the linger clock from now so a freshly-closed
+    /// app gets the full removal window before it disappears.</summary>
+    public void MarkClosed()
+    {
+        if (ClosedAt is not null) return;
+        ClosedAt = DateTime.UtcNow;
+        if (IsActive)
+        {
+            IsActive = false;
+            OnPropertyChanged(nameof(IsActive));
+        }
+        OnPropertyChanged(nameof(IsClosed));
+        OnPropertyChanged(nameof(ShowClosedBadge));
+        OnPropertyChanged(nameof(ChipOpacity));
+        OnPropertyChanged(nameof(CanDrag));
+    }
+
+    /// <summary>Reverses <see cref="MarkClosed"/> when the app comes back within the linger window.
+    /// Adopts the live session and rule match so metering and drag target the current process. The
+    /// brightness window recomputes on the next tick from <see cref="LastAudibleAt"/>.</summary>
+    public void Revive(AudioSession session, RoutingRule? lockingRule)
+    {
+        Session = session ?? throw new ArgumentNullException(nameof(session));
+        LockingRule = lockingRule;
+        ClosedAt = null;
+        if (Icon is null && !string.IsNullOrEmpty(session.ExecutablePath))
+        {
+            Icon = _iconService.TryGetIcon(session.ProcessId, session.ExecutablePath);
+        }
+        OnPropertyChanged(nameof(IsClosed));
+        OnPropertyChanged(nameof(ShowClosedBadge));
+        OnPropertyChanged(nameof(ChipOpacity));
+        OnPropertyChanged(nameof(IsRuleLocked));
+        OnPropertyChanged(nameof(CanDrag));
+        OnPropertyChanged(nameof(LockTooltip));
+        OnPropertyChanged(nameof(Tooltip));
+        OnPropertyChanged(nameof(DisplayLabel));
     }
 
     /// <summary>Peak as a double for the chip's <see cref="Controls.ChannelPeakMeter"/> underbar:

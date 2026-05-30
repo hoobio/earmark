@@ -5,6 +5,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:vm="using:Earmark.App.ViewModels"
     xmlns:ctrl="using:CommunityToolkit.WinUI.Controls"
+    xmlns:ui="using:Windows.UI"
     Background="Transparent">
 
     <Grid Padding="{StaticResource PagePadding}">
@@ -31,6 +32,95 @@
                         <ComboBoxItem Content="Dark" />
                     </ComboBox>
                 </ctrl:SettingsCard>
+
+                <TextBlock Text="Devices" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,12,0,0" />
+                <ctrl:SettingsCard Header="Keep stopped apps visible"
+                                   Description="After an app stops playing or closes, its chip on the Devices page dims and lingers for this many seconds before it disappears. Closed apps also show a badge. Set 0 to remove a chip as soon as its app stops.">
+                    <NumberBox Value="{x:Bind ViewModel.AppChipLingerSeconds, Mode=TwoWay}"
+                               Minimum="0" Maximum="600"
+                               SpinButtonPlacementMode="Inline"
+                               SmallChange="5" LargeChange="30"
+                               MinWidth="140" />
+                </ctrl:SettingsCard>
+
+                <ctrl:SettingsExpander Header="Peak meter"
+                                       Description="The level meter behind each device's volume slider. Off hides it and shows a plain slider.">
+                    <ComboBox SelectedIndex="{x:Bind ViewModel.PeakMeterColourModeIndex, Mode=TwoWay}" MinWidth="150">
+                        <ComboBoxItem Content="Gradient" />
+                        <ComboBoxItem Content="Blocks" />
+                        <ComboBoxItem Content="Single colour" />
+                        <ComboBoxItem Content="Off" />
+                    </ComboBox>
+                    <ctrl:SettingsExpander.Items>
+                        <ctrl:SettingsCard Header="Bar colour"
+                                           Description="Colour for the Single colour mode. Pick a quick swatch or open the wheel for a custom colour."
+                                           IsEnabled="{x:Bind ViewModel.IsSingleColourMode, Mode=OneWay}">
+                            <Button MinWidth="140" HorizontalContentAlignment="Left">
+                                <StackPanel Orientation="Horizontal" Spacing="{StaticResource SpacingSmall}">
+                                    <Border Width="24" Height="16"
+                                            CornerRadius="{ThemeResource ControlCornerRadius}"
+                                            BorderThickness="1"
+                                            BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                                            Background="{x:Bind ViewModel.PeakMeterSingleColour, Mode=OneWay, Converter={StaticResource ColorToBrushConverter}}" />
+                                    <TextBlock Text="Choose…" VerticalAlignment="Center" />
+                                </StackPanel>
+                                <Button.Flyout>
+                                    <Flyout>
+                                        <StackPanel Spacing="{StaticResource SpacingMedium}" Width="296">
+                                            <TextBlock Text="Quick colours"
+                                                       Style="{StaticResource CaptionTextBlockStyle}"
+                                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                            <ItemsControl ItemsSource="{x:Bind MeterSwatches}">
+                                                <ItemsControl.ItemsPanel>
+                                                    <ItemsPanelTemplate>
+                                                        <StackPanel Orientation="Horizontal" Spacing="{StaticResource SpacingXSmall}" />
+                                                    </ItemsPanelTemplate>
+                                                </ItemsControl.ItemsPanel>
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate x:DataType="ui:Color">
+                                                        <Button Width="28" Height="28"
+                                                                Padding="0"
+                                                                Click="OnMeterSwatchClick"
+                                                                Tag="{x:Bind}"
+                                                                HorizontalContentAlignment="Stretch"
+                                                                VerticalContentAlignment="Stretch">
+                                                            <Border CornerRadius="{ThemeResource ControlCornerRadius}"
+                                                                    Background="{x:Bind Converter={StaticResource ColorToBrushConverter}}" />
+                                                        </Button>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                            <ColorPicker x:Name="MeterColorPicker"
+                                                         Color="{x:Bind ViewModel.PeakMeterSingleColour, Mode=TwoWay}"
+                                                         ColorSpectrumShape="Ring"
+                                                         IsAlphaEnabled="False"
+                                                         IsMoreButtonVisible="True"
+                                                         IsColorSliderVisible="True"
+                                                         IsColorChannelTextInputVisible="False"
+                                                         IsHexInputVisible="True" />
+                                            <Button Content="Reset to default"
+                                                    Click="OnResetMeterColour"
+                                                    HorizontalAlignment="Right" />
+                                        </StackPanel>
+                                    </Flyout>
+                                </Button.Flyout>
+                            </Button>
+                        </ctrl:SettingsCard>
+                        <ctrl:SettingsCard Header="Channels"
+                                           Description="Split shows a bar per channel group (L / Centre+LFE / R); Single shows one combined bar from the loudest channel."
+                                           IsEnabled="{x:Bind ViewModel.IsMeterEnabled, Mode=OneWay}">
+                            <ComboBox SelectedIndex="{x:Bind ViewModel.PeakMeterChannelModeIndex, Mode=TwoWay}" MinWidth="150">
+                                <ComboBoxItem Content="Split" />
+                                <ComboBoxItem Content="Single" />
+                            </ComboBox>
+                        </ctrl:SettingsCard>
+                        <ctrl:SettingsCard Header="Peak-hold tick"
+                                           Description="Show the line that marks the recent loudest peak (it turns red on clipping)."
+                                           IsEnabled="{x:Bind ViewModel.IsMeterEnabled, Mode=OneWay}">
+                            <ToggleSwitch IsOn="{x:Bind ViewModel.PeakMeterShowHold, Mode=TwoWay}" />
+                        </ctrl:SettingsCard>
+                    </ctrl:SettingsExpander.Items>
+                </ctrl:SettingsExpander>
 
                 <TextBlock Text="System tray" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,12,0,0" />
                 <ctrl:SettingsExpander Header="Show tray icon"

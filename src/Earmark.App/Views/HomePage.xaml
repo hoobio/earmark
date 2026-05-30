@@ -151,6 +151,14 @@
                                                 <FontIcon Glyph="{x:Bind HideToggleGlyph, Mode=OneWay}" />
                                             </MenuFlyoutItem.Icon>
                                         </MenuFlyoutItem>
+                                        <!-- Hide the slider + mute for devices whose volume Windows can drive but
+                                             that ignore it (e.g. a USB DAC/amp with an analog volume knob). -->
+                                        <MenuFlyoutItem Text="{x:Bind VolumeControlsToggleLabel, Mode=OneWay}"
+                                                        Command="{x:Bind ToggleVolumeControlsCommand}">
+                                            <MenuFlyoutItem.Icon>
+                                                <FontIcon Glyph="{x:Bind VolumeControlsToggleGlyph, Mode=OneWay}" />
+                                            </MenuFlyoutItem.Icon>
+                                        </MenuFlyoutItem>
                                     </MenuFlyout>
                                 </Border.ContextFlyout>
                                 <Grid>
@@ -196,6 +204,7 @@
                                                         CornerRadius="{StaticResource CardCornerRadius}"
                                                         Tag="{x:Bind}"
                                                         IsEnabled="{x:Bind IsMuteToggleEnabled, Mode=OneWay}"
+                                                        IsHitTestVisible="{x:Bind ShowVolumeControls, Mode=OneWay}"
                                                         Click="OnMuteToggleClicked"
                                                         ToolTipService.ToolTip="{x:Bind MuteTooltip, Mode=OneWay}">
                                                     <!-- Transparent in every state but hover/press, where a faint white
@@ -276,62 +285,103 @@
                                         </StackPanel>
                                     </Grid>
 
-                                    <!-- Volume row -->
-                                    <Grid ColumnSpacing="{StaticResource SpacingSmall}">
+                                    <!-- Volume row. "Hide volume controls" hides the slider + readout + lock
+                                         annotations but NOT the peak meter, which has its own setting. The row
+                                         only collapses entirely when both are off (ShowVolumeRow). -->
+                                    <Grid ColumnSpacing="{StaticResource SpacingSmall}"
+                                          Visibility="{x:Bind ShowVolumeRow, Mode=OneWay}">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="Auto" />
                                             <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
 
-                                        <!-- Peak meter sits behind the slider; slider track brushes are
-                                             overridden in scope to be transparent so the meter shows through.
-                                             Opacity dims when muted (still hit-testable so a drag unmutes). -->
+                                        <!-- Peak meter sits behind the slider; the meter slider's track brushes are
+                                             overridden to be transparent so the meter shows through. When the meter is
+                                             Off a plain standard slider is shown instead. Opacity dims when muted
+                                             (still hit-testable so a drag unmutes). -->
                                         <Grid Grid.Column="0" Height="28"
+                                              Grid.ColumnSpan="{x:Bind VolumeMeterColumnSpan, Mode=OneWay}"
                                               Opacity="{x:Bind VolumeAreaOpacity, Mode=OneWay}">
-                                            <Grid.Resources>
-                                                <SolidColorBrush x:Key="SliderTrackFill" Color="Transparent" />
-                                                <SolidColorBrush x:Key="SliderTrackValueFill" Color="Transparent" />
-                                                <SolidColorBrush x:Key="SliderTrackFillPointerOver" Color="Transparent" />
-                                                <SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="Transparent" />
-                                                <SolidColorBrush x:Key="SliderTrackFillPressed" Color="Transparent" />
-                                                <SolidColorBrush x:Key="SliderTrackValueFillPressed" Color="Transparent" />
-                                                <SolidColorBrush x:Key="SliderTrackFillDisabled" Color="Transparent" />
-                                                <SolidColorBrush x:Key="SliderTrackValueFillDisabled" Color="Transparent" />
-                                                <!-- Thumb kept at the WinUI default colours (incl. the greyed disabled
-                                                     thumb), sized down to 14 so it sits comfortably inside the 20px bar
-                                                     stack and clears the column edge at 100%. -->
-                                                <x:Double x:Key="SliderHorizontalThumbWidth">14</x:Double>
-                                                <x:Double x:Key="SliderHorizontalThumbHeight">14</x:Double>
-                                            </Grid.Resources>
 
-                                            <!-- Per-channel peak meter (1-3 stacked colour-banded bars) sitting behind
-                                                 the slider; the slider track is transparent in this scope so the bars
-                                                 show through. Bar stack height tracks the slider thumb. -->
-                                            <controls:ChannelPeakMeter Margin="8,0"
-                                                                       VerticalAlignment="Center"
-                                                                       ChannelCount="{x:Bind ChannelCount, Mode=OneWay}"
-                                                                       LeftLevel="{x:Bind LeftLevel, Mode=OneWay}"
-                                                                       RightLevel="{x:Bind RightLevel, Mode=OneWay}"
-                                                                       CentreLfeLevel="{x:Bind CentreLfeLevel, Mode=OneWay}"
-                                                                       LeftHold="{x:Bind LeftHold, Mode=OneWay}"
-                                                                       RightHold="{x:Bind RightHold, Mode=OneWay}"
-                                                                       CentreLfeHold="{x:Bind CentreLfeHold, Mode=OneWay}"
-                                                                       Volume="{x:Bind MeterVolume, Mode=OneWay}" />
+                                            <!-- Meter mode: per-channel peak meter (1-3 stacked colour-banded bars)
+                                                 behind a transparent-track slider. Hidden when the meter is Off. -->
+                                            <Grid Visibility="{x:Bind MeterOptions.ShowMeter, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                <controls:ChannelPeakMeter Margin="{x:Bind MeterMargin, Mode=OneWay}"
+                                                                           VerticalAlignment="Center"
+                                                                           ChannelCount="{x:Bind ChannelCount, Mode=OneWay}"
+                                                                           ColourMode="{x:Bind MeterOptions.ColourMode, Mode=OneWay}"
+                                                                           SingleColour="{x:Bind MeterOptions.SingleColour, Mode=OneWay}"
+                                                                           ChannelMode="{x:Bind MeterOptions.ChannelMode, Mode=OneWay}"
+                                                                           ShowHold="{x:Bind MeterOptions.ShowHold, Mode=OneWay}"
+                                                                           LeftLevel="{x:Bind LeftLevel, Mode=OneWay}"
+                                                                           RightLevel="{x:Bind RightLevel, Mode=OneWay}"
+                                                                           CentreLfeLevel="{x:Bind CentreLfeLevel, Mode=OneWay}"
+                                                                           LeftHold="{x:Bind LeftHold, Mode=OneWay}"
+                                                                           RightHold="{x:Bind RightHold, Mode=OneWay}"
+                                                                           CentreLfeHold="{x:Bind CentreLfeHold, Mode=OneWay}"
+                                                                           Volume="{x:Bind MeterVolume, Mode=OneWay}" />
 
-                                            <!-- Right margin = thumb radius so the thumb visual at 100% isn't
-                                                 clipped by the column edge. Left margin kept at 0; the thumb
-                                                 at 0% sits inside the existing peak-meter 8px inset. -->
-                                            <!-- Padding insets the thumb travel inside the slider's own clip bounds
-                                                 (the control clips its thumb at the edge), so the thumb stays fully
-                                                 round at 0% / 100% instead of having its outer ring shaved off. -->
+                                                <!-- Padding insets the thumb travel inside the slider's own clip bounds
+                                                     (the control clips its thumb at the edge), so the thumb stays fully
+                                                     round at 0% / 100% instead of having its outer ring shaved off. -->
+                                                <Slider Minimum="0"
+                                                        Maximum="100"
+                                                        StepFrequency="1"
+                                                        SmallChange="1"
+                                                        LargeChange="5"
+                                                        Margin="0,0,2,0"
+                                                        Padding="8,0,8,0"
+                                                        Value="{x:Bind VolumePercent, Mode=TwoWay}"
+                                                        IsEnabled="{x:Bind IsVolumeEditable, Mode=OneWay}"
+                                                        Visibility="{x:Bind ShowVolumeControls, Mode=OneWay}"
+                                                        ToolTipService.ToolTip="{x:Bind ChannelMeterTooltip, Mode=OneWay}"
+                                                        Tag="{x:Bind}"
+                                                        PointerPressed="OnSliderPointerPressed"
+                                                        PointerCaptureLost="OnSliderReleased"
+                                                        KeyDown="OnSliderKeyDown"
+                                                        KeyUp="OnSliderKeyUp"
+                                                        LostFocus="OnSliderLostFocus"
+                                                        VerticalAlignment="Center"
+                                                        Background="Transparent">
+                                                    <Slider.Resources>
+                                                        <SolidColorBrush x:Key="SliderTrackFill" Color="Transparent" />
+                                                        <SolidColorBrush x:Key="SliderTrackValueFill" Color="Transparent" />
+                                                        <SolidColorBrush x:Key="SliderTrackFillPointerOver" Color="Transparent" />
+                                                        <SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="Transparent" />
+                                                        <SolidColorBrush x:Key="SliderTrackFillPressed" Color="Transparent" />
+                                                        <SolidColorBrush x:Key="SliderTrackValueFillPressed" Color="Transparent" />
+                                                        <SolidColorBrush x:Key="SliderTrackFillDisabled" Color="Transparent" />
+                                                        <SolidColorBrush x:Key="SliderTrackValueFillDisabled" Color="Transparent" />
+                                                        <!-- Thumb kept at the WinUI default colours (incl. the greyed disabled
+                                                             thumb), sized down to 14 so it sits comfortably inside the 20px bar
+                                                             stack and clears the column edge at 100%. -->
+                                                        <x:Double x:Key="SliderHorizontalThumbWidth">14</x:Double>
+                                                        <x:Double x:Key="SliderHorizontalThumbHeight">14</x:Double>
+                                                    </Slider.Resources>
+                                                    <!-- The Slider control's thumb sits a couple of px below its layout
+                                                         centre; nudge the whole control up so the thumb centres on the
+                                                         bar stack behind it. RenderTransform doesn't affect layout. -->
+                                                    <Slider.RenderTransform>
+                                                        <TranslateTransform Y="-2" />
+                                                    </Slider.RenderTransform>
+                                                </Slider>
+
+                                                <!-- The meter itself is IsHitTestVisible=False (so it never steals the
+                                                     slider's pointer). When the slider is hidden there's nothing left to
+                                                     surface the channel tooltip, so this transparent layer carries it -
+                                                     shown only while the controls are hidden. -->
+                                                <Border Background="Transparent"
+                                                        ToolTipService.ToolTip="{x:Bind ChannelMeterTooltip, Mode=OneWay}"
+                                                        Visibility="{x:Bind IsVolumeControlsHiddenByUser, Mode=OneWay}" />
+                                            </Grid>
+
+                                            <!-- Off mode: a standard volume slider (normal track + default thumb). -->
                                             <Slider Minimum="0"
                                                     Maximum="100"
                                                     StepFrequency="1"
                                                     SmallChange="1"
                                                     LargeChange="5"
-                                                    Margin="0,0,2,0"
-                                                    Padding="8,0,8,0"
                                                     Value="{x:Bind VolumePercent, Mode=TwoWay}"
                                                     IsEnabled="{x:Bind IsVolumeEditable, Mode=OneWay}"
                                                     Tag="{x:Bind}"
@@ -341,21 +391,14 @@
                                                     KeyUp="OnSliderKeyUp"
                                                     LostFocus="OnSliderLostFocus"
                                                     VerticalAlignment="Center"
-                                                    Background="Transparent">
-                                                <!-- The Slider control's thumb sits a couple of px below its layout
-                                                     centre; nudge the whole control up so the thumb centres on the
-                                                     bar stack behind it. RenderTransform doesn't affect layout. -->
-                                                <Slider.RenderTransform>
-                                                    <TranslateTransform Y="-2" />
-                                                </Slider.RenderTransform>
-                                            </Slider>
+                                                    Visibility="{x:Bind ShowPlainSlider, Mode=OneWay}" />
 
                                             <Border Background="Transparent"
                                                     Tapped="OnLockedSliderTapped"
                                                     PointerPressed="OnLockedSliderPointerPressed"
                                                     PointerReleased="OnLockedSliderPointerReleased"
                                                     ToolTipService.ToolTip="{x:Bind VolumeLockedTooltip, Mode=OneWay}"
-                                                    Visibility="{x:Bind IsVolumeLocked, Mode=OneWay}" />
+                                                    Visibility="{x:Bind ShowVolumeLockOverlay, Mode=OneWay}" />
                                         </Grid>
 
                                         <TextBlock Grid.Column="1"
@@ -364,14 +407,15 @@
                                                    MinWidth="38"
                                                    TextAlignment="Right"
                                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                   VerticalAlignment="Center" />
+                                                   VerticalAlignment="Center"
+                                                   Visibility="{x:Bind ShowVolumeControls, Mode=OneWay}" />
 
                                         <FontIcon Grid.Column="2"
                                                   Glyph="&#xE72E;" FontSize="12"
                                                   Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                                                   VerticalAlignment="Center"
                                                   ToolTipService.ToolTip="{x:Bind VolumeLockedTooltip, Mode=OneWay}"
-                                                  Visibility="{x:Bind IsVolumeLockedByRule, Mode=OneWay}" />
+                                                  Visibility="{x:Bind ShowVolumeLockIcon, Mode=OneWay}" />
                                     </Grid>
 
                                     <!-- Rules section. First rule chip is always visible; for cards with
@@ -474,12 +518,15 @@
                                                             DragStarting="OnAppChipDragStarting"
                                                             DropCompleted="OnAppChipDropCompleted"
                                                             ToolTipService.ToolTip="{x:Bind Tooltip}">
+                                                        <!-- Fade-in only. No HideAnimations: on a non-tail removal
+                                                             ItemsRepeater rebinds the head element and recycles the TAIL,
+                                                             so a hide animation fades the wrong tile (it made a still-playing
+                                                             chip look like it vanished when a sibling was pruned). Removal is
+                                                             instant; the dim + closed badge across the linger window carry the
+                                                             "going away" signal. -->
                                                         <animations:Implicit.ShowAnimations>
                                                             <animations:OpacityAnimation Duration="0:0:0.18" From="0" To="1" />
                                                         </animations:Implicit.ShowAnimations>
-                                                        <animations:Implicit.HideAnimations>
-                                                            <animations:OpacityAnimation Duration="0:0:0.14" From="1" To="0" />
-                                                        </animations:Implicit.HideAnimations>
                                                         <!-- Dim lives on the content, not the Border: the Border's implicit
                                                              show animation animates its Opacity to 1 and pins it there, which
                                                              would override a dim bound on the Border. Binding the inner Grid
@@ -510,21 +557,39 @@
                                                                                        Volume="1.0"
                                                                                        LeftLevel="{x:Bind PeakLevelScalar, Mode=OneWay}" />
 
-                                                            <Border Grid.Row="0"
-                                                                    Background="{ThemeResource SmokeFillColorDefaultBrush}"
-                                                                    CornerRadius="6"
-                                                                    Width="14" Height="14"
-                                                                    HorizontalAlignment="Right"
-                                                                    VerticalAlignment="Top"
-                                                                    Margin="0,-3,-3,0"
-                                                                    ToolTipService.ToolTip="{x:Bind LockTooltip}"
-                                                                    Visibility="{x:Bind IsRuleLocked, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                                                <FontIcon Glyph="&#xE72E;"
-                                                                          FontSize="8"
-                                                                          Foreground="{ThemeResource TextFillColorPrimaryBrush}"
-                                                                          HorizontalAlignment="Center"
-                                                                          VerticalAlignment="Center" />
-                                                            </Border>
+                                                            <!-- Rule-lock badge. InfoBadge is the Fluent-recommended status-badge
+                                                                 control (built-in severity styles + icon slot), so both chip badges
+                                                                 use it rather than hand-rolled Borders. Neutral (Informational) here
+                                                                 since a pin is informational, not a warning. -->
+                                                            <InfoBadge Grid.Row="0"
+                                                                       Width="16" Height="16"
+                                                                       HorizontalAlignment="Right"
+                                                                       VerticalAlignment="Top"
+                                                                       Margin="0,-4,-4,0"
+                                                                       Style="{StaticResource InformationalIconInfoBadgeStyle}"
+                                                                       ToolTipService.ToolTip="{x:Bind LockTooltip}"
+                                                                       Visibility="{x:Bind IsRuleLocked, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                                <InfoBadge.IconSource>
+                                                                    <FontIconSource Glyph="&#xE72E;" FontSize="10" />
+                                                                </InfoBadge.IconSource>
+                                                            </InfoBadge>
+
+                                                            <!-- Closed badge: shown once the app has exited but the chip is still
+                                                                 lingering. Top-left so it never collides with the rule-lock badge
+                                                                 (top-right). Caution severity (amber) signals "this is on its way
+                                                                 out". Binds OneWay (MarkClosed / Revive flip it at runtime). -->
+                                                            <InfoBadge Grid.Row="0"
+                                                                       Width="16" Height="16"
+                                                                       HorizontalAlignment="Left"
+                                                                       VerticalAlignment="Top"
+                                                                       Margin="-4,-4,0,0"
+                                                                       Style="{StaticResource CautionIconInfoBadgeStyle}"
+                                                                       ToolTipService.ToolTip="App closed - no longer running"
+                                                                       Visibility="{x:Bind ShowClosedBadge, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                                <InfoBadge.IconSource>
+                                                                    <FontIconSource Glyph="&#xE711;" FontSize="10" />
+                                                                </InfoBadge.IconSource>
+                                                            </InfoBadge>
                                                         </Grid>
                                                     </Border>
                                                 </DataTemplate>
