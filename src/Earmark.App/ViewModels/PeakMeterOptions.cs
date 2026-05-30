@@ -30,6 +30,14 @@ public partial class PeakMeterOptions : ObservableObject
     [ObservableProperty]
     public partial Color SingleColour { get; set; } = DefaultColour;
 
+    /// <summary>Whether the per-app indicator chips show at all (the apps row under each card).</summary>
+    [ObservableProperty]
+    public partial bool ShowAppIndicators { get; set; } = true;
+
+    /// <summary>Whether each app chip shows its thin peak-level underbar (chip shrinks when off).</summary>
+    [ObservableProperty]
+    public partial bool ShowAppMeters { get; set; } = true;
+
     /// <summary>True unless the meter is switched off (the card then shows a plain volume slider).</summary>
     public bool ShowMeter => ColourMode != PeakMeterColourMode.Off;
 

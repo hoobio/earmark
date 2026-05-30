@@ -18,23 +18,34 @@ public partial class AppChip : ObservableObject
 {
     private readonly ISessionIconService _iconService;
 
-    // Audio passthrough / mixer / virtual-cable apps surface as ordinary sessions but they're
-    // just relaying audio from somewhere else. They clutter the apps row without telling the
-    // user anything they can act on - dragging Wave Link's own session to a different output
-    // would be nonsensical. Substring match (case-insensitive) against process name + exe
-    // path - one keyword catches the whole vendor's process zoo (WaveLink, WaveLinkApp,
-    // WaveLinkHelper all match "wavelink") without having to enumerate every variant.
-    private static readonly string[] AudioPassthroughKeywords = new[]
+    // Audio forwarders / mixers / virtual cables surface as ordinary sessions but they're just
+    // relaying audio from somewhere else. They clutter the apps row without telling the user
+    // anything they can act on - dragging Wave Link's own session to a different output would be
+    // nonsensical. Filtering them is opt-out via AppSettings.FilterAudioForwarders. Substring match
+    // (case-insensitive) against process name + exe path - one keyword catches the whole vendor's
+    // process zoo (WaveLink, WaveLinkApp, WaveLinkHelper all match "wavelink") without enumerating
+    // every variant.
+    private static readonly string[] AudioForwarderKeywords = new[]
     {
         // Elgato Wave Link
         "wavelink", "wave link",
-        // Voicemeeter family
-        "voicemeeter", "vbvmaux", "vmvirtualaudio",
+        // Voicemeeter family (Banana / Potato share the base name)
+        "voicemeeter", "vbvmaux", "vmvirtualaudio", "vban",
         // VB-Audio Cable
         "vbaudio", "vbcable", "vb-cable",
-        // Nvidia Broadcast
-        "nvidia broadcast", "nvbroadcast",
-        // Generic audio routers
+        // Nvidia Broadcast (and its predecessor, RTX Voice)
+        "nvidia broadcast", "nvbroadcast", "rtxvoice", "rtx voice",
+        // SteelSeries Sonar (GG's virtual audio mixer)
+        "steelseries sonar", "steelseriessonar",
+        // Synchronous Audio Router
+        "synchronousaudiorouter", "synchronous audio router",
+        // Dante Virtual Soundcard
+        "dante virtual", "dantevirtual",
+        // JACK audio router
+        "jackrouter", "jack audio",
+        // Voice changers that re-inject a virtual mic
+        "voicemod", "clownfish",
+        // Generic audio routers / virtual cables
         "audiorelay", "audio router", "soundvolumeview",
         "audiorepeater", "audiorepeatermke",
         "virtualaudiocable", "virtual audio cable",
@@ -42,20 +53,19 @@ public partial class AppChip : ObservableObject
         "vrserver",
     };
 
-    public static bool ShouldShowAsAppChip(AudioSession session)
+    public static bool ShouldShowAsAppChip(AudioSession session, bool filterForwarders)
     {
         ArgumentNullException.ThrowIfNull(session);
         // Hide Earmark itself - the test-tone "ping" briefly opens a session against the
         // target endpoint, and a chip for our own process on the very card it's pinging is
         // confusing (and untouchable - the rule-lock check would block dragging anyway).
         if (session.ProcessId == (uint)Environment.ProcessId) return false;
-        // System Sounds appears as a session on every active render endpoint, which clutters
-        // the row with the same icon over and over. It also isn't reroutable per-app (it's
-        // the OS, not an app), so a chip for it tells the user nothing actionable.
-        if (session.IsSystemSounds) return false;
+        // System Sounds is deliberately NOT filtered: it's real audio the user can hear, so it gets
+        // a chip on whichever card it's audible on (it just isn't a drag source - see CanDrag).
+        if (!filterForwarders) return true;
         var name = session.ProcessName ?? string.Empty;
         var path = session.ExecutablePath ?? string.Empty;
-        foreach (var keyword in AudioPassthroughKeywords)
+        foreach (var keyword in AudioForwarderKeywords)
         {
             if (name.Contains(keyword, StringComparison.OrdinalIgnoreCase) ||
                 path.Contains(keyword, StringComparison.OrdinalIgnoreCase))
@@ -66,11 +76,12 @@ public partial class AppChip : ObservableObject
         return true;
     }
 
-    public AppChip(AudioSession session, string placementEndpointId, ISessionIconService iconService, RoutingRule? lockingRule, bool startsActive = true)
+    public AppChip(AudioSession session, string placementEndpointId, ISessionIconService iconService, PeakMeterOptions meterOptions, RoutingRule? lockingRule, bool startsActive = true)
     {
         Session = session ?? throw new ArgumentNullException(nameof(session));
         PlacementEndpointId = placementEndpointId ?? throw new ArgumentNullException(nameof(placementEndpointId));
         _iconService = iconService ?? throw new ArgumentNullException(nameof(iconService));
+        MeterOptions = meterOptions ?? throw new ArgumentNullException(nameof(meterOptions));
         LockingRule = lockingRule;
         // Audible chips start active with a fresh audible timestamp (drives full-strength
         // brightness). Silent rule-pinned chips start idle and dimmed, with LastAudibleAt parked
@@ -172,11 +183,23 @@ public partial class AppChip : ObservableObject
         }
     }
 
+    /// <summary>Shared peak-meter styling (the same instance every device card holds). The chip
+    /// binds <see cref="PeakMeterOptions.ShowAppMeters"/> for its underbar visibility, so toggling
+    /// the setting updates every chip live without a rebuild.</summary>
+    public PeakMeterOptions MeterOptions { get; }
+
     [ObservableProperty]
     public partial ImageSource? Icon { get; set; }
 
     public bool HasIcon => Icon is not null;
     public bool HasNoIcon => Icon is null;
+
+    /// <summary>Glyph shown when the app has no resolvable icon. System Sounds gets a speaker so
+    /// it reads as OS audio rather than an unknown app; everything else falls back to the generic
+    /// app glyph.</summary>
+    public string FallbackGlyph => Session.IsSystemSounds
+        ? new string((char)0xE767, 1)   // Volume / speaker
+        : new string((char)0xECAA, 1);  // generic app
 
     partial void OnIconChanged(ImageSource? value)
     {

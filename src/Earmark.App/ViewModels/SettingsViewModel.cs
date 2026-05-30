@@ -46,6 +46,20 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     public partial bool VerboseLogging { get; set; }
 
+    /// <summary>Master toggle for the per-app indicator chips under each device card.</summary>
+    [ObservableProperty]
+    public partial bool ShowAppIndicators { get; set; }
+
+    /// <summary>Whether each app chip shows its thin peak-level underbar. Only meaningful when
+    /// <see cref="ShowAppIndicators"/> is on.</summary>
+    [ObservableProperty]
+    public partial bool ShowAppPeakMeters { get; set; }
+
+    /// <summary>Whether known audio forwarders (Wave Link, VB-Cable, ...) are hidden from the app
+    /// indicators. Only meaningful when <see cref="ShowAppIndicators"/> is on.</summary>
+    [ObservableProperty]
+    public partial bool FilterAudioForwarders { get; set; }
+
     /// <summary>Seconds a Devices-page app chip lingers (dimmed) after its app stops playing or
     /// closes, before it's removed. Bound to a NumberBox, so it's a double here; persisted as a
     /// clamped int.</summary>
@@ -127,6 +141,9 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
             CloseToTray = _settings.Current.CloseToTray;
             LaunchToTray = _settings.Current.LaunchToTray;
             VerboseLogging = _settings.Current.VerboseLogging;
+            ShowAppIndicators = _settings.Current.ShowAppIndicators;
+            ShowAppPeakMeters = _settings.Current.ShowAppPeakMeters;
+            FilterAudioForwarders = _settings.Current.FilterAudioForwarders;
             AppChipLingerSeconds = _settings.Current.AppChipLingerSeconds;
             AppThemeIndex = (int)_settings.Current.Theme;
             EnableWaveLink = _settings.Current.EnableWaveLink;
@@ -154,6 +171,18 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     partial void OnCloseToTrayChanged(bool value) => Persist(s => s.CloseToTray = value);
     partial void OnLaunchToTrayChanged(bool value) => Persist(s => s.LaunchToTray = value);
     partial void OnVerboseLoggingChanged(bool value) => Persist(s => s.VerboseLogging = value);
+
+    partial void OnShowAppIndicatorsChanged(bool value)
+    {
+        Persist(s => s.ShowAppIndicators = value);
+        // The child cards (volume meters, forwarder filter, linger) are meaningless with no chips.
+        OnPropertyChanged(nameof(AppIndicatorChildrenEnabled));
+    }
+    partial void OnShowAppPeakMetersChanged(bool value) => Persist(s => s.ShowAppPeakMeters = value);
+    partial void OnFilterAudioForwardersChanged(bool value) => Persist(s => s.FilterAudioForwarders = value);
+
+    /// <summary>Gates the app-indicator child settings - they only matter while the chips show.</summary>
+    public bool AppIndicatorChildrenEnabled => ShowAppIndicators;
 
     partial void OnAppChipLingerSecondsChanged(double value)
     {

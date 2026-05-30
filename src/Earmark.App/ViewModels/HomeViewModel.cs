@@ -47,6 +47,8 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     private readonly IWaveLinkVisualService _waveLinkVisuals;
     private readonly IDispatcherQueueProvider _dispatcher;
     private WaveLinkChannelStyle? _lastAppliedStyle;
+    private bool? _lastFilterForwarders;
+    private bool? _lastShowAppIndicators;
     private readonly INotificationService _notifications;
     private readonly ILogger<HomeViewModel> _logger;
     private readonly Dictionary<string, DateTime> _lastReconcileToast = new(StringComparer.OrdinalIgnoreCase);
@@ -228,7 +230,15 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             card.UpdatePeak(peaks, PeakTickInterval);
         }
 
-        TickAppMeters();
+        // App indicators off -> no chips, so don't read per-session peaks at all. With no
+        // GetPeak calls landing, AudioSessionMeterService stops its background COM sampling
+        // after ~1s (IdleSampleStopMs). Hiding the chips alone wouldn't reclaim that cost;
+        // skipping the read does. App meters off (underbar only) doesn't qualify - chip
+        // placement, the playing/idle brightness, sort order, and linger all need the peak.
+        if (_meterOptions.ShowAppIndicators)
+        {
+            TickAppMeters();
+        }
     }
 
     /// <summary>How long a chip lingers (dimmed) after its app stops playing or closes, before
@@ -246,6 +256,12 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         if (chip.RulePinnedHere) return false;
         return now - chip.LastAudibleAt > linger;
     }
+
+    /// <summary>Whether a session earns an app chip, honouring the live "filter audio forwarders"
+    /// setting. Wraps the static <see cref="AppChip.ShouldShowAsAppChip"/> so the per-call settings
+    /// read lives in one place.</summary>
+    private bool ShouldShow(AudioSession session) =>
+        AppChip.ShouldShowAsAppChip(session, _settings.Current.FilterAudioForwarders);
 
     /// <summary>
     /// Per-session peak update for every chip on every <i>visible</i> card. Cards filtered
@@ -268,7 +284,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         var pidsByAppKey = new Dictionary<string, List<uint>>(StringComparer.Ordinal);
         foreach (var session in sessionsSnapshot)
         {
-            if (!AppChip.ShouldShowAsAppChip(session)) continue;
+            if (!ShouldShow(session)) continue;
             if (!pidsByAppKey.TryGetValue(session.IdentityKey, out var pids))
             {
                 pids = new List<uint>();
@@ -308,7 +324,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
 
                 foreach (var session in sessionsSnapshot)
                 {
-                    if (!AppChip.ShouldShowAsAppChip(session)) continue;
+                    if (!ShouldShow(session)) continue;
                     if (seenAppsOnThisCard.Contains(session.IdentityKey)) continue;
 
                     var livePeak = _sessionMeters.GetPeak(session.ProcessId, card.Endpoint.Id) ?? 0f;
@@ -318,7 +334,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
                         .Concat(_endpoints.GetEndpoints(EndpointFlow.Capture))
                         .ToList();
                     var match = _matcher.FindAppRoute(session, EndpointFlow.Render, rulesSnapshot, combinedEndpointsCache, sessionsSnapshot);
-                    var revivedChip = new AppChip(session, card.Endpoint.Id, _iconService, match?.Rule)
+                    var revivedChip = new AppChip(session, card.Endpoint.Id, _iconService, _meterOptions, match?.Rule)
                     {
                         RulePinnedHere = match is not null &&
                             string.Equals(match.Endpoint.Id, card.Endpoint.Id, StringComparison.OrdinalIgnoreCase),
@@ -561,6 +577,18 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         _dispatcher.Enqueue(() =>
         {
             SyncMeterOptions();
+            // The forwarder filter and the app-indicators master toggle both change which chips
+            // exist, so a change re-runs the in-place reconcile (not just a restyle). When
+            // indicators are off the reconcile clears every row and the 20Hz app-meter tick is
+            // skipped, idling the per-session meter service. Tracked so unrelated saves don't
+            // churn the apps rows.
+            if (_settings.Current.FilterAudioForwarders != _lastFilterForwarders ||
+                _settings.Current.ShowAppIndicators != _lastShowAppIndicators)
+            {
+                _lastFilterForwarders = _settings.Current.FilterAudioForwarders;
+                _lastShowAppIndicators = _settings.Current.ShowAppIndicators;
+                QueueAppsReconcile();
+            }
             if (_settings.Current.WaveLinkChannelStyle == _lastAppliedStyle) return;
             _ = ApplyWaveLinkVisualsAsync(CancellationToken.None);
         });
@@ -575,6 +603,8 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         _meterOptions.ChannelMode = s.PeakMeterChannelMode;
         _meterOptions.ShowHold = s.PeakMeterShowHold;
         _meterOptions.SingleColour = PeakMeterOptions.ColourFromHex(s.PeakMeterSingleColour);
+        _meterOptions.ShowAppIndicators = s.ShowAppIndicators;
+        _meterOptions.ShowAppMeters = s.ShowAppPeakMeters;
         foreach (var card in _allCards) card.NotifyMeterStyleChanged();
     }
 
@@ -634,11 +664,31 @@ public partial class HomeViewModel : ObservableObject, IDisposable
 
     private static readonly Color MixTileColour = Color.FromArgb(255, 255, 255, 255);
 
+    /// <summary>Drops every chip on every card. Used when app indicators are turned off so no
+    /// stale chips linger (and nothing reads per-session peak until they're turned back on).</summary>
+    private void ClearAllCardApps()
+    {
+        foreach (var card in _allCards)
+        {
+            if (card.Apps.Count == 0) continue;
+            card.Apps.Clear();
+            card.NotifyAppsChanged();
+        }
+    }
+
     /// <summary>UI-thread helper that re-reads the session/rule snapshot and reconciles each
     /// card's <c>Apps</c> collection in place. Called after a rebuild swaps cards and any time
     /// the snapshot may have drifted (rule edit, endpoint default change).</summary>
     private void SyncAllCardsApps()
     {
+        // App indicators off: no chips at all. Clear any that exist and skip the peak-reading
+        // reconcile so the session meter service idles. Re-enabling re-runs this and repopulates.
+        if (!_meterOptions.ShowAppIndicators)
+        {
+            ClearAllCardApps();
+            return;
+        }
+
         var sessions = _sessions.GetSessions();
         var rules = _rules.Rules;
         var renderEndpoints = _endpoints.GetEndpoints(EndpointFlow.Render);
@@ -657,7 +707,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         var liveSessionByIdentity = new Dictionary<string, AudioSession>(StringComparer.Ordinal);
         foreach (var session in sessions)
         {
-            if (!AppChip.ShouldShowAsAppChip(session)) continue;
+            if (!ShouldShow(session)) continue;
             realIdentities.Add(session.IdentityKey);
             if (!liveSessionByIdentity.TryGetValue(session.IdentityKey, out var rep) ||
                 (session.State == SessionState.Active && rep.State != SessionState.Active))
@@ -730,7 +780,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             var key = session.IdentityKey;
             if (realIdentities.Contains(key)) continue;
             if (!seen.Add(key)) continue;
-            if (!AppChip.ShouldShowAsAppChip(session)) continue;
+            if (!ShouldShow(session)) continue;
 
             var match = _matcher.FindAppRoute(session, EndpointFlow.Render, rules, combined, sessions);
             if (match is null) continue;
@@ -977,7 +1027,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         var additions = new Dictionary<string, (AudioSession Session, bool Audible, RoutingRule? Rule, bool PinnedHere)>(StringComparer.Ordinal);
         foreach (var session in sessions)
         {
-            if (!AppChip.ShouldShowAsAppChip(session)) continue;
+            if (!ShouldShow(session)) continue;
 
             var key = session.IdentityKey;
             routeByPid.TryGetValue(session.ProcessId, out var match);
@@ -1011,7 +1061,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         foreach (var add in additions.Values
             .OrderBy(a => a.Session.IsSystemSounds ? "System Sounds" : a.Session.DisplayName, StringComparer.OrdinalIgnoreCase))
         {
-            var chip = new AppChip(add.Session, card.Endpoint.Id, _iconService, add.Rule, startsActive: add.Audible)
+            var chip = new AppChip(add.Session, card.Endpoint.Id, _iconService, _meterOptions, add.Rule, startsActive: add.Audible)
             {
                 RulePinnedHere = add.PinnedHere,
             };
@@ -1198,18 +1248,31 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// Toggles the reorder "lift" affordance: every card except the one being dragged shrinks
-    /// slightly while a card-reorder drag is in flight. Called by the page on drag start / end.
+    /// Reorders by a visible-list insertion index expressed in the source-excluded ("compact")
+    /// space the Home page computes from layout geometry: the dragged card lands at position
+    /// <paramref name="compactIndex"/> among the other visible cards. Maps that to a neighbour +
+    /// side and defers to <see cref="ReorderDevice"/> (which owns the <c>_allCards</c> /
+    /// persistence path, including hidden-card interleaving).
     /// </summary>
-    public void SetReorderInProgress(bool active, string? draggedId = null)
+    public void ReorderDeviceToCompactIndex(string sourceId, int compactIndex)
     {
-        foreach (var card in _allCards)
+        if (string.IsNullOrEmpty(sourceId)) return;
+
+        var others = Devices
+            .Where(c => !string.Equals(c.Endpoint.Id, sourceId, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (others.Count == 0) return;
+
+        compactIndex = Math.Clamp(compactIndex, 0, others.Count);
+        if (compactIndex < others.Count)
         {
-            card.ShrinkForReorder = active &&
-                !string.Equals(card.Endpoint.Id, draggedId, StringComparison.OrdinalIgnoreCase);
+            ReorderDevice(sourceId, others[compactIndex], insertAfter: false);
+        }
+        else
+        {
+            ReorderDevice(sourceId, others[^1], insertAfter: true);
         }
     }
-
 
     /// <summary>
     /// Pulls the list of physical playback endpoint names Wave Link is currently routing

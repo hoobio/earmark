@@ -116,6 +116,9 @@ public partial class DeviceCard : ObservableObject
         // ShowMeter feeds the row-collapse and off-mode-slider visibility.
         OnPropertyChanged(nameof(ShowVolumeRow));
         OnPropertyChanged(nameof(ShowPlainSlider));
+        // ShowAppIndicators feeds the apps-row visibility and the layout opt-out.
+        OnPropertyChanged(nameof(ShowAppsSection));
+        OnPropertyChanged(nameof(IsLayoutCustomSized));
     }
 
     /// <summary>
@@ -127,13 +130,18 @@ public partial class DeviceCard : ObservableObject
 
     public bool HasApps => Apps.Count > 0;
 
+    /// <summary>Whether the apps row actually renders: there are chips AND the user hasn't turned
+    /// app indicators off globally. Drives the section visibility and the layout opt-out.</summary>
+    public bool ShowAppsSection => HasApps && MeterOptions.ShowAppIndicators;
+
     /// <summary>
     /// Combined opt-out from <see cref="Controls.WrapByRowLayout"/>'s row-baseline sizing.
     /// True when the card has any "extra" content other cards in the row might lack: an
-    /// expanded rules panel OR an apps row. Each adds real content height that shouldn't
-    /// force every other card to pad up to match.
+    /// expanded rules panel OR a (shown) apps row. Each adds real content height that shouldn't
+    /// force every other card to pad up to match. A hidden apps row reserves no height, so it
+    /// doesn't count.
     /// </summary>
-    public bool IsLayoutCustomSized => IsRulesExpanded || HasApps;
+    public bool IsLayoutCustomSized => IsRulesExpanded || ShowAppsSection;
 
     /// <summary>Tells the page that <see cref="HasApps"/> may have flipped. Raised from
     /// <c>HomeViewModel</c> after it adds/removes chips so the section visibility binding
@@ -141,6 +149,7 @@ public partial class DeviceCard : ObservableObject
     public void NotifyAppsChanged()
     {
         OnPropertyChanged(nameof(HasApps));
+        OnPropertyChanged(nameof(ShowAppsSection));
         OnPropertyChanged(nameof(IsLayoutCustomSized));
     }
 
@@ -272,29 +281,18 @@ public partial class DeviceCard : ObservableObject
         ? new string((char)0xE767, 1)   // Volume
         : new string((char)0xE74F, 1);  // Volume Mute
 
-    // ---- Reorder drag indicator ----
+    // ---- Reorder drag ----
     //
-    // Driven by the Home page during a card-reorder DragOver: exactly one edge of the card the
-    // pointer is over lights up to show where the dragged card would land. Both clear on drop /
-    // drag-end. Bound to two thin, non-hit-testable accent rules on the card's left/right edges.
+    // While this card is the one being dragged for a reorder it renders invisible: the OS shows a
+    // floating drag bitmap, and WrapByRowLayout lifts the card out of flow to the live drop slot,
+    // so the card's own slot must read as the empty gap the neighbours slide around (the "make
+    // space" affordance). Set by the Home page on drag start / end.
 
-    /// <summary>Show the accent rule on the card's left edge (the dragged card lands before this one).</summary>
+    /// <summary>True while this card is the active reorder drag source. Drives <see cref="CardOpacity"/> to 0.</summary>
     [ObservableProperty]
-    public partial bool ShowInsertBefore { get; set; }
+    public partial bool IsBeingDragged { get; set; }
 
-    /// <summary>Show the accent rule on the card's right edge (the dragged card lands after this one).</summary>
-    [ObservableProperty]
-    public partial bool ShowInsertAfter { get; set; }
-
-    /// <summary>True while a reorder drag is in flight on another card: this card shrinks slightly
-    /// to give the dragged card a "lifted" look. The dragged card itself is excluded.</summary>
-    [ObservableProperty]
-    public partial bool ShrinkForReorder { get; set; }
-
-    /// <summary>Scale applied to the card while another card is being dragged for reorder.</summary>
-    public double ReorderScaleFactor => ShrinkForReorder ? 0.96 : 1.0;
-
-    partial void OnShrinkForReorderChanged(bool value) => OnPropertyChanged(nameof(ReorderScaleFactor));
+    partial void OnIsBeingDraggedChanged(bool value) => OnPropertyChanged(nameof(CardOpacity));
 
     /// <summary>
     /// Resolves visibility per the spec:
@@ -318,8 +316,9 @@ public partial class DeviceCard : ObservableObject
     /// <summary>True when the card should render in the grid (visible-or-show-hidden).</summary>
     public bool IsListed => _showHidden || !IsEffectivelyHidden;
 
-    /// <summary>Reduced when shown via "show hidden" toggle.</summary>
-    public double CardOpacity => IsListed && IsEffectivelyHidden ? 0.5 : 1.0;
+    /// <summary>Invisible while this card is the reorder drag source (its slot is the drop gap);
+    /// otherwise reduced when shown via the "show hidden" toggle.</summary>
+    public double CardOpacity => IsBeingDragged ? 0.0 : (IsListed && IsEffectivelyHidden ? 0.5 : 1.0);
 
     // ---- Volume ----
 

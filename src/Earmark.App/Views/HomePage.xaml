@@ -113,7 +113,17 @@
                           VerticalScrollBarVisibility="Auto"
                           HorizontalScrollBarVisibility="Disabled"
                           VerticalContentAlignment="Top">
-                <ItemsRepeater ItemsSource="{x:Bind ViewModel.Devices}"
+                <!-- Transparent drop surface around the repeater: card reorder is handled here (not
+                     per-card) so the insertion point is computed from the layout's frozen no-gap
+                     geometry. That keeps it stable while cards slide to open the gap, and catches a
+                     drop over the empty gap or past the last card. App-chip drops stay per-card. -->
+                <Grid Background="Transparent"
+                      AllowDrop="True"
+                      DragOver="OnDevicesDragOver"
+                      Drop="OnDevicesDrop">
+                <ItemsRepeater x:Name="DevicesRepeater"
+                               ItemsSource="{x:Bind ViewModel.Devices}"
+                               ElementPrepared="OnDevicesElementPrepared"
                                VerticalAlignment="Top">
                     <ItemsRepeater.Layout>
                         <controls:WrapByRowLayout MinItemWidth="320"
@@ -129,18 +139,10 @@
                                     AllowDrop="True"
                                     CanDrag="True"
                                     Tag="{x:Bind}"
-                                    RenderTransformOrigin="0.5,0.5"
                                     DragStarting="OnDeviceCardDragStarting"
                                     DropCompleted="OnDeviceCardDropCompleted"
                                     DragOver="OnDeviceCardDragOver"
                                     Drop="OnDeviceCardDrop">
-                                <!-- Shrinks slightly while another card is being dragged for reorder,
-                                     giving the dragged card a lifted look. RenderTransform doesn't
-                                     affect layout, so cards keep their grid slots. -->
-                                <Border.RenderTransform>
-                                    <ScaleTransform ScaleX="{x:Bind ReorderScaleFactor, Mode=OneWay}"
-                                                    ScaleY="{x:Bind ReorderScaleFactor, Mode=OneWay}" />
-                                </Border.RenderTransform>
                                 <!-- Right-click to show / hide the device. Replaces the always-on
                                      eye button that used to sit top-right of every card. -->
                                 <Border.ContextFlyout>
@@ -503,7 +505,7 @@
                                          receive the chip; the chip itself is a drag source (when not
                                          rule-locked) and carries PID + source endpoint id in the DataPackage
                                          Text payload. -->
-                                    <StackPanel x:Name="AppsSection" Spacing="{StaticResource SpacingXSmall}" Visibility="{x:Bind HasApps, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                    <StackPanel x:Name="AppsSection" Spacing="{StaticResource SpacingXSmall}" Visibility="{x:Bind ShowAppsSection, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
                                         <!-- Plain ItemsControl over a non-virtualizing WrapPanel (not ItemsRepeater).
                                              ItemsRepeater + a virtualizing layout can't run WinUI's built-in theme
                                              transitions and mis-targets recycled tiles on removal; a plain Panel lets
@@ -527,7 +529,7 @@
                                             </ItemsControl.ItemsPanel>
                                             <ItemsControl.ItemTemplate>
                                                 <DataTemplate x:DataType="vm:AppChip">
-                                                    <Border Width="32" Height="40"
+                                                    <Border Width="32"
                                                             Background="Transparent"
                                                             Padding="0"
                                                             CanDrag="{x:Bind CanDrag}"
@@ -539,15 +541,18 @@
                                                         <!-- Dim lives on this inner Grid, not the Border / container: the
                                                              theme transitions drive the container's Opacity/Offset on
                                                              add/remove/reorder, so binding the dim here keeps the idle /
-                                                             closed dim from fighting the transition. -->
-                                                        <Grid RowSpacing="2" Opacity="{x:Bind ChipOpacity, Mode=OneWay}">
+                                                             closed dim from fighting the transition. The icon row is a fixed
+                                                             35px so the chip height is deterministic; the meter underbar
+                                                             carries its own 2px top gap. With the meter hidden the chip is
+                                                             just the 35px icon (5px thinner), with it shown it's the prior 40. -->
+                                                        <Grid Opacity="{x:Bind ChipOpacity, Mode=OneWay}">
                                                             <Grid.RowDefinitions>
-                                                                <RowDefinition Height="*" />
+                                                                <RowDefinition Height="35" />
                                                                 <RowDefinition Height="Auto" />
                                                             </Grid.RowDefinitions>
 
                                                             <Grid Grid.Row="0">
-                                                                <FontIcon Glyph="&#xECAA;" FontSize="26"
+                                                                <FontIcon Glyph="{x:Bind FallbackGlyph}" FontSize="26"
                                                                           Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                                                                           Visibility="{x:Bind HasNoIcon, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
                                                                 <Image Source="{x:Bind Icon, Mode=OneWay}"
@@ -558,12 +563,16 @@
                                                             </Grid>
 
                                                             <!-- Single colour-banded peak bar - same control + dB bands as
-                                                                 the device meter (one short bar, no volume scale, no hold). -->
+                                                                 the device meter (one short bar, no volume scale, no hold).
+                                                                 Hidden by the "App volume meters" setting; collapsing the
+                                                                 Auto row (and its margin) shrinks the chip. -->
                                                             <controls:ChannelPeakMeter Grid.Row="1"
+                                                                                       Margin="0,2,0,0"
                                                                                        ChannelCount="1"
                                                                                        BarHeightOverride="3"
                                                                                        ShowHold="False"
                                                                                        Volume="1.0"
+                                                                                       Visibility="{x:Bind MeterOptions.ShowAppMeters, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
                                                                                        LeftLevel="{x:Bind PeakLevelScalar, Mode=OneWay}" />
 
                                                             <!-- Small corner badges. InfoBadge (the "official" status badge) is
@@ -612,28 +621,12 @@
                                         </ItemsControl>
                                     </StackPanel>
                                 </StackPanel>
-
-                                    <!-- Reorder drop indicators: a thin accent rule on the edge the
-                                         dragged card would land against. Non-hit-testable so they
-                                         never interfere with the drag; collapsed unless the page lights
-                                         one up during a card-reorder DragOver. -->
-                                    <Border Width="3"
-                                            HorizontalAlignment="Left"
-                                            CornerRadius="{StaticResource CardCornerRadius}"
-                                            Background="{ThemeResource AccentFillColorDefaultBrush}"
-                                            IsHitTestVisible="False"
-                                            Visibility="{x:Bind ShowInsertBefore, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                    <Border Width="3"
-                                            HorizontalAlignment="Right"
-                                            CornerRadius="{StaticResource CardCornerRadius}"
-                                            Background="{ThemeResource AccentFillColorDefaultBrush}"
-                                            IsHitTestVisible="False"
-                                            Visibility="{x:Bind ShowInsertAfter, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
                                 </Grid>
                             </Border>
                         </DataTemplate>
                     </ItemsRepeater.ItemTemplate>
                 </ItemsRepeater>
+                </Grid>
             </ScrollViewer>
         </Grid>
     </Grid>

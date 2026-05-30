@@ -34,14 +34,35 @@
                 </ctrl:SettingsCard>
 
                 <TextBlock Text="Devices" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,12,0,0" />
-                <ctrl:SettingsCard Header="Keep stopped apps visible"
-                                   Description="After an app stops playing or closes, its chip on the Devices page dims and lingers for this many seconds before it disappears. Closed apps also show a badge. Set 0 to remove a chip as soon as its app stops.">
-                    <NumberBox Value="{x:Bind ViewModel.AppChipLingerSeconds, Mode=TwoWay}"
-                               Minimum="0" Maximum="600"
-                               SpinButtonPlacementMode="Inline"
-                               SmallChange="5" LargeChange="30"
-                               MinWidth="140" />
-                </ctrl:SettingsCard>
+                <ctrl:SettingsExpander Header="App indicators"
+                                       Description="Show a chip for each app playing through a device, on that device's card. Drag a chip onto another card to reroute the app."
+                                       IsExpanded="{x:Bind ViewModel.ShowAppIndicators, Mode=OneWay}">
+                    <ctrl:SettingsExpander.HeaderIcon>
+                        <FontIcon Glyph="&#xE71D;" />
+                    </ctrl:SettingsExpander.HeaderIcon>
+                    <ToggleSwitch IsOn="{x:Bind ViewModel.ShowAppIndicators, Mode=TwoWay}" />
+                    <ctrl:SettingsExpander.Items>
+                        <ctrl:SettingsCard Header="Volume meters"
+                                           Description="Show the thin peak-level bar under each app icon. Off drops the bar and makes the chips a little smaller."
+                                           IsEnabled="{x:Bind ViewModel.AppIndicatorChildrenEnabled, Mode=OneWay}">
+                            <ToggleSwitch IsOn="{x:Bind ViewModel.ShowAppPeakMeters, Mode=TwoWay}" />
+                        </ctrl:SettingsCard>
+                        <ctrl:SettingsCard Header="Hide audio forwarders"
+                                           Description="Hide virtual cables and mixers (Wave Link, VB-Cable, Voicemeeter, SteelSeries Sonar, and similar) that just relay other apps' audio. Off shows them like any other app."
+                                           IsEnabled="{x:Bind ViewModel.AppIndicatorChildrenEnabled, Mode=OneWay}">
+                            <ToggleSwitch IsOn="{x:Bind ViewModel.FilterAudioForwarders, Mode=TwoWay}" />
+                        </ctrl:SettingsCard>
+                        <ctrl:SettingsCard Header="Keep stopped apps visible"
+                                           Description="After an app stops playing or closes, its chip dims and lingers for this many seconds before it disappears. Closed apps also show a badge. Set 0 to remove a chip as soon as its app stops."
+                                           IsEnabled="{x:Bind ViewModel.AppIndicatorChildrenEnabled, Mode=OneWay}">
+                            <NumberBox Value="{x:Bind ViewModel.AppChipLingerSeconds, Mode=TwoWay}"
+                                       Minimum="0" Maximum="600"
+                                       SpinButtonPlacementMode="Inline"
+                                       SmallChange="5" LargeChange="30"
+                                       MinWidth="140" />
+                        </ctrl:SettingsCard>
+                    </ctrl:SettingsExpander.Items>
+                </ctrl:SettingsExpander>
 
                 <ctrl:SettingsExpander Header="Peak meter"
                                        Description="The level meter behind each device's volume slider. Off hides it and shows a plain slider.">

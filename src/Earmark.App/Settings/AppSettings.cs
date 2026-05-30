@@ -58,6 +58,21 @@ public sealed class AppSettings
     /// <summary>Whether the peak-hold tick renders on the meter. Default true.</summary>
     public bool PeakMeterShowHold { get; set; } = true;
 
+    /// <summary>Whether the per-app indicator chips (the row of app icons under each device card)
+    /// are shown at all. Default true. Off hides the whole apps row on every card.</summary>
+    public bool ShowAppIndicators { get; set; } = true;
+
+    /// <summary>Whether each app indicator chip shows its thin peak-level underbar. Default true.
+    /// Off drops the bar (and shrinks the chip). Only meaningful when <see
+    /// cref="ShowAppIndicators"/> is also on.</summary>
+    public bool ShowAppPeakMeters { get; set; } = true;
+
+    /// <summary>Whether known audio forwarders / virtual cables (Wave Link, VB-Cable,
+    /// Voicemeeter, SteelSeries Sonar, ...) are filtered out of the app indicators. Default true:
+    /// these relay audio from other apps, so a chip for one tells the user nothing actionable. Off
+    /// shows them like any other app.</summary>
+    public bool FilterAudioForwarders { get; set; } = true;
+
     public List<string> HiddenDeviceIds { get; set; } = new();
 
     /// <summary>
