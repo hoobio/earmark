@@ -76,6 +76,62 @@ public sealed class WrapByRowLayout : VirtualizingLayout
         }
     }
 
+    // ---- Reorder "make space" state ----
+    //
+    // Set by the Home page during a card-reorder drag. The dragged card is lifted out of its data
+    // slot and re-inserted at the live drop position so the remaining cards flow to open a gap -
+    // the "bump aside" affordance. The dragged card itself is arranged at that gap slot but the
+    // page renders it invisible, so its slot reads as the empty space the drop will fill.
+
+    private int _draggedIndex = -1;
+    private int _gapIndex = -1;
+
+    /// <summary>No-gap rectangle per data index, refreshed every arrange. Frozen reference point
+    /// for drag hit-testing so opening the gap doesn't move the answer.</summary>
+    private Rect[] _identityRects = [];
+
+    /// <summary>Data index of the card being dragged, or -1 when no reorder is in flight.</summary>
+    public int DraggedIndex => _draggedIndex;
+
+    /// <summary>Sets the live reorder positions and re-arranges. <paramref name="gapIndex"/> is a
+    /// position in the source-excluded (compacted) sequence: the dragged card slots in there.</summary>
+    public void SetReorderState(int draggedIndex, int gapIndex)
+    {
+        if (_draggedIndex == draggedIndex && _gapIndex == gapIndex) return;
+        _draggedIndex = draggedIndex;
+        _gapIndex = gapIndex;
+        InvalidateArrange();
+    }
+
+    /// <summary>Drops the gap and restores plain in-order layout (drag ended or cancelled).</summary>
+    public void ClearReorderState()
+    {
+        if (_draggedIndex < 0 && _gapIndex < 0) return;
+        _draggedIndex = -1;
+        _gapIndex = -1;
+        InvalidateArrange();
+    }
+
+    /// <summary>Maps display slot -> data index. Identity unless a reorder is in flight, in which
+    /// case the dragged item is lifted from its slot and re-inserted at the gap position.</summary>
+    private int[] BuildDisplayOrder(int count)
+    {
+        var order = new int[count];
+        if (_draggedIndex < 0 || _draggedIndex >= count || _gapIndex < 0)
+        {
+            for (var i = 0; i < count; i++) order[i] = i;
+            return order;
+        }
+
+        var list = new List<int>(count);
+        for (var i = 0; i < count; i++)
+        {
+            if (i != _draggedIndex) list.Add(i);
+        }
+        list.Insert(Math.Clamp(_gapIndex, 0, list.Count), _draggedIndex);
+        return list.ToArray();
+    }
+
     protected override Size MeasureOverride(VirtualizingLayoutContext context, Size availableSize)
     {
         if (context.ItemCount == 0)
@@ -122,26 +178,60 @@ public sealed class WrapByRowLayout : VirtualizingLayout
     {
         if (context.ItemCount == 0)
         {
+            _identityRects = [];
             return new Size(finalSize.Width, 0);
         }
 
-        var columnCount = ComputeColumnCount(finalSize.Width);
-        var columnWidth = ComputeColumnWidth(finalSize.Width, columnCount);
+        // Cache the no-gap geometry (where each card sits with no reorder in flight) so drag
+        // hit-testing stays stable while cards slide to open the gap. Indexed by data index.
+        var identity = new int[context.ItemCount];
+        for (var i = 0; i < identity.Length; i++) identity[i] = i;
+        _identityRects = ComputeSlotRects(context, finalSize.Width, identity, out var identityHeight);
 
+        // Display order folds in the live reorder gap (identity when no drag is in flight).
+        var display = BuildDisplayOrder(context.ItemCount);
+        double totalHeight;
+        Rect[] slotRects;
+        if (IsIdentity(display))
+        {
+            slotRects = _identityRects;        // slot == data index, reuse the cached rects
+            totalHeight = identityHeight;
+        }
+        else
+        {
+            slotRects = ComputeSlotRects(context, finalSize.Width, display, out totalHeight);
+        }
+
+        for (var slot = 0; slot < display.Length; slot++)
+        {
+            context.GetOrCreateElementAt(display[slot]).Arrange(slotRects[slot]);
+        }
+
+        return new Size(finalSize.Width, totalHeight);
+    }
+
+    /// <summary>Computes the rectangle for each slot of a given display order, using the same
+    /// two-pass row sizing as the live arrange. slotRects[k] is the rect for the element at
+    /// <paramref name="order"/>[k].</summary>
+    private Rect[] ComputeSlotRects(VirtualizingLayoutContext context, double finalWidth, int[] order, out double totalHeight)
+    {
+        var columnCount = ComputeColumnCount(finalWidth);
+        var columnWidth = ComputeColumnWidth(finalWidth, columnCount);
+        var rects = new Rect[order.Length];
         var y = 0.0;
 
-        for (var rowStart = 0; rowStart < context.ItemCount; rowStart += columnCount)
+        for (var rowStart = 0; rowStart < order.Length; rowStart += columnCount)
         {
-            var rowEnd = Math.Min(rowStart + columnCount, context.ItemCount);
+            var rowEnd = Math.Min(rowStart + columnCount, order.Length);
 
-            // Pass 1: baseline = tallest non-custom card. Custom-sized cards (e.g. a card with
-            // its rules-chevron expanded by the user) are excluded so they don't drag everyone
-            // else up. Also track overall row height for next-row positioning.
+            // Pass 1: baseline = tallest non-custom card. Custom-sized cards (e.g. a card with its
+            // rules-chevron expanded) are excluded so they don't drag everyone else up. Also track
+            // overall row height for next-row positioning.
             var baseline = 0.0;
             var rowTotal = 0.0;
-            for (var i = rowStart; i < rowEnd; i++)
+            for (var slot = rowStart; slot < rowEnd; slot++)
             {
-                var element = context.GetOrCreateElementAt(i);
+                var element = context.GetOrCreateElementAt(order[slot]);
                 var h = element.DesiredSize.Height;
                 if (h > rowTotal) rowTotal = h;
                 if (!GetIsCustomSized((DependencyObject)element) && h > baseline)
@@ -152,26 +242,51 @@ public sealed class WrapByRowLayout : VirtualizingLayout
             if (baseline == 0) baseline = rowTotal; // all custom-sized? fall back to true max
 
             // Pass 2: non-custom cards stretch to the baseline so siblings stay aligned.
-            // Custom-sized cards keep their own (taller) desired height.
-            for (var i = rowStart; i < rowEnd; i++)
+            for (var slot = rowStart; slot < rowEnd; slot++)
             {
-                var element = context.GetOrCreateElementAt(i);
-                var col = i - rowStart;
+                var element = context.GetOrCreateElementAt(order[slot]);
+                var col = slot - rowStart;
                 var x = col * (columnWidth + ColumnSpacing);
                 var h = GetIsCustomSized((DependencyObject)element)
                     ? element.DesiredSize.Height
                     : baseline;
-                element.Arrange(new Rect(x, y, columnWidth, h));
+                rects[slot] = new Rect(x, y, columnWidth, h);
             }
 
             y += rowTotal;
-            if (rowEnd < context.ItemCount)
+            if (rowEnd < order.Length)
             {
                 y += RowSpacing;
             }
         }
 
-        return new Size(finalSize.Width, y);
+        totalHeight = y;
+        return rects;
+    }
+
+    private static bool IsIdentity(int[] order)
+    {
+        for (var i = 0; i < order.Length; i++)
+        {
+            if (order[i] != i) return false;
+        }
+        return true;
+    }
+
+    /// <summary>Maps a pointer position (in this layout's coordinate space) to a reorder insertion
+    /// index in [0, count] using the cached no-gap geometry, so the answer stays stable while cards
+    /// slide to open the gap. The result reads "insert before this data index"; <c>count</c> means
+    /// "after the last card".</summary>
+    public int GetInsertionIndex(Point point)
+    {
+        var rects = _identityRects;
+        for (var i = 0; i < rects.Length; i++)
+        {
+            var r = rects[i];
+            if (point.Y < r.Top) return i;                                         // an earlier row
+            if (point.Y <= r.Bottom && point.X < r.Left + (r.Width / 2)) return i; // left half of this card
+        }
+        return rects.Length;
     }
 
     private int ComputeColumnCount(double availableWidth)

@@ -1,12 +1,15 @@
 using System.Runtime.InteropServices.WindowsRuntime;
 
+using Earmark.App.Controls;
 using Earmark.App.ViewModels;
 using Earmark.Core.Models;
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.UI.Composition;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Hosting;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
@@ -172,10 +175,15 @@ public sealed partial class HomePage : Page
     private const string DragPayloadPrefix = "earmark:chip:";
     private const string DragPayloadCardPrefix = "earmark:card:";
 
-    /// <summary>The card currently showing a reorder insertion rule. The page lights exactly
-    /// one card at a time during a card drag; this tracks it so each new DragOver / Drop /
-    /// DropCompleted can clear the previous one without scanning every card.</summary>
-    private DeviceCard? _reorderHighlightCard;
+    /// <summary>The card being dragged for a reorder, captured on drag start so DragOver can
+    /// compute the live gap position relative to it. Null when no card reorder is in flight.</summary>
+    private DeviceCard? _draggedCard;
+
+    /// <summary>True between a card-reorder drag start and its completion. Gates whether newly
+    /// realized cards get the implicit slide animation attached as they scroll into view.</summary>
+    private bool _reorderActive;
+
+    private WrapByRowLayout? Layout => DevicesRepeater.Layout as WrapByRowLayout;
 
     private void OnAppChipDragStarting(UIElement sender, DragStartingEventArgs args)
     {
@@ -214,12 +222,15 @@ public sealed partial class HomePage : Page
         args.Data.SetText($"{DragPayloadCardPrefix}{card.Endpoint.Id}");
         args.Data.RequestedOperation = DataPackageOperation.Move;
 
-        // Shrink every other card so the dragged one reads as "lifted".
-        ViewModel.SetReorderInProgress(true, card.Endpoint.Id);
+        _draggedCard = card;
+        // Attach the implicit slide animation to every realized card so the neighbours animate as
+        // they flow around the gap (the "make space" affordance).
+        EnableReorderAnimations(true);
 
         // The default drag bitmap is translucent: the card fill is a semi-transparent layer brush
         // meant to sit over Mica, so lifted off the backdrop it reads as see-through. Render an
-        // opaque snapshot and use that as the drag visual instead.
+        // opaque snapshot and use that as the drag visual instead. Render BEFORE hiding the source
+        // so the snapshot captures the visible card.
         var deferral = args.GetDeferral();
         try
         {
@@ -237,69 +248,214 @@ public sealed partial class HomePage : Page
         {
             deferral.Complete();
         }
+
+        // Lift the source out of flow: it renders invisible (IsBeingDragged -> CardOpacity 0) and
+        // the layout slots it at its own position (no gap) until the first DragOver moves the gap.
+        card.IsBeingDragged = true;
     }
 
     private void OnDeviceCardDropCompleted(UIElement sender, DropCompletedEventArgs args)
     {
-        // Drag finished (dropped on a card, dropped on empty space, or cancelled) - drop any
-        // lingering insertion rule and un-shrink the other cards. The Drop handler also clears the
-        // rule, but a cancelled drag never reaches it, so this is the catch-all.
-        ClearReorderHighlight();
-        ViewModel.SetReorderInProgress(false);
+        // Drag finished (dropped on a card, dropped on empty space, or cancelled). The Drop handler
+        // commits the reorder and clears the gap, but a cancelled drag never reaches it, so this is
+        // the catch-all that restores the source card and tears down the animation hooks.
+        if (_draggedCard is not null) _draggedCard.IsBeingDragged = false;
+        _draggedCard = null;
+        Layout?.ClearReorderState();
+        EnableReorderAnimations(false);
+    }
+
+    // ---- Container-level card reorder ----
+    //
+    // Card-reorder DragOver/Drop are handled on the transparent Grid around the repeater, not per
+    // card: the insertion point is computed from the layout's frozen no-gap geometry, so it depends
+    // only on the pointer position and stays put while cards slide to open the gap. The dragged
+    // card's own (invisible) handlers and any hovered card bubble their card-payload events up to
+    // here. App-chip payloads are handled per card and don't reach this.
+
+    private void OnDevicesDragOver(object sender, DragEventArgs e)
+    {
+        var text = TryReadText(e.DataView);
+        if (text is null || !text.StartsWith(DragPayloadCardPrefix, StringComparison.Ordinal))
+        {
+            // Not a card reorder (foreign drag, or an app chip over empty space) - decline.
+            e.AcceptedOperation = DataPackageOperation.None;
+            return;
+        }
+
+        var source = GetReorderSourceIndex(text);
+        if (source < 0 || Layout is null)
+        {
+            e.AcceptedOperation = DataPackageOperation.None;
+            return;
+        }
+
+        var raw = Layout.GetInsertionIndex(e.GetPosition(DevicesRepeater));
+        Layout.SetReorderState(source, ToCompactIndex(raw, source));
+        e.AcceptedOperation = DataPackageOperation.Move;
+        e.Handled = true;
+    }
+
+    private void OnDevicesDrop(object sender, DragEventArgs e)
+    {
+        var text = TryReadText(e.DataView);
+        if (text is null || !text.StartsWith(DragPayloadCardPrefix, StringComparison.Ordinal)) return;
+
+        var source = GetReorderSourceIndex(text);
+        var raw = Layout?.GetInsertionIndex(e.GetPosition(DevicesRepeater)) ?? -1;
+        Layout?.ClearReorderState();
+        if (source < 0 || raw < 0) return;
+
+        var sourceId = text.Substring(DragPayloadCardPrefix.Length);
+        var compact = ToCompactIndex(raw, source);
+        _logger?.LogInformation("Reorder: {Source} -> compact index {Index}", sourceId, compact);
+        ViewModel.ReorderDeviceToCompactIndex(sourceId, compact);
+        e.Handled = true;
+    }
+
+    /// <summary>Compacts a raw "insert before data index" position into the source-excluded space
+    /// the gap and <see cref="HomeViewModel.ReorderDeviceToCompactIndex"/> both use.</summary>
+    private int ToCompactIndex(int raw, int source)
+    {
+        var compact = raw > source ? raw - 1 : raw;
+        return Math.Clamp(compact, 0, Math.Max(0, ViewModel.Devices.Count - 1));
+    }
+
+    /// <summary>Index of the reorder source in the visible list: the card captured on drag start,
+    /// falling back to resolving the payload's endpoint id.</summary>
+    private int GetReorderSourceIndex(string payloadText)
+    {
+        if (_draggedCard is not null)
+        {
+            var i = ViewModel.Devices.IndexOf(_draggedCard);
+            if (i >= 0) return i;
+        }
+
+        var id = payloadText.Substring(DragPayloadCardPrefix.Length);
+        for (var i = 0; i < ViewModel.Devices.Count; i++)
+        {
+            if (string.Equals(ViewModel.Devices[i].Endpoint.Id, id, StringComparison.OrdinalIgnoreCase))
+            {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /// <summary>Attaches (or removes) a Composition implicit Offset animation on each realized card
+    /// so any layout re-arrange slides smoothly. Kept on only during a reorder drag so page loads
+    /// and scrolls don't animate.</summary>
+    private void EnableReorderAnimations(bool enable)
+    {
+        _reorderActive = enable;
+        for (var i = 0; i < ViewModel.Devices.Count; i++)
+        {
+            if (DevicesRepeater.TryGetElement(i) is UIElement element)
+            {
+                ApplyReorderAnimation(element, enable);
+            }
+        }
+    }
+
+    private static void ApplyReorderAnimation(UIElement element, bool enable)
+    {
+        var visual = ElementCompositionPreview.GetElementVisual(element);
+        if (!enable)
+        {
+            visual.ImplicitAnimations = null;
+            return;
+        }
+
+        var compositor = visual.Compositor;
+        var offset = compositor.CreateVector3KeyFrameAnimation();
+        offset.Target = "Offset";
+        offset.InsertExpressionKeyFrame(1.0f, "this.FinalValue");
+        offset.Duration = TimeSpan.FromMilliseconds(220);
+
+        var animations = compositor.CreateImplicitAnimationCollection();
+        animations["Offset"] = offset;
+        visual.ImplicitAnimations = animations;
+    }
+
+    private void OnDevicesElementPrepared(ItemsRepeater sender, ItemsRepeaterElementPreparedEventArgs args)
+    {
+        if (_reorderActive)
+        {
+            ApplyReorderAnimation(args.Element, true);
+        }
     }
 
     /// <summary>Renders the card to an opaque bitmap for use as the drag visual. The card's own
     /// fill is a translucent layer brush, so each premultiplied pixel is composited over the
-    /// theme's solid background colour to make the lifted card read as solid.</summary>
+    /// theme's solid background colour to make the lifted card read as solid. The card's rounded
+    /// corners are then re-applied as an alpha mask: compositing over an opaque base fills the
+    /// transparent corner cut-outs with solid colour and squares the card off, so we punch them
+    /// back out.</summary>
     private static async Task<SoftwareBitmap?> RenderCardOpaqueAsync(FrameworkElement element)
     {
         var rtb = new RenderTargetBitmap();
         await rtb.RenderAsync(element);
-        if (rtb.PixelWidth <= 0 || rtb.PixelHeight <= 0) return null;
+        var w = rtb.PixelWidth;
+        var h = rtb.PixelHeight;
+        if (w <= 0 || h <= 0) return null;
 
         var bytes = (await rtb.GetPixelsAsync()).ToArray();   // BGRA8, premultiplied alpha
         var baseColor = element.ActualTheme == ElementTheme.Light
             ? Color.FromArgb(255, 0xF3, 0xF3, 0xF3)           // SolidBackgroundFillColorBase (light)
             : Color.FromArgb(255, 0x20, 0x20, 0x20);          // SolidBackgroundFillColorBase (dark)
 
-        for (var i = 0; i + 3 < bytes.Length; i += 4)
+        // Corner radius in physical pixels: the card's DIP radius scaled by the render's
+        // rasterization scale (rendered pixel width / layout width).
+        var radiusDip = (element as Border)?.CornerRadius.TopLeft ?? 8.0;
+        var scale = element.ActualWidth > 0 ? w / element.ActualWidth : 1.0;
+        var radius = radiusDip * scale;
+
+        for (var y = 0; y < h; y++)
         {
-            var a = bytes[i + 3];
-            if (a == 255) continue;
-            var inv = 255 - a;
-            bytes[i + 0] = (byte)(bytes[i + 0] + (baseColor.B * inv / 255));
-            bytes[i + 1] = (byte)(bytes[i + 1] + (baseColor.G * inv / 255));
-            bytes[i + 2] = (byte)(bytes[i + 2] + (baseColor.R * inv / 255));
-            bytes[i + 3] = 255;
+            for (var x = 0; x < w; x++)
+            {
+                var i = (y * w + x) * 4;
+                var coverage = RoundedRectCoverage(x + 0.5, y + 0.5, w, h, radius);
+                var a = bytes[i + 3];
+                if (a == 255 && coverage >= 1.0) continue;   // opaque interior - leave it
+
+                // Composite the (premultiplied) source over the opaque base, then re-premultiply
+                // by the corner coverage so the rounded cut-outs stay transparent.
+                var inv = 255 - a;
+                var b = bytes[i + 0] + baseColor.B * inv / 255.0;
+                var g = bytes[i + 1] + baseColor.G * inv / 255.0;
+                var r = bytes[i + 2] + baseColor.R * inv / 255.0;
+                bytes[i + 0] = (byte)(b * coverage);
+                bytes[i + 1] = (byte)(g * coverage);
+                bytes[i + 2] = (byte)(r * coverage);
+                bytes[i + 3] = (byte)(255 * coverage);
+            }
         }
 
-        var bitmap = new SoftwareBitmap(BitmapPixelFormat.Bgra8, rtb.PixelWidth, rtb.PixelHeight, BitmapAlphaMode.Premultiplied);
+        var bitmap = new SoftwareBitmap(BitmapPixelFormat.Bgra8, w, h, BitmapAlphaMode.Premultiplied);
         bitmap.CopyFromBuffer(bytes.AsBuffer());
         return bitmap;
     }
 
-    private void SetReorderHighlight(DeviceCard card, bool insertAfter)
+    /// <summary>Anti-aliased coverage [0,1] of a pixel centre against a rounded rectangle: 1 over
+    /// the straight edges and interior, a soft ramp across each corner arc, 0 outside it.</summary>
+    private static double RoundedRectCoverage(double px, double py, double w, double h, double r)
     {
-        if (!ReferenceEquals(_reorderHighlightCard, card))
-        {
-            ClearReorderHighlight();
-            _reorderHighlightCard = card;
-        }
-        card.ShowInsertBefore = !insertAfter;
-        card.ShowInsertAfter = insertAfter;
-    }
-
-    private void ClearReorderHighlight()
-    {
-        if (_reorderHighlightCard is null) return;
-        _reorderHighlightCard.ShowInsertBefore = false;
-        _reorderHighlightCard.ShowInsertAfter = false;
-        _reorderHighlightCard = null;
+        if (r <= 0) return 1.0;
+        // Pick the nearest corner-arc centre; bail to full coverage on the straight-edge bands.
+        double cx;
+        if (px < r) cx = r; else if (px > w - r) cx = w - r; else return 1.0;
+        double cy;
+        if (py < r) cy = r; else if (py > h - r) cy = h - r; else return 1.0;
+        var dx = px - cx;
+        var dy = py - cy;
+        var dist = Math.Sqrt(dx * dx + dy * dy);
+        return Math.Clamp(r - dist + 0.5, 0.0, 1.0);
     }
 
     private void OnDeviceCardDragOver(object sender, DragEventArgs e)
     {
-        if (sender is not FrameworkElement { Tag: DeviceCard card } border) return;
+        if (sender is not FrameworkElement { Tag: DeviceCard card }) return;
 
         // Bail early when the drag isn't ours. Other drags (file drops onto the window, etc.)
         // shouldn't get our acceptance.
@@ -317,23 +473,10 @@ public sealed partial class HomePage : Page
             return;
         }
 
+        // Card-reorder payloads bubble up to the container (OnDevicesDragOver), which positions the
+        // gap from stable layout geometry. Leave the event unhandled so it gets there.
         if (text.StartsWith(DragPayloadCardPrefix, StringComparison.Ordinal))
         {
-            var sourceId = text.Substring(DragPayloadCardPrefix.Length);
-            // Dropping a card on itself is a no-op; no insertion rule.
-            if (string.Equals(card.Endpoint.Id, sourceId, StringComparison.OrdinalIgnoreCase))
-            {
-                ClearReorderHighlight();
-                e.AcceptedOperation = DataPackageOperation.None;
-            }
-            else
-            {
-                // Insert side = which half of the card the pointer is over.
-                var insertAfter = e.GetPosition(border).X > border.ActualWidth / 2;
-                SetReorderHighlight(card, insertAfter);
-                e.AcceptedOperation = DataPackageOperation.Move;
-            }
-            e.Handled = true;
             return;
         }
 
@@ -361,25 +504,14 @@ public sealed partial class HomePage : Page
 
     private void OnDeviceCardDrop(object sender, DragEventArgs e)
     {
-        if (sender is not FrameworkElement { Tag: DeviceCard card } border) return;
+        if (sender is not FrameworkElement { Tag: DeviceCard card }) return;
 
         var text = TryReadText(e.DataView);
         if (text is null) return;
 
-        if (text.StartsWith(DragPayloadCardPrefix, StringComparison.Ordinal))
-        {
-            ClearReorderHighlight();
-            var sourceId = text.Substring(DragPayloadCardPrefix.Length);
-            if (string.Equals(card.Endpoint.Id, sourceId, StringComparison.OrdinalIgnoreCase)) return;
-
-            var insertAfter = e.GetPosition(border).X > border.ActualWidth / 2;
-            _logger?.LogInformation(
-                "Reorder: {Source} -> {Target} (after={After})",
-                sourceId, card.Endpoint.Id, insertAfter);
-            ViewModel.ReorderDevice(sourceId, card, insertAfter);
-            e.Handled = true;
-            return;
-        }
+        // Card-reorder drops bubble up to the container (OnDevicesDrop), which commits via the
+        // layout's stable insertion index. Only app-chip drops are handled per card.
+        if (text.StartsWith(DragPayloadCardPrefix, StringComparison.Ordinal)) return;
 
         if (card.IsCapture) return;
         if (!TryParseChipPayload(text, out var pid, out var sourceEndpointId)) return;
