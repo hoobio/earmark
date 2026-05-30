@@ -50,6 +50,9 @@
                  ControlCornerRadius (4) is a built-in WinUI theme resource; CardCornerRadius is
                  ours so card/tile rounding reads from one place. -->
             <CornerRadius x:Key="CardCornerRadius">8</CornerRadius>
+            <!-- Same 8 as a scalar, for Rectangle.RadiusX/Y (which take a double, not a CornerRadius)
+                 so dotted group/drop outlines round to the card radius from one place. -->
+            <x:Double x:Key="CardCornerRadiusValue">8</x:Double>
 
             <!-- Caps line length on wide monitors instead of stretching content edge-to-edge
                  (Fluent 2 layout). Pages centre their content within this. -->

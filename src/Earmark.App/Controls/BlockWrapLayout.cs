@@ -66,11 +66,6 @@ public sealed class BlockWrapLayout : VirtualizingLayout
         set => SetValue(RowSpacingProperty, value);
     }
 
-    /// <summary>Extra vertical gap added at a row boundary that touches a group section, on top of
-    /// <see cref="RowSpacing"/>, so a group reads as a distinct cluster and an adjacent ungrouped card
-    /// isn't mistaken for one of its members.</summary>
-    public const double GroupSeparation = 12.0;
-
     private static void OnLayoutPropertyChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
         if (d is BlockWrapLayout layout) layout.InvalidateMeasure();
@@ -274,7 +269,9 @@ public sealed class BlockWrapLayout : VirtualizingLayout
                     if (Info(context, order[slot])?.BreaksRow ?? false) { thisRowHasGroup = true; break; }
                 }
                 var nextIsGroup = Info(context, order[i])?.BreaksRow ?? false;
-                y += RowSpacing + (thisRowHasGroup && !nextIsGroup ? GroupSeparation : 0);
+                // A group above ungrouped device(s) gets double the normal row gap so it reads as a
+                // distinct cluster (the extra tracks RowSpacing rather than a separate magic number).
+                y += RowSpacing + (thisRowHasGroup && !nextIsGroup ? RowSpacing : 0);
             }
         }
 

@@ -540,7 +540,7 @@
 
                     <!-- Transient accent dotted outline shown while a drag hovers
                          this card's centre with intent to group onto it. -->
-                    <Rectangle RadiusX="8" RadiusY="8"
+                    <Rectangle RadiusX="{StaticResource CardCornerRadiusValue}" RadiusY="{StaticResource CardCornerRadiusValue}"
                                Stroke="{ThemeResource AccentFillColorDefaultBrush}"
                                StrokeThickness="2"
                                StrokeDashArray="3,3"
@@ -604,13 +604,13 @@
 
                     <!-- Dotted outline at the group-box bounds (non-interactive). Only one is ever
                          visible: neutral while dragging, accent when this group is the join target. -->
-                    <Rectangle RadiusX="8" RadiusY="8"
+                    <Rectangle RadiusX="{StaticResource CardCornerRadiusValue}" RadiusY="{StaticResource CardCornerRadiusValue}"
                                Stroke="{ThemeResource TextFillColorTertiaryBrush}"
                                StrokeThickness="1"
                                StrokeDashArray="3,3"
                                IsHitTestVisible="False"
                                Visibility="{x:Bind ShowNeutralOutline, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                    <Rectangle RadiusX="8" RadiusY="8"
+                    <Rectangle RadiusX="{StaticResource CardCornerRadiusValue}" RadiusY="{StaticResource CardCornerRadiusValue}"
                                Stroke="{ThemeResource AccentFillColorDefaultBrush}"
                                StrokeThickness="2"
                                StrokeDashArray="3,3"
