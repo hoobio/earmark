@@ -550,7 +550,8 @@ jobs:
       # Create as a draft first so the asset upload completes even on repos with immutable
       # releases, then flip to a published prerelease.
       - name: Create pre-release (draft)
-        uses: softprops/action-gh-release@v3
+        # Pinned to a commit SHA (third-party action). Bump via Dependabot/Renovate.
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda  # v3.0.0
         with:
           tag_name: v${{ steps.version.outputs.version }}-pre.${{ github.run_number }}
           name: v${{ steps.version.outputs.version }}-pre.${{ github.run_number }}
