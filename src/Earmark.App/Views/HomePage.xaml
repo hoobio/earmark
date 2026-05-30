@@ -161,6 +161,15 @@
                                                 <FontIcon Glyph="{x:Bind VolumeControlsToggleGlyph, Mode=OneWay}" />
                                             </MenuFlyoutItem.Icon>
                                         </MenuFlyoutItem>
+                                        <!-- Only shown for grouped devices: remove this one from its group. -->
+                                        <MenuFlyoutItem Text="Ungroup device"
+                                                        Click="OnUngroupDeviceClicked"
+                                                        Tag="{x:Bind}"
+                                                        Visibility="{x:Bind IsGroupMember, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                            <MenuFlyoutItem.Icon>
+                                                <FontIcon Glyph="&#xF0B4;" />
+                                            </MenuFlyoutItem.Icon>
+                                        </MenuFlyoutItem>
                                     </MenuFlyout>
                                 </Border.ContextFlyout>
                                 <Grid>
@@ -621,11 +630,125 @@
                                         </ItemsControl>
                                     </StackPanel>
                                 </StackPanel>
+
+                                    <!-- Transient accent dotted outline shown while a drag hovers
+                                         this card's centre with intent to group onto it. -->
+                                    <Rectangle RadiusX="8" RadiusY="8"
+                                               Stroke="{ThemeResource AccentFillColorDefaultBrush}"
+                                               StrokeThickness="2"
+                                               StrokeDashArray="3,3"
+                                               IsHitTestVisible="False"
+                                               Visibility="{x:Bind IsGroupDropTarget, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
                                 </Grid>
                             </Border>
                         </DataTemplate>
                     </ItemsRepeater.ItemTemplate>
                 </ItemsRepeater>
+
+                <!-- Group chrome overlay: sits above the cards in the same scroll-content coordinate
+                     space, so it scrolls with them and only needs repositioning when the grid
+                     re-arranges. Two layers: per-row dotted outlines (so a wrapped group hugs each
+                     row, not a bounding box), and per-group editable titles. Both position via a
+                     RenderTransform driven by compile-checked x:Bind (a Canvas.Left style-binding
+                     doesn't apply reliably to generated ItemsControl containers). Outlines are
+                     non-interactive; only the title (in the empty band above the first row) is
+                     hit-testable, so card drag + clicks pass through everywhere else. -->
+                <ItemsControl ItemsSource="{x:Bind GroupOutlines}" IsHitTestVisible="False">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <Canvas />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:GroupOutlineSegment">
+                            <Grid Width="{x:Bind Width, Mode=OneWay}"
+                                  Height="{x:Bind Height, Mode=OneWay}"
+                                  HorizontalAlignment="Left"
+                                  VerticalAlignment="Top">
+                                <Grid.RenderTransform>
+                                    <TranslateTransform X="{x:Bind X, Mode=OneWay}" Y="{x:Bind Y, Mode=OneWay}" />
+                                </Grid.RenderTransform>
+                                <!-- Normal vs join-target outline: only one is ever visible, so the
+                                     dotted strokes never overlap. -->
+                                <Rectangle RadiusX="8" RadiusY="8"
+                                           Stroke="{ThemeResource TextFillColorTertiaryBrush}"
+                                           StrokeThickness="1"
+                                           StrokeDashArray="3,3"
+                                           Visibility="{x:Bind ShowNormalOutline, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                <Rectangle RadiusX="8" RadiusY="8"
+                                           Stroke="{ThemeResource AccentFillColorDefaultBrush}"
+                                           StrokeThickness="2"
+                                           StrokeDashArray="3,3"
+                                           Visibility="{x:Bind IsJoinTarget, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                            </Grid>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <ItemsControl x:Name="GroupTitleHost" ItemsSource="{x:Bind GroupOverlays}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <Canvas />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:GroupOverlay">
+                            <!-- The title is the group's drag handle (drag to move the whole group)
+                                 and a double-click / context-menu rename target. A read-only label is
+                                 shown normally; it swaps to a text box while editing. -->
+                            <Grid Width="{x:Bind Width, Mode=OneWay}"
+                                  Height="{x:Bind BandHeight}"
+                                  HorizontalAlignment="Left"
+                                  VerticalAlignment="Top"
+                                  Background="Transparent"
+                                  CanDrag="True"
+                                  Tag="{x:Bind}"
+                                  DragStarting="OnGroupTitleDragStarting"
+                                  DropCompleted="OnGroupTitleDropCompleted"
+                                  DoubleTapped="OnGroupTitleDoubleTapped"
+                                  ToolTipService.ToolTip="Drag to move the group · double-click to rename">
+                                <Grid.ContextFlyout>
+                                    <MenuFlyout>
+                                        <MenuFlyoutItem Text="Rename" Click="OnRenameGroupClicked" Tag="{x:Bind}">
+                                            <MenuFlyoutItem.Icon>
+                                                <FontIcon Glyph="&#xE8AC;" />
+                                            </MenuFlyoutItem.Icon>
+                                        </MenuFlyoutItem>
+                                        <MenuFlyoutItem Text="Ungroup all" Click="OnUngroupAllClicked" Tag="{x:Bind}">
+                                            <MenuFlyoutItem.Icon>
+                                                <FontIcon Glyph="&#xF0B4;" />
+                                            </MenuFlyoutItem.Icon>
+                                        </MenuFlyoutItem>
+                                    </MenuFlyout>
+                                </Grid.ContextFlyout>
+                                <Grid.RenderTransform>
+                                    <TranslateTransform X="{x:Bind X, Mode=OneWay}" Y="{x:Bind Y, Mode=OneWay}" />
+                                </Grid.RenderTransform>
+
+                                <TextBlock Text="{x:Bind Group.Title, Mode=OneWay}"
+                                           Visibility="{x:Bind ShowLabel, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                           VerticalAlignment="Center"
+                                           Padding="2,0,4,0"
+                                           FontWeight="SemiBold"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                           TextTrimming="CharacterEllipsis"
+                                           TextWrapping="NoWrap" />
+                                <TextBox Text="{x:Bind Group.Title, Mode=TwoWay}"
+                                         Visibility="{x:Bind IsEditing, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                         MinHeight="0"
+                                         PlaceholderText="New group"
+                                         KeyDown="OnGroupTitleKeyDown"
+                                         LostFocus="OnGroupTitleEditLostFocus"
+                                         Background="Transparent"
+                                         BorderThickness="0"
+                                         Padding="2,0,4,0"
+                                         VerticalContentAlignment="Center"
+                                         FontWeight="SemiBold"
+                                         Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            </Grid>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
                 </Grid>
             </ScrollViewer>
         </Grid>

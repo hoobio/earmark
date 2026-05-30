@@ -149,6 +149,17 @@ public partial class HomeViewModel : ObservableObject, IDisposable
 
     public ObservableCollection<DeviceCard> Devices { get; } = new();
 
+    /// <summary>Chrome view-models (editable title + dedicated-row) per present group id, reused
+    /// across rebuilds. The page reads this to position the overlay and to answer the layout's
+    /// dedicated-row queries.</summary>
+    private readonly Dictionary<string, DeviceGroupInfo> _groupInfos = new(StringComparer.OrdinalIgnoreCase);
+
+    public IReadOnlyDictionary<string, DeviceGroupInfo> GroupInfos => _groupInfos;
+
+    /// <summary>Raised after the set of group infos changes (group added/removed, or a dedicated-row
+    /// flip) so the page can refresh its overlay layer / relayout.</summary>
+    public event Action? GroupInfosChanged;
+
     public bool HasItems => Devices.Count > 0;
     public bool IsEmpty => Devices.Count == 0;
 
@@ -555,9 +566,11 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         // Snapshot the manual order on the UI thread so the background BuildCards reads a stable
         // copy (a concurrent ReorderDevice replaces the list reference rather than mutating it).
         var deviceOrder = new List<string>(_settings.Current.DeviceOrder);
+        // Same for groups - mutations replace the list wholesale, so a shallow snapshot is stable.
+        var deviceGroups = new List<DeviceGroup>(_settings.Current.DeviceGroups);
         var showHidden = ShowHiddenDevices;
 
-        var built = await Task.Run(() => BuildCards(hiddenIds, pinnedIds, volumeControlsHiddenIds, deviceOrder, showHidden), ct).ConfigureAwait(false);
+        var built = await Task.Run(() => BuildCards(hiddenIds, pinnedIds, volumeControlsHiddenIds, deviceOrder, deviceGroups, showHidden), ct).ConfigureAwait(false);
 
         if (ct.IsCancellationRequested) return;
 
@@ -567,6 +580,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             _allCards.Clear();
             _allCards.AddRange(built);
             SyncVisibleDevices();
+            ReconcileGroupInfos(deviceGroups);
             SyncAllCardsApps();
             _ = ApplyWaveLinkVisualsAsync(ct);
         });
@@ -792,7 +806,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         return result;
     }
 
-    private List<DeviceCard> BuildCards(HashSet<string> hiddenIds, HashSet<string> pinnedIds, HashSet<string> volumeControlsHiddenIds, List<string> deviceOrder, bool showHidden)
+    private List<DeviceCard> BuildCards(HashSet<string> hiddenIds, HashSet<string> pinnedIds, HashSet<string> volumeControlsHiddenIds, List<string> deviceOrder, List<DeviceGroup> deviceGroups, bool showHidden)
     {
         var renderEndpoints = _endpoints.GetEndpoints(EndpointFlow.Render);
         var captureEndpoints = _endpoints.GetEndpoints(EndpointFlow.Capture);
@@ -828,6 +842,15 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             ordered = ApplyManualOrder(ordered, deviceOrder);
         }
 
+        // Pull each group's members together (anchored at the earliest-appearing member) so they
+        // render contiguously, regardless of how DeviceOrder was persisted. Endpoint id -> group id
+        // for decorating the cards below.
+        var groupIdByEndpoint = BuildGroupIdMap(ordered.Select(e => e.Id), deviceGroups);
+        if (groupIdByEndpoint.Count > 0)
+        {
+            ordered = ApplyGroupContiguity(ordered, e => e.Id, deviceGroups);
+        }
+
         var cards = new List<DeviceCard>(ordered.Count);
         foreach (var endpoint in ordered)
         {
@@ -857,11 +880,80 @@ public partial class HomeViewModel : ObservableObject, IDisposable
                 volumeControlsHiddenByUser,
                 OnCardVisibilityToggled,
                 OnCardVolumeControlsToggled);
+            if (groupIdByEndpoint.TryGetValue(endpoint.Id, out var groupId))
+            {
+                card.GroupId = groupId;
+            }
             // Apps are filled later on the UI thread; ObservableCollection mutations have to
             // happen there, and the rule-lock recompute needs the same fresh snapshot.
             cards.Add(card);
         }
         return cards;
+    }
+
+    /// <summary>Endpoint id -> group id, restricted to groups that still have at least two of their
+    /// members present in <paramref name="presentIds"/>. A group that has dropped below two present
+    /// members (unplugged / removed) is treated as disbanded for this build.</summary>
+    private static Dictionary<string, string> BuildGroupIdMap(IEnumerable<string> presentIds, List<DeviceGroup> groups)
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (groups.Count == 0) return map;
+
+        var present = new HashSet<string>(presentIds, StringComparer.OrdinalIgnoreCase);
+        foreach (var group in groups)
+        {
+            var members = group.MemberIds.Where(present.Contains).ToList();
+            if (members.Count < 2) continue;   // a sub-two group isn't a group anymore
+            foreach (var id in members)
+            {
+                map[id] = group.Id;
+            }
+        }
+        return map;
+    }
+
+    /// <summary>Reorders <paramref name="items"/> so each group's members sit contiguously, anchored
+    /// at the position of the group's earliest-appearing member, in the group's own member order.
+    /// Non-members keep their relative slots. Members of a group not present here are skipped.</summary>
+    private static List<T> ApplyGroupContiguity<T>(List<T> items, Func<T, string> idOf, List<DeviceGroup> groups)
+    {
+        var groupByMember = new Dictionary<string, DeviceGroup>(StringComparer.OrdinalIgnoreCase);
+        foreach (var group in groups)
+        {
+            foreach (var id in group.MemberIds)
+            {
+                groupByMember[id] = group;
+            }
+        }
+
+        var itemById = new Dictionary<string, T>(StringComparer.OrdinalIgnoreCase);
+        foreach (var item in items)
+        {
+            itemById[idOf(item)] = item;
+        }
+
+        var emittedGroups = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var result = new List<T>(items.Count);
+        foreach (var item in items)
+        {
+            var id = idOf(item);
+            if (groupByMember.TryGetValue(id, out var group))
+            {
+                if (!emittedGroups.Add(group.Id)) continue;   // group's block already emitted
+                foreach (var memberId in group.MemberIds)
+                {
+                    if (itemById.TryGetValue(memberId, out var member))
+                    {
+                        result.Add(member);
+                    }
+                }
+            }
+            else
+            {
+                result.Add(item);
+            }
+        }
+        return result;
     }
 
     /// <summary>
@@ -1274,6 +1366,286 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>Creates a new two-member group from a drag of <paramref name="sourceId"/> onto
+    /// <paramref name="targetId"/>'s centre. Both must currently be ungrouped (the page enforces
+    /// this for the gesture). The target leads the member order; the dropped source follows.</summary>
+    public void CreateGroup(string sourceId, string targetId)
+    {
+        if (string.IsNullOrEmpty(sourceId) || string.IsNullOrEmpty(targetId)) return;
+        if (string.Equals(sourceId, targetId, StringComparison.OrdinalIgnoreCase)) return;
+
+        var source = FindCard(sourceId);
+        var target = FindCard(targetId);
+        if (source is null || target is null) return;
+        if (source.GroupId is not null || target.GroupId is not null) return;
+
+        var group = new DeviceGroup
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            Title = "New group",
+            MemberIds = [target.Endpoint.Id, source.Endpoint.Id],
+        };
+        _settings.Current.DeviceGroups.Add(group);
+        target.GroupId = group.Id;
+        source.GroupId = group.Id;
+        ApplyGroupChange();
+    }
+
+    /// <summary>Adds an ungrouped <paramref name="sourceId"/> to the existing group
+    /// <paramref name="groupId"/>, appended to the member order.</summary>
+    public void AddToGroup(string sourceId, string groupId)
+    {
+        if (string.IsNullOrEmpty(sourceId) || string.IsNullOrEmpty(groupId)) return;
+
+        var source = FindCard(sourceId);
+        if (source is null || source.GroupId is not null) return;
+
+        var group = _settings.Current.DeviceGroups
+            .FirstOrDefault(g => string.Equals(g.Id, groupId, StringComparison.OrdinalIgnoreCase));
+        if (group is null) return;
+        if (group.MemberIds.Any(id => string.Equals(id, source.Endpoint.Id, StringComparison.OrdinalIgnoreCase))) return;
+
+        group.MemberIds.Add(source.Endpoint.Id);
+        source.GroupId = group.Id;
+        ApplyGroupChange();
+    }
+
+    /// <summary>Shared tail for a membership change: pull each group's members contiguous in
+    /// <c>_allCards</c>, re-derive the persisted order, save, then refresh the visible list and
+    /// the group infos. Preserves card instances (no full rebuild).</summary>
+    private void ApplyGroupChange()
+    {
+        var groups = _settings.Current.DeviceGroups;
+        var reordered = ApplyGroupContiguity(_allCards, c => c.Endpoint.Id, groups);
+        _allCards.Clear();
+        _allCards.AddRange(reordered);
+
+        _settings.Current.DeviceOrder = _allCards.Select(c => c.Endpoint.Id).ToList();
+        QueueSettingsSave();
+        SyncVisibleDevices();
+        ReconcileGroupInfos(groups);
+    }
+
+    private DeviceCard? FindCard(string endpointId) =>
+        _allCards.FirstOrDefault(c => string.Equals(c.Endpoint.Id, endpointId, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>Total member count of a group (including hidden members), or 0 if unknown. The page
+    /// uses this to decide whether a drag-out needs the disband confirmation.</summary>
+    public int GroupMemberCount(string groupId) =>
+        _settings.Current.DeviceGroups
+            .FirstOrDefault(g => string.Equals(g.Id, groupId, StringComparison.OrdinalIgnoreCase))?.MemberIds.Count ?? 0;
+
+    /// <summary>Removes a member dragged out of its group and reorders it to the dropped top-level
+    /// position. Disbands the group if it drops below two members (the page confirms first).</summary>
+    public void RemoveFromGroup(string sourceId, int compactIndex)
+    {
+        var source = FindCard(sourceId);
+        if (source is null || source.GroupId is null) return;
+
+        RemoveMemberFromGroupModel(source);
+        ReorderDeviceToCompactIndex(sourceId, compactIndex);   // moves + persists order + resyncs
+        ReconcileGroupInfos(_settings.Current.DeviceGroups);
+    }
+
+    /// <summary>Reorders a member within its own group, keeping it grouped, and re-derives the
+    /// group's member order from the new card order.</summary>
+    public void ReorderWithinGroup(string sourceId, int compactIndex)
+    {
+        var source = FindCard(sourceId);
+        var gid = source?.GroupId;
+        if (source is null || gid is null) return;
+
+        ReorderDeviceToCompactIndex(sourceId, compactIndex);
+        var group = _settings.Current.DeviceGroups
+            .FirstOrDefault(g => string.Equals(g.Id, gid, StringComparison.OrdinalIgnoreCase));
+        if (group is not null)
+        {
+            group.MemberIds = _allCards
+                .Where(c => string.Equals(c.GroupId, gid, StringComparison.OrdinalIgnoreCase))
+                .Select(c => c.Endpoint.Id)
+                .ToList();
+            QueueSettingsSave();
+        }
+    }
+
+    /// <summary>Removes <paramref name="card"/> from its group in the model (clears its
+    /// <c>GroupId</c>, drops it from the group's member list, and disbands the group - clearing the
+    /// remaining member's <c>GroupId</c> - if that leaves fewer than two). Persistence / resync is
+    /// the caller's job. Returns true if the card was grouped.</summary>
+    private bool RemoveMemberFromGroupModel(DeviceCard card)
+    {
+        var gid = card.GroupId;
+        if (gid is null) return false;
+
+        card.GroupId = null;
+        var group = _settings.Current.DeviceGroups
+            .FirstOrDefault(g => string.Equals(g.Id, gid, StringComparison.OrdinalIgnoreCase));
+        if (group is null) return true;
+
+        group.MemberIds.RemoveAll(id => string.Equals(id, card.Endpoint.Id, StringComparison.OrdinalIgnoreCase));
+        if (group.MemberIds.Count < 2)
+        {
+            foreach (var memberId in group.MemberIds.ToList())
+            {
+                var remaining = FindCard(memberId);
+                if (remaining is not null) remaining.GroupId = null;
+            }
+            _settings.Current.DeviceGroups.Remove(group);
+        }
+        return true;
+    }
+
+    /// <summary>Moves a whole group (all its members, as a contiguous block in member order) so it
+    /// lands before the visible card at <paramref name="visibleInsertIndex"/> in the block-excluded
+    /// visible list (what the page computes from geometry). Maps that to the full
+    /// <see cref="_allCards"/> list and re-asserts group contiguity, so the block can never end up
+    /// splitting another group regardless of where the live preview pointed.</summary>
+    public void ReorderGroup(string groupId, int visibleInsertIndex)
+    {
+        var group = _settings.Current.DeviceGroups
+            .FirstOrDefault(g => string.Equals(g.Id, groupId, StringComparison.OrdinalIgnoreCase));
+        if (group is null) return;
+
+        var members = group.MemberIds
+            .Select(FindCard)
+            .Where(c => c is not null)
+            .Cast<DeviceCard>()
+            .ToList();
+        if (members.Count == 0) return;
+        var memberSet = new HashSet<DeviceCard>(members);
+
+        // The drop index is against the visible list minus this group's members. Resolve it to the
+        // card the block should land in front of.
+        var visibleOthers = Devices.Where(c => !memberSet.Contains(c)).ToList();
+        var anchor = visibleInsertIndex >= 0 && visibleInsertIndex < visibleOthers.Count
+            ? visibleOthers[visibleInsertIndex]
+            : null;
+
+        // Insert the block before that anchor in the full list, then re-contiguate every group so
+        // none is left split (the ultimate guard against the block landing inside another group).
+        var allOthers = _allCards.Where(c => !memberSet.Contains(c)).ToList();
+        var insertAt = anchor is not null ? allOthers.IndexOf(anchor) : allOthers.Count;
+        if (insertAt < 0) insertAt = allOthers.Count;
+        allOthers.InsertRange(insertAt, members);
+
+        var reordered = ApplyGroupContiguity(allOthers, c => c.Endpoint.Id, _settings.Current.DeviceGroups);
+        _allCards.Clear();
+        _allCards.AddRange(reordered);
+        _settings.Current.DeviceOrder = _allCards.Select(c => c.Endpoint.Id).ToList();
+        QueueSettingsSave();
+        SyncVisibleDevices();
+    }
+
+    /// <summary>Disbands a whole group: clears every member's <c>GroupId</c> and drops the group.
+    /// Members keep their positions.</summary>
+    public void UngroupAll(string groupId)
+    {
+        var group = _settings.Current.DeviceGroups
+            .FirstOrDefault(g => string.Equals(g.Id, groupId, StringComparison.OrdinalIgnoreCase));
+        if (group is null) return;
+
+        foreach (var memberId in group.MemberIds.ToList())
+        {
+            var card = FindCard(memberId);
+            if (card is not null) card.GroupId = null;
+        }
+        _settings.Current.DeviceGroups.Remove(group);
+        QueueSettingsSave();
+        SyncVisibleDevices();
+        ReconcileGroupInfos(_settings.Current.DeviceGroups);
+    }
+
+    /// <summary>Removes a single device from its group (context-menu "Ungroup device") and drops it
+    /// right behind the group (after the former last member), rather than leaving it wedged among the
+    /// members. Disbands the group if that leaves fewer than two members.</summary>
+    public void UngroupDevice(string endpointId)
+    {
+        var card = FindCard(endpointId);
+        if (card is null || card.GroupId is null) return;
+
+        var gid = card.GroupId;
+        var otherMemberIds = _settings.Current.DeviceGroups
+            .FirstOrDefault(g => string.Equals(g.Id, gid, StringComparison.OrdinalIgnoreCase))
+            ?.MemberIds
+            .Where(id => !string.Equals(id, endpointId, StringComparison.OrdinalIgnoreCase))
+            .ToList() ?? new List<string>();
+
+        RemoveMemberFromGroupModel(card);
+
+        // Re-contiguate the remaining groups, then place the ungrouped card just after the (former)
+        // group's last member so it reads as "bumped out behind the group".
+        var reordered = ApplyGroupContiguity(_allCards, c => c.Endpoint.Id, _settings.Current.DeviceGroups);
+        reordered.Remove(card);
+        var insertAt = reordered.Count;
+        for (var i = 0; i < reordered.Count; i++)
+        {
+            if (otherMemberIds.Any(id => string.Equals(id, reordered[i].Endpoint.Id, StringComparison.OrdinalIgnoreCase)))
+            {
+                insertAt = i + 1;
+            }
+        }
+        reordered.Insert(insertAt, card);
+
+        _allCards.Clear();
+        _allCards.AddRange(reordered);
+        _settings.Current.DeviceOrder = _allCards.Select(c => c.Endpoint.Id).ToList();
+        QueueSettingsSave();
+        SyncVisibleDevices();
+        ReconcileGroupInfos(_settings.Current.DeviceGroups);
+    }
+
+    /// <summary>Reconciles <see cref="_groupInfos"/> against the groups present after a rebuild
+    /// (a group is "present" when at least one visible card carries its id). Existing infos are kept
+    /// (and refreshed) so an in-progress title edit survives; gone groups are dropped.</summary>
+    private void ReconcileGroupInfos(List<DeviceGroup> groups)
+    {
+        var byId = new Dictionary<string, DeviceGroup>(StringComparer.OrdinalIgnoreCase);
+        foreach (var group in groups) byId[group.Id] = group;
+
+        var presentIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var card in _allCards)
+        {
+            if (card.GroupId is not null) presentIds.Add(card.GroupId);
+        }
+
+        var changed = false;
+        foreach (var goneId in _groupInfos.Keys.Where(id => !presentIds.Contains(id)).ToList())
+        {
+            _groupInfos.Remove(goneId);
+            changed = true;
+        }
+        foreach (var id in presentIds)
+        {
+            if (!byId.TryGetValue(id, out var record)) continue;
+            if (_groupInfos.TryGetValue(id, out var info))
+            {
+                info.SyncFrom(record.Title, record.DedicatedRow);
+            }
+            else
+            {
+                _groupInfos[id] = new DeviceGroupInfo(id, record.Title, record.DedicatedRow, OnGroupInfoChanged);
+                changed = true;
+            }
+        }
+
+        if (changed) GroupInfosChanged?.Invoke();
+    }
+
+    /// <summary>Persists a title / dedicated-row edit back to the matching <see cref="DeviceGroup"/>
+    /// record. A dedicated-row flip also needs a relayout, signalled via <see cref="GroupInfosChanged"/>.</summary>
+    private void OnGroupInfoChanged(DeviceGroupInfo info)
+    {
+        var record = _settings.Current.DeviceGroups
+            .FirstOrDefault(g => string.Equals(g.Id, info.Id, StringComparison.OrdinalIgnoreCase));
+        if (record is null) return;
+
+        var dedicatedChanged = record.DedicatedRow != info.DedicatedRow;
+        record.Title = info.Title;
+        record.DedicatedRow = info.DedicatedRow;
+        QueueSettingsSave();
+        if (dedicatedChanged) GroupInfosChanged?.Invoke();
+    }
+
     /// <summary>
     /// Pulls the list of physical playback endpoint names Wave Link is currently routing
     /// mixed audio to ("Headphones", "Speakers", etc.). These rank above the Elgato virtual
@@ -1349,7 +1721,11 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     private void OnCardVisibilityToggled(DeviceCard card, DeviceCard.VisibilityState prev)
     {
         _undoStack.PushVisibility(card.Endpoint.Id, prev.IsHidden, prev.IsPinned);
+        // Hiding a grouped device removes it from its group (groups aren't hideable); that disbands
+        // the group if it drops below two members.
+        var groupChanged = card.IsHiddenByUser && card.GroupId is not null && RemoveMemberFromGroupModel(card);
         PersistAndResync(card);
+        if (groupChanged) ReconcileGroupInfos(_settings.Current.DeviceGroups);
     }
 
     private void OnCardVolumeControlsToggled(DeviceCard card)

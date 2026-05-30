@@ -294,6 +294,26 @@ public partial class DeviceCard : ObservableObject
 
     partial void OnIsBeingDraggedChanged(bool value) => OnPropertyChanged(nameof(CardOpacity));
 
+    // ---- Grouping ----
+    //
+    // Id of the group this card belongs to, or null when ungrouped. Set by HomeViewModel during the
+    // card build (and on membership changes). Drives the membership-aware context menu and the
+    // per-card grouping affordances; the group's title / outline chrome is drawn by an overlay layer
+    // keyed off the same id.
+
+    /// <summary>Group id this card is a member of, or null if ungrouped.</summary>
+    [ObservableProperty]
+    public partial string? GroupId { get; set; }
+
+    public bool IsGroupMember => GroupId is not null;
+
+    partial void OnGroupIdChanged(string? value) => OnPropertyChanged(nameof(IsGroupMember));
+
+    /// <summary>True while a drag is hovering this card's centre with intent to group onto it.
+    /// Drives a transient accent dotted outline on the card.</summary>
+    [ObservableProperty]
+    public partial bool IsGroupDropTarget { get; set; }
+
     /// <summary>
     /// Resolves visibility per the spec:
     ///   - User-hidden    -> hidden (force)

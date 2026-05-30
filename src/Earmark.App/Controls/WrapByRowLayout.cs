@@ -6,6 +6,20 @@ using Windows.Foundation;
 namespace Earmark.App.Controls;
 
 /// <summary>
+/// Read-only group lookup the page supplies to <see cref="WrapByRowLayout"/> so it can reserve a
+/// title band above each group and (later) honour dedicated-row groups, without the layout knowing
+/// about view-model types. Indices are positions in the layout's item source (the visible cards).
+/// </summary>
+public interface IGroupLayoutInfo
+{
+    /// <summary>Group id of the card at <paramref name="index"/>, or null if it's ungrouped.</summary>
+    string? GroupIdForIndex(int index);
+
+    /// <summary>Whether the group reserves its own row(s).</summary>
+    bool IsDedicatedRow(string groupId);
+}
+
+/// <summary>
 /// Wrap-style virtualised layout. Arranges items into rows of equal-width columns; each row's
 /// height is sized to the tallest card in that row alone, independent of other rows. Unlike
 /// <see cref="UniformGridLayout"/> (which makes all items the same height), one expanded card
@@ -83,22 +97,39 @@ public sealed class WrapByRowLayout : VirtualizingLayout
     // the "bump aside" affordance. The dragged card itself is arranged at that gap slot but the
     // page renders it invisible, so its slot reads as the empty space the drop will fill.
 
-    private int _draggedIndex = -1;
+    // The dragged "block": one index for a card reorder, or a group's member indices (in member
+    // order) for a whole-group drag. Lifted out of flow and re-inserted contiguously at the gap.
+    private int[] _draggedIndices = [];
     private int _gapIndex = -1;
 
     /// <summary>No-gap rectangle per data index, refreshed every arrange. Frozen reference point
     /// for drag hit-testing so opening the gap doesn't move the answer.</summary>
     private Rect[] _identityRects = [];
 
-    /// <summary>Data index of the card being dragged, or -1 when no reorder is in flight.</summary>
-    public int DraggedIndex => _draggedIndex;
+    private bool _includeDraggedInGroupRect;
 
-    /// <summary>Sets the live reorder positions and re-arranges. <paramref name="gapIndex"/> is a
-    /// position in the source-excluded (compacted) sequence: the dragged card slots in there.</summary>
-    public void SetReorderState(int draggedIndex, int gapIndex)
+    /// <summary>When true the dragged card is still counted in its group's outline rect (a member
+    /// reordering within its own group, so the outline keeps the full footprint including the gap).
+    /// When false the dragged card is excluded (a member leaving, or a non-member), so the outline
+    /// hugs the remaining members. Set by the page per drag move.</summary>
+    public bool IncludeDraggedInGroupRect
     {
-        if (_draggedIndex == draggedIndex && _gapIndex == gapIndex) return;
-        _draggedIndex = draggedIndex;
+        get => _includeDraggedInGroupRect;
+        set { if (_includeDraggedInGroupRect != value) { _includeDraggedInGroupRect = value; InvalidateArrange(); } }
+    }
+
+    /// <summary>Sets a single-card reorder: lift <paramref name="draggedIndex"/> and re-insert it at
+    /// <paramref name="gapIndex"/> (a position in the source-excluded / compacted sequence).</summary>
+    public void SetReorderState(int draggedIndex, int gapIndex) =>
+        SetReorderState([draggedIndex], gapIndex);
+
+    /// <summary>Sets a block reorder: lift all <paramref name="draggedIndices"/> (a group's members,
+    /// in member order) and re-insert them contiguously at <paramref name="gapIndex"/> (a position in
+    /// the block-excluded / compacted sequence).</summary>
+    public void SetReorderState(IReadOnlyList<int> draggedIndices, int gapIndex)
+    {
+        if (_gapIndex == gapIndex && SameIndices(_draggedIndices, draggedIndices)) return;
+        _draggedIndices = [.. draggedIndices];
         _gapIndex = gapIndex;
         InvalidateArrange();
     }
@@ -106,31 +137,81 @@ public sealed class WrapByRowLayout : VirtualizingLayout
     /// <summary>Drops the gap and restores plain in-order layout (drag ended or cancelled).</summary>
     public void ClearReorderState()
     {
-        if (_draggedIndex < 0 && _gapIndex < 0) return;
-        _draggedIndex = -1;
+        IncludeDraggedInGroupRect = false;
+        if (_draggedIndices.Length == 0 && _gapIndex < 0) return;
+        _draggedIndices = [];
         _gapIndex = -1;
         InvalidateArrange();
     }
 
+    private static bool SameIndices(int[] a, IReadOnlyList<int> b)
+    {
+        if (a.Length != b.Count) return false;
+        for (var i = 0; i < a.Length; i++)
+        {
+            if (a[i] != b[i]) return false;
+        }
+        return true;
+    }
+
+    // ---- Grouping ----
+    //
+    // The page injects read-only group info; the layout reserves a title band above the first row
+    // a group starts in (so an editable title can sit in the backdrop above the members) and
+    // publishes per-group bounding rects for the overlay chrome (title + dotted outline). Group
+    // membership doesn't change the column grid - members render as ordinary contiguous cards.
+
+    /// <summary>Height reserved above a row that starts a group, for the group's title.</summary>
+    public const double TitleBandHeight = 28.0;
+
+    private IGroupLayoutInfo? _groupInfo;
+
+    /// <summary>Read-only group lookup set by the page. Changing it re-measures (bands shift height).</summary>
+    public IGroupLayoutInfo? GroupInfo
+    {
+        get => _groupInfo;
+        set { _groupInfo = value; InvalidateMeasure(); }
+    }
+
+    /// <summary>Per-group, the union rect of each ROW the group spans (in layout coordinates),
+    /// ordered top-to-bottom. One entry for a single-row group; multiple for a wrapped group so the
+    /// outline hugs each row segment instead of a big bounding box. The title sits above the first
+    /// segment. Refreshed each arrange.</summary>
+    public IReadOnlyDictionary<string, IReadOnlyList<Rect>> GroupSegments { get; private set; } =
+        new Dictionary<string, IReadOnlyList<Rect>>();
+
+    /// <summary>Raised after each arrange (and <see cref="GroupSegments"/> refresh) so the page can
+    /// reposition the group overlay. More reliable than <c>LayoutUpdated</c>, which can miss the
+    /// gap re-arrange during a drag.</summary>
+    public event Action? Arranged;
+
+    /// <summary>Forces a re-measure so group bands + segments recompute after a membership change
+    /// that didn't reorder the cards (e.g. ungroup-all, dedicated-row toggle).</summary>
+    public void RefreshLayout() => InvalidateMeasure();
+
     /// <summary>Maps display slot -> data index. Identity unless a reorder is in flight, in which
-    /// case the dragged item is lifted from its slot and re-inserted at the gap position.</summary>
+    /// case the dragged block is lifted from its slots and re-inserted contiguously at the gap.</summary>
     private int[] BuildDisplayOrder(int count)
     {
-        var order = new int[count];
-        if (_draggedIndex < 0 || _draggedIndex >= count || _gapIndex < 0)
+        if (_draggedIndices.Length == 0 || _gapIndex < 0)
         {
+            var order = new int[count];
             for (var i = 0; i < count; i++) order[i] = i;
             return order;
         }
 
+        var dragged = new HashSet<int>(_draggedIndices);
         var list = new List<int>(count);
         for (var i = 0; i < count; i++)
         {
-            if (i != _draggedIndex) list.Add(i);
+            if (!dragged.Contains(i)) list.Add(i);
         }
-        list.Insert(Math.Clamp(_gapIndex, 0, list.Count), _draggedIndex);
+        // Insert the block in its given (member) order so the group keeps its internal arrangement.
+        list.InsertRange(Math.Clamp(_gapIndex, 0, list.Count), _draggedIndices);
         return list.ToArray();
     }
+
+    private bool IsDragged(int dataIndex) => System.Array.IndexOf(_draggedIndices, dataIndex) >= 0;
 
     protected override Size MeasureOverride(VirtualizingLayoutContext context, Size availableSize)
     {
@@ -142,34 +223,16 @@ public sealed class WrapByRowLayout : VirtualizingLayout
         var columnCount = ComputeColumnCount(availableSize.Width);
         var columnWidth = ComputeColumnWidth(availableSize.Width, columnCount);
 
-        var totalHeight = 0.0;
-        var rowMax = 0.0;
-        var inRow = 0;
-
+        // Measure every element at the column width, then reuse the row-packing geometry (which folds
+        // in group title bands) to size the total height.
         for (var i = 0; i < context.ItemCount; i++)
         {
-            var element = context.GetOrCreateElementAt(i);
-            element.Measure(new Size(columnWidth, double.PositiveInfinity));
-
-            if (element.DesiredSize.Height > rowMax)
-            {
-                rowMax = element.DesiredSize.Height;
-            }
-            inRow++;
-
-            if (inRow == columnCount)
-            {
-                totalHeight += rowMax;
-                if (i < context.ItemCount - 1) totalHeight += RowSpacing;
-                rowMax = 0;
-                inRow = 0;
-            }
+            context.GetOrCreateElementAt(i).Measure(new Size(columnWidth, double.PositiveInfinity));
         }
 
-        if (inRow > 0)
-        {
-            totalHeight += rowMax;
-        }
+        var identity = new int[context.ItemCount];
+        for (var i = 0; i < identity.Length; i++) identity[i] = i;
+        ComputeSlotRects(context, availableSize.Width, identity, out var totalHeight);
 
         return new Size(availableSize.Width, totalHeight);
     }
@@ -207,7 +270,58 @@ public sealed class WrapByRowLayout : VirtualizingLayout
             context.GetOrCreateElementAt(display[slot]).Arrange(slotRects[slot]);
         }
 
+        GroupSegments = ComputeGroupSegments(display, slotRects);
+        Arranged?.Invoke();
         return new Size(finalSize.Width, totalHeight);
+    }
+
+    /// <summary>Per group, the union rect of each row the group spans (top-to-bottom). Members in the
+    /// same row share a Top, so they union into one segment; a wrapped group yields one segment per
+    /// row, letting the overlay hug each row instead of drawing a big bounding box over empty cells.</summary>
+    private Dictionary<string, IReadOnlyList<Rect>> ComputeGroupSegments(int[] order, Rect[] slotRects)
+    {
+        var result = new Dictionary<string, IReadOnlyList<Rect>>();
+        if (_groupInfo is null) return result;
+
+        // Collect each group's member rects, then split by row.
+        var byGroup = new Dictionary<string, List<Rect>>();
+        for (var slot = 0; slot < order.Length; slot++)
+        {
+            var dataIndex = order[slot];
+            var gid = _groupInfo.GroupIdForIndex(dataIndex);
+            if (gid is null) continue;
+            // Exclude the dragged card(s) unless a member is reordering within its own group: a
+            // member leaving / a non-member / a whole-group drag would otherwise stretch the outline
+            // to follow the moving slot.
+            if (IsDragged(dataIndex) && !_includeDraggedInGroupRect) continue;
+            (byGroup.TryGetValue(gid, out var list) ? list : byGroup[gid] = new List<Rect>()).Add(slotRects[slot]);
+        }
+
+        foreach (var (gid, memberRects) in byGroup)
+        {
+            var segments = memberRects
+                .GroupBy(r => Math.Round(r.Top))
+                .OrderBy(g => g.Key)
+                .Select(rowGroup =>
+                {
+                    Rect acc = default;
+                    var any = false;
+                    foreach (var r in rowGroup) { acc = any ? Union(acc, r) : r; any = true; }
+                    return acc;
+                })
+                .ToList();
+            result[gid] = segments;
+        }
+        return result;
+    }
+
+    private static Rect Union(Rect a, Rect b)
+    {
+        var left = Math.Min(a.Left, b.Left);
+        var top = Math.Min(a.Top, b.Top);
+        var right = Math.Max(a.Right, b.Right);
+        var bottom = Math.Max(a.Bottom, b.Bottom);
+        return new Rect(left, top, right - left, bottom - top);
     }
 
     /// <summary>Computes the rectangle for each slot of a given display order, using the same
@@ -241,6 +355,10 @@ public sealed class WrapByRowLayout : VirtualizingLayout
             }
             if (baseline == 0) baseline = rowTotal; // all custom-sized? fall back to true max
 
+            // A row that starts a group reserves an empty title band on top (the group's title is
+            // drawn there by the overlay). Cards in the row sit below the band.
+            var band = RowStartsGroup(order, rowStart, rowEnd) ? TitleBandHeight : 0.0;
+
             // Pass 2: non-custom cards stretch to the baseline so siblings stay aligned.
             for (var slot = rowStart; slot < rowEnd; slot++)
             {
@@ -250,10 +368,10 @@ public sealed class WrapByRowLayout : VirtualizingLayout
                 var h = GetIsCustomSized((DependencyObject)element)
                     ? element.DesiredSize.Height
                     : baseline;
-                rects[slot] = new Rect(x, y, columnWidth, h);
+                rects[slot] = new Rect(x, y + band, columnWidth, h);
             }
 
-            y += rowTotal;
+            y += band + rowTotal;
             if (rowEnd < order.Length)
             {
                 y += RowSpacing;
@@ -262,6 +380,24 @@ public sealed class WrapByRowLayout : VirtualizingLayout
 
         totalHeight = y;
         return rects;
+    }
+
+    /// <summary>True if any card in the row [rowStart, rowEnd) is the first member of its group in
+    /// this order - i.e. the group begins in this row, so it needs a title band.</summary>
+    private bool RowStartsGroup(int[] order, int rowStart, int rowEnd)
+    {
+        if (_groupInfo is null) return false;
+        for (var slot = rowStart; slot < rowEnd; slot++)
+        {
+            var gid = _groupInfo.GroupIdForIndex(order[slot]);
+            if (gid is null) continue;
+            // First member of the group within this order (previous slot is a different/no group).
+            if (slot == 0 || _groupInfo.GroupIdForIndex(order[slot - 1]) != gid)
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static bool IsIdentity(int[] order)
@@ -288,6 +424,23 @@ public sealed class WrapByRowLayout : VirtualizingLayout
         }
         return rects.Length;
     }
+
+    /// <summary>Data index of the card whose no-gap rect contains <paramref name="point"/>, or -1 if
+    /// the point isn't over any card. Stable during a drag (uses the frozen identity rects).</summary>
+    public int GetCardIndexAt(Point point)
+    {
+        var rects = _identityRects;
+        for (var i = 0; i < rects.Length; i++)
+        {
+            if (rects[i].Contains(point)) return i;
+        }
+        return -1;
+    }
+
+    /// <summary>The no-gap rect of the card at <paramref name="index"/>, or an empty rect if out of
+    /// range. Used to compute the centre zone for the group-vs-reorder gesture.</summary>
+    public Rect GetCardRect(int index) =>
+        index >= 0 && index < _identityRects.Length ? _identityRects[index] : default;
 
     private int ComputeColumnCount(double availableWidth)
     {
