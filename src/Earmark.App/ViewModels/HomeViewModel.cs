@@ -1286,13 +1286,16 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         // Stamp membership (drives the per-card context menu and the visible pin).
         foreach (var c in _allCards) c.IsGroupMember = groupByMemberId.ContainsKey(c.Endpoint.Id);
 
-        // Build / reuse a group card per live group, refreshing its members in place.
+        // Build / reuse a group card per live group (>=2 present members) and gather each group's
+        // desired member list WITHOUT mutating Members yet (the two-phase reconcile below does that).
         var liveGroupCardById = new Dictionary<string, DeviceGroupCard>(StringComparer.OrdinalIgnoreCase);
+        var desiredMembers = new Dictionary<DeviceGroupCard, List<DeviceCard>>();
         foreach (var group in _settings.Current.DeviceGroups)
         {
             var members = group.MemberIds
                 .Where(cardById.ContainsKey)
                 .Select(id => cardById[id])
+                .Distinct()
                 .ToList();
             if (members.Count < 2) continue;   // a sub-two group isn't live this build
 
@@ -1305,17 +1308,12 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             {
                 gc.SyncFrom(group.Title);
             }
-            SyncMembersInPlace(gc.Members, members);
             liveGroupCardById[group.Id] = gc;
+            desiredMembers[gc] = members;
         }
 
-        foreach (var goneId in _groupCards.Keys.Where(id => !liveGroupCardById.ContainsKey(id)).ToList())
-        {
-            _groupCards.Remove(goneId);
-        }
-
-        // Materialise the visible block list: a group container always shows; a lone card shows only
-        // when it's listed (visible-or-show-hidden).
+        // Desired top-level blocks: a group container always shows; a lone card shows only when it's
+        // listed (visible-or-show-hidden).
         var desired = new List<object>(orderedBlockIds.Count);
         foreach (var id in orderedBlockIds)
         {
@@ -1323,7 +1321,25 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             else if (cardById.TryGetValue(id, out var card) && card.IsListed) desired.Add(card);
         }
 
-        ReconcileBlocks(desired);
+        // Reconcile in two phases - ALL removals before ANY additions - so a card moving between the
+        // outer block list and a group's members is never present in two bound collections at the same
+        // time (which makes the shared card templates duplicate / drop the element).
+        foreach (var gc in _groupCards.Values)
+        {
+            RemoveMissing(gc.Members, desiredMembers.TryGetValue(gc, out var m) ? m : []);
+        }
+        RemoveMissing(Blocks, desired);
+
+        foreach (var goneId in _groupCards.Keys.Where(id => !liveGroupCardById.ContainsKey(id)).ToList())
+        {
+            _groupCards.Remove(goneId);
+        }
+
+        PositionInPlace(Blocks, desired);
+        foreach (var (gc, members) in desiredMembers)
+        {
+            PositionInPlace(gc.Members, members);
+        }
 
         // Rebuild the flat visible-cards list the peak / meter / app-chip machinery iterates.
         _visibleCards.Clear();
@@ -1336,6 +1352,18 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             }
         }
 
+        // Diagnostic: a card must appear exactly once across the outer blocks + every group's members.
+        // If this fires, the data/reconcile produced a duplicate (vs. a pure ItemsRepeater render glitch).
+        var seenCards = new HashSet<DeviceCard>();
+        foreach (var card in _visibleCards)
+        {
+            if (!seenCards.Add(card))
+            {
+                _logger.LogWarning("SyncBlocks: duplicate card in the block tree: '{Card}' ({Id})",
+                    card.Endpoint.DisplayName, card.Endpoint.Id);
+            }
+        }
+
         OnPropertyChanged(nameof(HasItems));
         OnPropertyChanged(nameof(IsEmpty));
         // First rebuild completed: drop the loading placeholder so the real content (or the
@@ -1344,52 +1372,32 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(ShowEmptyState));
     }
 
-    /// <summary>Reconciles <see cref="Blocks"/> to <paramref name="desired"/> in place (Remove/Insert
-    /// by reference, never Move - ItemsRepeater under a custom VirtualizingLayout ignores Move),
-    /// preserving instances that stay.</summary>
-    private void ReconcileBlocks(List<object> desired)
+    /// <summary>Removal half of the two-phase reconcile: drops from <paramref name="target"/> any item
+    /// not in <paramref name="keep"/>, plus any duplicate occurrences (keeps one). Running all removals
+    /// before any additions keeps a card from sitting in two bound collections at once.</summary>
+    private static void RemoveMissing<T>(IList<T> target, IReadOnlyList<T> keep) where T : class
     {
-        for (var i = Blocks.Count - 1; i >= 0; i--)
+        var wanted = new HashSet<T>(keep);
+        var seen = new HashSet<T>();
+        for (var i = target.Count - 1; i >= 0; i--)
         {
-            if (!desired.Contains(Blocks[i])) Blocks.RemoveAt(i);
-        }
-        for (var i = 0; i < desired.Count; i++)
-        {
-            var item = desired[i];
-            var current = Blocks.IndexOf(item);
-            if (current < 0)
-            {
-                Blocks.Insert(i, item);
-            }
-            else if (current != i)
-            {
-                Blocks.RemoveAt(current);
-                Blocks.Insert(i, item);
-            }
+            var item = target[i];
+            if (!wanted.Contains(item) || !seen.Add(item)) target.RemoveAt(i);
         }
     }
 
-    /// <summary>Reconciles a group's <c>Members</c> to <paramref name="desired"/> in place, same
-    /// Remove/Insert discipline as <see cref="ReconcileBlocks"/>.</summary>
-    private static void SyncMembersInPlace(ObservableCollection<DeviceCard> members, List<DeviceCard> desired)
+    /// <summary>Addition half of the two-phase reconcile: positions each item of <paramref name="desired"/>
+    /// at its index in <paramref name="target"/> (insert if missing, move if misplaced), bounds-safe.
+    /// Never uses Move - ItemsRepeater under a custom VirtualizingLayout ignores it.</summary>
+    private static void PositionInPlace<T>(IList<T> target, IReadOnlyList<T> desired) where T : class
     {
-        for (var i = members.Count - 1; i >= 0; i--)
-        {
-            if (!desired.Contains(members[i])) members.RemoveAt(i);
-        }
         for (var i = 0; i < desired.Count; i++)
         {
-            var card = desired[i];
-            var current = members.IndexOf(card);
-            if (current < 0)
-            {
-                members.Insert(i, card);
-            }
-            else if (current != i)
-            {
-                members.RemoveAt(current);
-                members.Insert(i, card);
-            }
+            var item = desired[i];
+            var current = target.IndexOf(item);
+            if (current == i) continue;
+            if (current >= 0) target.RemoveAt(current);
+            target.Insert(Math.Min(i, target.Count), item);
         }
     }
 
