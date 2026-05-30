@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Earmark.App.Settings;
 
 public sealed class AppSettings
@@ -130,7 +132,8 @@ public sealed class DeviceConfig
     public bool? VolumeControlsHidden { get; set; }
 
     /// <summary>True when every flag is unset/false, so the entry carries no information and can be
-    /// pruned from the map on save.</summary>
+    /// pruned from the map on save. Not serialised (it's a derived helper, not stored state).</summary>
+    [JsonIgnore]
     public bool IsDefault => Hidden is not true && Pinned is not true && VolumeControlsHidden is not true;
 }
 

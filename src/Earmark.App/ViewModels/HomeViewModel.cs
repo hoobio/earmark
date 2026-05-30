@@ -1584,6 +1584,69 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         SyncBlocks();
     }
 
+    /// <summary>Disbands a group (context-menu "Ungroup all"): drops the group record and replaces
+    /// its slot in the block order with its members, so they become lone blocks in place.</summary>
+    public void UngroupAll(string groupId)
+    {
+        var group = FindGroupRecord(groupId);
+        if (group is null) return;
+
+        var members = group.MemberIds.ToList();
+        _settings.Current.DeviceGroups.Remove(group);
+        var gi = _settings.Current.DeviceOrder.FindIndex(id => string.Equals(id, groupId, StringComparison.OrdinalIgnoreCase));
+        if (gi >= 0)
+        {
+            _settings.Current.DeviceOrder.RemoveAt(gi);
+            _settings.Current.DeviceOrder.InsertRange(gi, members);
+        }
+        else
+        {
+            _settings.Current.DeviceOrder.AddRange(members);
+        }
+
+        QueueSettingsSave();
+        SyncBlocks();
+    }
+
+    /// <summary>Removes a single device from its group (context-menu "Ungroup device") and drops it
+    /// as a lone block right after the group, rather than leaving it wedged among the members.
+    /// Disbands the group if that leaves fewer than two.</summary>
+    public void UngroupDevice(string endpointId)
+    {
+        var group = _settings.Current.DeviceGroups.FirstOrDefault(g =>
+            g.MemberIds.Any(id => string.Equals(id, endpointId, StringComparison.OrdinalIgnoreCase)));
+        if (group is null) return;
+
+        var groupId = group.Id;
+        group.MemberIds.RemoveAll(id => string.Equals(id, endpointId, StringComparison.OrdinalIgnoreCase));
+
+        var afterId = groupId;   // land the freed card just after the group block
+        if (group.MemberIds.Count < 2)
+        {
+            // Disband: the group's slot becomes its remaining member(s); land the card after them.
+            var remaining = group.MemberIds.ToList();
+            _settings.Current.DeviceGroups.Remove(group);
+            var gi = _settings.Current.DeviceOrder.FindIndex(id => string.Equals(id, groupId, StringComparison.OrdinalIgnoreCase));
+            if (gi >= 0)
+            {
+                _settings.Current.DeviceOrder.RemoveAt(gi);
+                _settings.Current.DeviceOrder.InsertRange(gi, remaining);
+            }
+            afterId = remaining.Count > 0 ? remaining[^1] : null;
+        }
+
+        var full = ComputeOrderedBlockIds(out _);
+        full.RemoveAll(id => string.Equals(id, endpointId, StringComparison.OrdinalIgnoreCase));
+        var anchorIdx = afterId is not null
+            ? full.FindIndex(id => string.Equals(id, afterId, StringComparison.OrdinalIgnoreCase))
+            : -1;
+        full.Insert(anchorIdx >= 0 ? anchorIdx + 1 : full.Count, endpointId);
+
+        _settings.Current.DeviceOrder = full;
+        QueueSettingsSave();
+        SyncBlocks();
+    }
+
     private void OnCardVisibilityToggled(DeviceCard card, DeviceCard.VisibilityState prev)
     {
         _undoStack.PushVisibility(card.Endpoint.Id, prev.IsHidden, prev.IsPinned);

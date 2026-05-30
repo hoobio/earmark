@@ -106,10 +106,6 @@ public sealed class BlockWrapLayout : VirtualizingLayout
         InvalidateArrange();
     }
 
-    /// <summary>Forces a re-measure after a change that didn't reorder blocks (e.g. a dedicated-row
-    /// toggle, which changes spans).</summary>
-    public void RefreshLayout() => InvalidateMeasure();
-
     private int[] BuildDisplayOrder(int count)
     {
         if (_draggedIndex < 0 || _gapIndex < 0)

@@ -77,6 +77,15 @@
                                 <FontIcon Glyph="{x:Bind VolumeControlsToggleGlyph, Mode=OneWay}" />
                             </MenuFlyoutItem.Icon>
                         </MenuFlyoutItem>
+                        <!-- Only shown for grouped devices: remove this one from its group. -->
+                        <MenuFlyoutItem Text="Ungroup device"
+                                        Click="OnUngroupDeviceClicked"
+                                        Tag="{x:Bind}"
+                                        Visibility="{x:Bind IsGroupMember, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <MenuFlyoutItem.Icon>
+                                <FontIcon Glyph="&#xF0B4;" />
+                            </MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
                     </MenuFlyout>
                 </Border.ContextFlyout>
                 <Grid>
@@ -569,15 +578,31 @@
                             <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
-                        <!-- Title band. Doubles as the group's drag handle: dragging it reorders the
-                             whole group section among the other blocks. -->
+                        <!-- Title band. Doubles as the group's drag handle (drag to reorder the whole
+                             section); double-tap / context "Rename" edits the title; context "Ungroup
+                             all" disbands the group. -->
                         <Grid Grid.Row="0" Padding="2,0,4,0"
                               Background="Transparent"
                               CanDrag="True"
                               Tag="{x:Bind}"
                               DragStarting="OnGroupHeaderDragStarting"
                               DropCompleted="OnGroupHeaderDropCompleted"
-                              ToolTipService.ToolTip="Drag to move the group">
+                              DoubleTapped="OnGroupTitleDoubleTapped"
+                              ToolTipService.ToolTip="Drag to move the group · double-click to rename">
+                            <Grid.ContextFlyout>
+                                <MenuFlyout>
+                                    <MenuFlyoutItem Text="Rename" Click="OnRenameGroupClicked" Tag="{x:Bind}">
+                                        <MenuFlyoutItem.Icon>
+                                            <FontIcon Glyph="&#xE8AC;" />
+                                        </MenuFlyoutItem.Icon>
+                                    </MenuFlyoutItem>
+                                    <MenuFlyoutItem Text="Ungroup all" Click="OnUngroupAllClicked" Tag="{x:Bind}">
+                                        <MenuFlyoutItem.Icon>
+                                            <FontIcon Glyph="&#xF0B4;" />
+                                        </MenuFlyoutItem.Icon>
+                                    </MenuFlyoutItem>
+                                </MenuFlyout>
+                            </Grid.ContextFlyout>
                             <TextBlock Text="{x:Bind Title, Mode=OneWay}"
                                        VerticalAlignment="Center"
                                        FontWeight="SemiBold"
@@ -585,6 +610,19 @@
                                        TextTrimming="CharacterEllipsis"
                                        TextWrapping="NoWrap"
                                        Visibility="{x:Bind ShowTitleLabel, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                            <TextBox Text="{x:Bind Title, Mode=TwoWay}"
+                                     Visibility="{x:Bind IsEditingTitle, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                     Tag="{x:Bind}"
+                                     MinHeight="0"
+                                     PlaceholderText="Group name"
+                                     KeyDown="OnGroupTitleKeyDown"
+                                     LostFocus="OnGroupTitleEditLostFocus"
+                                     Background="Transparent"
+                                     BorderThickness="0"
+                                     Padding="0"
+                                     VerticalContentAlignment="Center"
+                                     FontWeight="SemiBold"
+                                     Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                         </Grid>
 
                         <!-- Members. The inner repeater reuses the lone-card template + WrapByRowLayout

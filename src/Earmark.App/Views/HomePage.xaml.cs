@@ -165,6 +165,73 @@ public sealed partial class HomePage : Page
         EndDrag();
     }
 
+    // ---- Group title editing + context menu ----
+
+    private void OnGroupTitleDoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: DeviceGroupCard group } header) return;
+        group.IsEditingTitle = true;
+        FocusTitleEditor(header);
+        e.Handled = true;
+    }
+
+    private void OnRenameGroupClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: DeviceGroupCard group }) return;
+        group.IsEditingTitle = true;
+        // The flyout item isn't in the header's tree; focus the editor via the realised block element.
+        var idx = ViewModel.Blocks.IndexOf(group);
+        if (idx >= 0 && DevicesRepeater.TryGetElement(idx) is FrameworkElement blockEl)
+        {
+            FocusTitleEditor(blockEl);
+        }
+    }
+
+    private void OnUngroupAllClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: DeviceGroupCard group })
+        {
+            ViewModel.UngroupAll(group.Id);
+        }
+    }
+
+    private void OnUngroupDeviceClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: DeviceCard card })
+        {
+            ViewModel.UngroupDevice(card.Endpoint.Id);
+        }
+    }
+
+    private void OnGroupTitleKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key != VirtualKey.Enter) return;
+        e.Handled = true;
+        // Move focus off the TextBox so the two-way binding commits (via LostFocus), as if clicked away.
+        DevicesRepeater.Focus(FocusState.Programmatic);
+    }
+
+    private void OnGroupTitleEditLostFocus(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: DeviceGroupCard group })
+        {
+            group.IsEditingTitle = false;   // the two-way binding already committed the title on focus loss
+        }
+    }
+
+    /// <summary>Focuses + selects the group's title text box once it becomes visible.</summary>
+    private void FocusTitleEditor(FrameworkElement root)
+    {
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (FindDescendant<TextBox>(root) is { } box)
+            {
+                box.Focus(FocusState.Programmatic);
+                box.SelectAll();
+            }
+        });
+    }
+
     /// <summary>Shared teardown for any reorder / reparent drag (committed or cancelled): drop the gap,
     /// clear highlights + outlines, detach the slide animation, and reset the dragged state.</summary>
     private void EndDrag()
@@ -254,7 +321,7 @@ public sealed partial class HomePage : Page
             }
             SetDragCaption(e, "Add to group");
         }
-        else if (target is DeviceGroupCard edgeGroup)
+        else if (target is DeviceGroupCard)
         {
             // Top / bottom strip of a group section = insert the card before / after the group (a
             // block reorder). This is the only way to drop above a first-in-row group.
@@ -263,7 +330,6 @@ public sealed partial class HomePage : Page
             var src = ViewModel.Blocks.IndexOf(_draggedCard);
             var insertIdx = ResolveGroupIntent(targetIdx, point) == GroupDropIntent.Before ? targetIdx : targetIdx + 1;
             if (src >= 0) Layout.SetReorderState(src, ToCompactIndex(insertIdx, src));
-            _ = edgeGroup;
             SetDragCaption(e, "Move");
         }
         else if (target is DeviceCard targetCard
