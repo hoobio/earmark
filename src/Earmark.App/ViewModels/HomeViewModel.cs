@@ -1096,13 +1096,14 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// Reorders a card's chips to <see cref="CompareChips"/> order using Remove+Insert, never
-    /// <see cref="ObservableCollection{T}.Move"/> - ItemsRepeater under <c>WrapByRowLayout</c>
-    /// ignores Move for realized tiles (the desync behind the wrong-chip-removed bug). Only the
-    /// positions that are actually out of place are touched, so a stable order is a no-op, and chip
-    /// instance identity is preserved (icons / bindings survive the reorder).
+    /// Reorders a card's chips to <see cref="CompareChips"/> order using
+    /// <see cref="ObservableCollection{T}.Move"/>, so the apps row's <c>ReorderThemeTransition</c>
+    /// slides each chip to its new slot (the "swap" animation). Move is safe here because the apps
+    /// row is a plain ItemsControl + WrapPanel, not the ItemsRepeater + virtualizing layout that
+    /// ignored Move. Only positions actually out of place are touched (stable order is a no-op), and
+    /// chip instance identity is preserved so icons / bindings survive the reorder.
     /// </summary>
-    private static void SortCardApps(DeviceCard card)
+    private void SortCardApps(DeviceCard card)
     {
         var chips = card.Apps;
         if (chips.Count < 2) return;
@@ -1110,15 +1111,23 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         var desired = new List<AppChip>(chips);
         desired.Sort(CompareChips);
 
+        var moved = false;
         for (var i = 0; i < desired.Count; i++)
         {
             var target = desired[i];
             var currentIndex = chips.IndexOf(target);
             if (currentIndex != i)
             {
-                chips.RemoveAt(currentIndex);
-                chips.Insert(i, target);
+                chips.Move(currentIndex, i);
+                moved = true;
             }
+        }
+
+        if (moved)
+        {
+            _logger.LogInformation("Apps re-sorted on '{Card}': {Order}",
+                card.Endpoint.DisplayName,
+                string.Join(" > ", chips.Select(c => $"{c.DisplayLabel}[r{ChipSortRank(c)}]")));
         }
     }
 
