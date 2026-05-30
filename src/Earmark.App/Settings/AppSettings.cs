@@ -14,6 +14,13 @@ public sealed class AppSettings
 
     public bool VerboseLogging { get; set; }
 
+    /// <summary>
+    /// Whether the standalone (MSI / unpackaged) build checks GitHub for a newer release on launch.
+    /// Default true. Ignored by packaged (MSIX/Store) builds, which update through the Store. The
+    /// manual "Check for updates" button works regardless of this toggle.
+    /// </summary>
+    public bool CheckForUpdates { get; set; } = true;
+
     /// <summary>App theme. <see cref="AppTheme.System"/> (default) follows Windows.</summary>
     public AppTheme Theme { get; set; } = AppTheme.System;
 
@@ -99,8 +106,36 @@ public sealed class AppSettings
     /// </summary>
     public List<string> DeviceOrder { get; set; } = new();
 
+    /// <summary>
+    /// User-defined device groups on the Devices page. A group bundles two or more device cards
+    /// under an editable title; members render contiguously (their adjacency is enforced over
+    /// <see cref="DeviceOrder"/>, which stays the single source of truth for absolute order).
+    /// </summary>
+    public List<DeviceGroup> DeviceGroups { get; set; } = new();
+
     /// <summary>Persisted window size in physical pixels. Null until the user has resized
     /// at least once (so first launch picks the WinUI default).</summary>
     public int? WindowWidth { get; set; }
     public int? WindowHeight { get; set; }
+}
+
+/// <summary>
+/// A device group: an editable title over two-or-more contiguous device cards. <see
+/// cref="MemberIds"/> are endpoint ids in member (left-to-right) order. <see cref="DedicatedRow"/>
+/// makes the group reserve its own grid row(s). Groups with fewer than two present members are
+/// pruned / disbanded.
+/// </summary>
+public sealed class DeviceGroup
+{
+    /// <summary>Stable group identity (a GUID string), independent of title or membership.</summary>
+    public string Id { get; set; } = string.Empty;
+
+    public string Title { get; set; } = string.Empty;
+
+    /// <summary>When true the group reserves the whole grid row(s) it occupies; other cards bump
+    /// to the row above / below by order.</summary>
+    public bool DedicatedRow { get; set; }
+
+    /// <summary>Member endpoint ids, in left-to-right member order.</summary>
+    public List<string> MemberIds { get; set; } = new();
 }

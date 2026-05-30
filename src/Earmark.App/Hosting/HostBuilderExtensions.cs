@@ -44,6 +44,7 @@ internal static class HostBuilderExtensions
         builder.Services.AddSingleton<INavigationService, NavigationService>();
         builder.Services.AddSingleton<IWindowChromeManager, WindowChromeManager>();
         builder.Services.AddSingleton<INotificationService, NotificationService>();
+        builder.Services.AddSingleton<IUpdateService, UpdateService>();
         builder.Services.AddSingleton<IEndpointWriter, EndpointWriter>();
         builder.Services.AddSingleton<ISessionIconService, SessionIconService>();
         builder.Services.AddSingleton<IWaveLinkNameReconciler, WaveLinkNameReconciler>();
@@ -56,6 +57,7 @@ internal static class HostBuilderExtensions
         builder.Services.AddSingleton<RulesViewModel>();
         builder.Services.AddSingleton<SessionsViewModel>();
         builder.Services.AddSingleton<SettingsViewModel>();
+        builder.Services.AddSingleton<AboutViewModel>();
 
         builder.Services.AddSingleton<HomePage>();
         builder.Services.AddSingleton<RulesPage>();

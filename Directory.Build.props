@@ -16,4 +16,38 @@
     <Version>$([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)version.txt').Trim())</Version>
   </PropertyGroup>
 
+  <!--
+    Build-channel + commit stamping for the App's About box and update check (read at runtime
+    via Services/AppInfo). Scoped to Earmark.App so the git probe runs once, not per project.
+      EarmarkBuildChannel: "Dev" for local builds, "Release" under GitHub Actions. CI passes
+      -p:EarmarkBuildChannel=Prerelease for release-please pre-release builds. AppInfo turns the
+      channel into the "(Dev)"/"(Pre-release)" marker and gates the update UI.
+  -->
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'Earmark.App'">
+    <EarmarkBuildChannel Condition="'$(EarmarkBuildChannel)' == '' and '$(GITHUB_ACTIONS)' == 'true'">Release</EarmarkBuildChannel>
+    <EarmarkBuildChannel Condition="'$(EarmarkBuildChannel)' == ''">Dev</EarmarkBuildChannel>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(MSBuildProjectName)' == 'Earmark.App'">
+    <AssemblyMetadata Include="BuildChannel" Value="$(EarmarkBuildChannel)" />
+  </ItemGroup>
+
+  <!-- Stamp the source commit so the SDK appends "+<sha>" to InformationalVersion. ContinueOnError
+       keeps non-git checkouts (or a missing git) from breaking the build; AppInfo just shows no
+       commit then. -->
+  <Target Name="EarmarkStampSourceRevision"
+          Condition="'$(MSBuildProjectName)' == 'Earmark.App' and '$(SourceRevisionId)' == ''"
+          BeforeTargets="GetAssemblyVersion;InitializeSourceControlInformation">
+    <Exec Command="git -C &quot;$(MSBuildProjectDirectory)&quot; rev-parse HEAD"
+          ConsoleToMSBuild="true"
+          StandardOutputImportance="low"
+          ContinueOnError="true"
+          IgnoreExitCode="true">
+      <Output TaskParameter="ConsoleOutput" PropertyName="_EarmarkGitHead" />
+    </Exec>
+    <PropertyGroup>
+      <SourceRevisionId Condition="'$(_EarmarkGitHead)' != ''">$(_EarmarkGitHead.Trim())</SourceRevisionId>
+    </PropertyGroup>
+  </Target>
+
 </Project>

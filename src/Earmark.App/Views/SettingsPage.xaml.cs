@@ -24,14 +24,17 @@ public sealed partial class SettingsPage : Page
         Color.FromArgb(0xFF, 0xFF, 0xB9, 0x00), // gold
     };
 
-    public SettingsPage(SettingsViewModel viewModel)
+    public SettingsPage(SettingsViewModel viewModel, AboutViewModel about)
     {
         ViewModel = viewModel;
+        About = about;
         MeterSwatches = BuildMeterSwatches();
         InitializeComponent();
     }
 
     public SettingsViewModel ViewModel { get; }
+
+    public AboutViewModel About { get; }
 
     /// <summary>Quick-pick colours bound by the swatch strip in the bar-colour flyout.</summary>
     public IReadOnlyList<Color> MeterSwatches { get; }
@@ -52,4 +55,16 @@ public sealed partial class SettingsPage : Page
     }
 
     private void OnResetMeterColour(object sender, RoutedEventArgs e) => ViewModel.ResetPeakMeterColour();
+
+    private async void OnCheckForUpdates(object sender, RoutedEventArgs e) => await About.CheckForUpdatesAsync();
+
+    private void OnOpenLatestRelease(object sender, RoutedEventArgs e) => About.OpenLatestRelease();
+
+    private void OnReportBug(object sender, RoutedEventArgs e) => About.ReportBug();
+
+    private void OnRequestFeature(object sender, RoutedEventArgs e) => About.RequestFeature();
+
+    private void OnOpenGitHub(object sender, RoutedEventArgs e) => About.OpenGitHub();
+
+    private void OnOpenLogsFolder(object sender, RoutedEventArgs e) => About.OpenLogsFolder();
 }
