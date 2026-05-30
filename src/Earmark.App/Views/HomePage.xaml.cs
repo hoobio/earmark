@@ -10,9 +10,11 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Hosting;
 using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 
 using Windows.ApplicationModel.DataTransfer;
+using Windows.Foundation;
 using Windows.Graphics.Imaging;
 using Windows.System;
 using Windows.UI;
@@ -64,12 +66,21 @@ public sealed partial class HomePage : Page
     private const string DragPayloadCardPrefix = "earmark:card:";
     private const string DragPayloadGroupPrefix = "earmark:group:";
 
-    /// <summary>The block being dragged (a DeviceCard or DeviceGroupCard), or null when no reorder is
-    /// in flight. App-chip drags leave this null (they're handled per card).</summary>
-    private object? _draggedBlock;
+    /// <summary>The card being dragged (a lone card or a group member), or null. App-chip drags leave
+    /// this null (they're handled per card).</summary>
+    private DeviceCard? _draggedCard;
 
-    /// <summary>Block id of <see cref="_draggedBlock"/> (endpoint id for a card, group id for a group).</summary>
-    private string? _draggedBlockId;
+    /// <summary>The group the dragged card belongs to when it's a member; null for a lone card.</summary>
+    private DeviceGroupCard? _draggedCardGroup;
+
+    /// <summary>The group being dragged by its header handle, or null.</summary>
+    private DeviceGroupCard? _draggedGroup;
+
+    /// <summary>The lone card currently highlighted as a create-group target (accent dotted outline).</summary>
+    private DeviceCard? _createTarget;
+
+    /// <summary>The group currently highlighted as a join target (accent outline).</summary>
+    private DeviceGroupCard? _joinTarget;
 
     /// <summary>True between a reorder drag start and its completion; gates whether newly realised
     /// blocks get the implicit slide animation attached as they scroll into view.</summary>
@@ -79,19 +90,11 @@ public sealed partial class HomePage : Page
     {
         if (sender is not FrameworkElement { Tag: DeviceCard card } element) return;
 
-        // A member card drag is a cross-container reparent (leave / reorder within group), handled in
-        // a later stage. For now only lone cards reorder as blocks.
-        if (card.IsGroupMember)
-        {
-            args.Cancel = true;
-            return;
-        }
-
+        _draggedCard = card;
+        _draggedCardGroup = card.IsGroupMember ? FindGroupOf(card) : null;
         args.Data.SetText($"{DragPayloadCardPrefix}{card.Endpoint.Id}");
         args.Data.RequestedOperation = DataPackageOperation.Move;
 
-        _draggedBlock = card;
-        _draggedBlockId = card.Endpoint.Id;
         EnableReorderAnimations(true);
         SetDragInProgress(true);
 
@@ -111,19 +114,18 @@ public sealed partial class HomePage : Page
 
     private void OnDeviceCardDropCompleted(UIElement sender, DropCompletedEventArgs args)
     {
-        if (_draggedBlock is DeviceCard card) card.IsBeingDragged = false;
-        EndBlockReorder();
+        if (_draggedCard is not null) _draggedCard.IsBeingDragged = false;
+        EndDrag();
     }
 
     private async void OnGroupHeaderDragStarting(UIElement sender, DragStartingEventArgs args)
     {
         if (sender is not FrameworkElement { Tag: DeviceGroupCard group }) return;
 
+        _draggedGroup = group;
         args.Data.SetText($"{DragPayloadGroupPrefix}{group.Id}");
         args.Data.RequestedOperation = DataPackageOperation.Move;
 
-        _draggedBlock = group;
-        _draggedBlockId = group.Id;
         EnableReorderAnimations(true);
         SetDragInProgress(true);   // reveals the dotted outline + drag padding on every group
 
@@ -152,16 +154,18 @@ public sealed partial class HomePage : Page
 
     private void OnGroupHeaderDropCompleted(UIElement sender, DropCompletedEventArgs args)
     {
-        if (_draggedBlock is DeviceGroupCard group) group.IsBeingDragged = false;
-        EndBlockReorder();
+        if (_draggedGroup is not null) _draggedGroup.IsBeingDragged = false;
+        EndDrag();
     }
 
-    /// <summary>Shared teardown for a reorder drag (committed or cancelled): drop the gap, hide the
-    /// outlines, detach the slide animation, and clear the dragged-block state.</summary>
-    private void EndBlockReorder()
+    /// <summary>Shared teardown for any reorder / reparent drag (committed or cancelled): drop the gap,
+    /// clear highlights + outlines, detach the slide animation, and reset the dragged state.</summary>
+    private void EndDrag()
     {
-        _draggedBlock = null;
-        _draggedBlockId = null;
+        _draggedCard = null;
+        _draggedCardGroup = null;
+        _draggedGroup = null;
+        ClearHighlights();
         Layout?.ClearReorderState();
         SetDragInProgress(false);
         EnableReorderAnimations(false);
@@ -169,39 +173,288 @@ public sealed partial class HomePage : Page
 
     private void OnBlocksDragOver(object sender, DragEventArgs e)
     {
-        if (Layout is null || _draggedBlock is null)
+        if (Layout is null)
         {
             e.AcceptedOperation = DataPackageOperation.None;
             return;
         }
 
-        var source = ViewModel.Blocks.IndexOf(_draggedBlock);
-        if (source < 0)
+        var point = e.GetPosition(DevicesRepeater);
+
+        // Whole-group reorder (dragging the header).
+        if (_draggedGroup is not null)
+        {
+            ClearHighlights();
+            SetReorderGap(_draggedGroup, point);
+            SetDragCaption(e, "Move group");
+            e.AcceptedOperation = DataPackageOperation.Move;
+            e.Handled = true;
+            return;
+        }
+
+        if (_draggedCard is null)
         {
             e.AcceptedOperation = DataPackageOperation.None;
             return;
         }
 
-        var compact = ToCompactIndex(Layout.GetInsertionIndex(e.GetPosition(DevicesRepeater)), source);
-        Layout.SetReorderState(source, compact);
-        SetDragCaption(e, _draggedBlock is DeviceGroupCard ? "Move group" : "Move");
+        if (_draggedCardGroup is not null)
+        {
+            // Member drag: inside its group box -> reorder within (committed on drop); outside -> leave.
+            var box = Layout.GetContentRect(ViewModel.Blocks.IndexOf(_draggedCardGroup));
+            ClearHighlights();
+            Layout.ClearReorderState();   // member moves don't open a block-level gap
+            SetDragCaption(e, box.Contains(point) ? "Move within group" : "Remove from group");
+            e.AcceptedOperation = DataPackageOperation.Move;
+            e.Handled = true;
+            return;
+        }
+
+        // Lone card: create (onto a card's centre) / join (onto a group) / reorder (elsewhere).
+        var targetIdx = Layout.GetBlockIndexAt(point);
+        var target = targetIdx >= 0 && targetIdx < ViewModel.Blocks.Count ? ViewModel.Blocks[targetIdx] : null;
+
+        if (target is DeviceGroupCard joinGroup)
+        {
+            Layout.ClearReorderState();
+            ClearCreateTarget();
+            SetJoinTarget(joinGroup);
+            SetDragCaption(e, "Add to group");
+        }
+        else if (target is DeviceCard targetCard
+                 && !ReferenceEquals(targetCard, _draggedCard)
+                 && IsCentreZone(point, Layout.GetContentRect(targetIdx)))
+        {
+            Layout.ClearReorderState();
+            ClearJoinTarget();
+            SetCreateTarget(targetCard);
+            SetDragCaption(e, "Group");
+        }
+        else
+        {
+            ClearHighlights();
+            SetReorderGap(_draggedCard, point);
+            SetDragCaption(e, "Move");
+        }
+
         e.AcceptedOperation = DataPackageOperation.Move;
         e.Handled = true;
     }
 
-    private void OnBlocksDrop(object sender, DragEventArgs e)
+    private async void OnBlocksDrop(object sender, DragEventArgs e)
     {
-        if (Layout is null || _draggedBlock is null || _draggedBlockId is null) return;
-
-        var source = ViewModel.Blocks.IndexOf(_draggedBlock);
-        if (source < 0) return;
-
-        var compact = ToCompactIndex(Layout.GetInsertionIndex(e.GetPosition(DevicesRepeater)), source);
-        Layout.ClearReorderState();
+        if (Layout is null) return;
+        var point = e.GetPosition(DevicesRepeater);
         e.Handled = true;
 
-        _logger?.LogInformation("Block reorder: {Block} -> compact index {Index}", _draggedBlockId, compact);
-        ViewModel.ReorderBlock(_draggedBlockId, compact);
+        // Whole-group reorder.
+        if (_draggedGroup is not null)
+        {
+            var groupSource = ViewModel.Blocks.IndexOf(_draggedGroup);
+            Layout.ClearReorderState();
+            if (groupSource >= 0)
+            {
+                _logger?.LogInformation("Group reorder: {Group}", _draggedGroup.Id);
+                ViewModel.ReorderBlock(_draggedGroup.Id, ToCompactIndex(Layout.GetInsertionIndex(point), groupSource));
+            }
+            return;
+        }
+
+        if (_draggedCard is null) return;
+        var sourceId = _draggedCard.Endpoint.Id;
+
+        // Member drag: leave the group (with disband confirm) or reorder within it.
+        if (_draggedCardGroup is not null)
+        {
+            var group = _draggedCardGroup;
+            var box = Layout.GetContentRect(ViewModel.Blocks.IndexOf(group));
+            Layout.ClearReorderState();
+            ClearHighlights();
+
+            if (box.Contains(point))
+            {
+                var anchor = MemberAnchorAt(group, point, sourceId);
+                _logger?.LogInformation("Reorder within group {Group}: {Member}", group.Id, sourceId);
+                ViewModel.ReorderWithinGroup(sourceId, anchor);
+            }
+            else
+            {
+                var anchorId = InsertionAnchorBlockId(point);
+                if (ViewModel.GroupMemberCount(group.Id) <= 2 && !await ConfirmDisbandAsync())
+                {
+                    return;   // cancelled - the member stays in the group
+                }
+                _logger?.LogInformation("Leave group {Group}: {Member}", group.Id, sourceId);
+                ViewModel.RemoveFromGroup(sourceId, anchorId);
+            }
+            return;
+        }
+
+        // Lone card: create / join / reorder.
+        var targetIdx = Layout.GetBlockIndexAt(point);
+        var target = targetIdx >= 0 && targetIdx < ViewModel.Blocks.Count ? ViewModel.Blocks[targetIdx] : null;
+        Layout.ClearReorderState();
+        ClearHighlights();
+
+        if (target is DeviceGroupCard joinGroup)
+        {
+            _logger?.LogInformation("Join group {Group}: {Source}", joinGroup.Id, sourceId);
+            ViewModel.AddToGroup(sourceId, joinGroup.Id);
+            return;
+        }
+        if (target is DeviceCard targetCard
+            && !ReferenceEquals(targetCard, _draggedCard)
+            && IsCentreZone(point, Layout.GetContentRect(targetIdx)))
+        {
+            _logger?.LogInformation("Create group: {Source} + {Target}", sourceId, targetCard.Endpoint.Id);
+            ViewModel.CreateGroup(sourceId, targetCard.Endpoint.Id);
+            return;
+        }
+
+        var cardSource = ViewModel.Blocks.IndexOf(_draggedCard);
+        if (cardSource >= 0)
+        {
+            _logger?.LogInformation("Block reorder: {Source}", sourceId);
+            ViewModel.ReorderBlock(sourceId, ToCompactIndex(Layout.GetInsertionIndex(point), cardSource));
+        }
+    }
+
+    /// <summary>Opens the block-level make-space gap for <paramref name="block"/> at the pointer.</summary>
+    private void SetReorderGap(object block, Point point)
+    {
+        var source = ViewModel.Blocks.IndexOf(block);
+        if (source < 0) { Layout?.ClearReorderState(); return; }
+        Layout?.SetReorderState(source, ToCompactIndex(Layout.GetInsertionIndex(point), source));
+    }
+
+    /// <summary>The block id to insert before for a member leaving its group (null = at the end).</summary>
+    private string? InsertionAnchorBlockId(Point point)
+    {
+        var raw = Layout!.GetInsertionIndex(point);
+        return raw >= 0 && raw < ViewModel.Blocks.Count ? PageBlockId(ViewModel.Blocks[raw]) : null;
+    }
+
+    /// <summary>The member endpoint id the pointer sits before within <paramref name="group"/> (null =
+    /// at the end), skipping the dragged member, for within-group reorder. Members live in the group's
+    /// nested repeater, which the outer layout can't hit-test, so this reads the realised member
+    /// elements' bounds (mapped into the repeater's coordinate space) directly.</summary>
+    private string? MemberAnchorAt(DeviceGroupCard group, Point point, string draggedMemberId)
+    {
+        var blockIndex = ViewModel.Blocks.IndexOf(group);
+        if (blockIndex < 0 || DevicesRepeater.TryGetElement(blockIndex) is not FrameworkElement blockEl) return null;
+        if (FindDescendant<ItemsRepeater>(blockEl) is not { } inner) return null;
+
+        for (var i = 0; i < group.Members.Count; i++)
+        {
+            var member = group.Members[i];
+            if (string.Equals(member.Endpoint.Id, draggedMemberId, StringComparison.OrdinalIgnoreCase)) continue;
+            if (inner.TryGetElement(i) is not FrameworkElement memberEl) continue;
+
+            Rect r;
+            try
+            {
+                r = memberEl.TransformToVisual(DevicesRepeater)
+                    .TransformBounds(new Rect(0, 0, memberEl.ActualWidth, memberEl.ActualHeight));
+            }
+            catch { continue; }
+
+            // Reading-order "before" test: an earlier row, or the left half of a same-row member.
+            if (point.Y < r.Top || (point.Y <= r.Bottom && point.X < r.Left + (r.Width / 2)))
+            {
+                return member.Endpoint.Id;
+            }
+        }
+        return null;   // after the last member
+    }
+
+    private static T? FindDescendant<T>(DependencyObject root) where T : DependencyObject
+    {
+        var count = VisualTreeHelper.GetChildrenCount(root);
+        for (var i = 0; i < count; i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is T match) return match;
+            if (FindDescendant<T>(child) is { } nested) return nested;
+        }
+        return null;
+    }
+
+    private static string? PageBlockId(object block) => block switch
+    {
+        DeviceCard card => card.Endpoint.Id,
+        DeviceGroupCard group => group.Id,
+        _ => null,
+    };
+
+    private DeviceGroupCard? FindGroupOf(DeviceCard card)
+    {
+        foreach (var block in ViewModel.Blocks)
+        {
+            if (block is DeviceGroupCard group && group.Members.Contains(card)) return group;
+        }
+        return null;
+    }
+
+    /// <summary>Inner 40% of a rect counts as "centre" (30% inset each side); the surrounding frame
+    /// reads as reorder so the two gestures don't fight at the boundary.</summary>
+    private static bool IsCentreZone(Point p, Rect r)
+    {
+        if (r.Width <= 0 || r.Height <= 0) return false;
+        var insetX = r.Width * 0.3;
+        var insetY = r.Height * 0.3;
+        return p.X >= r.Left + insetX && p.X <= r.Right - insetX
+            && p.Y >= r.Top + insetY && p.Y <= r.Bottom - insetY;
+    }
+
+    private void SetCreateTarget(DeviceCard card)
+    {
+        if (ReferenceEquals(_createTarget, card)) return;
+        ClearCreateTarget();
+        _createTarget = card;
+        card.IsGroupDropTarget = true;
+    }
+
+    private void ClearCreateTarget()
+    {
+        if (_createTarget is null) return;
+        _createTarget.IsGroupDropTarget = false;
+        _createTarget = null;
+    }
+
+    private void SetJoinTarget(DeviceGroupCard group)
+    {
+        if (ReferenceEquals(_joinTarget, group)) return;
+        ClearJoinTarget();
+        _joinTarget = group;
+        group.IsJoinTarget = true;
+    }
+
+    private void ClearJoinTarget()
+    {
+        if (_joinTarget is null) return;
+        _joinTarget.IsJoinTarget = false;
+        _joinTarget = null;
+    }
+
+    private void ClearHighlights()
+    {
+        ClearCreateTarget();
+        ClearJoinTarget();
+    }
+
+    /// <summary>Confirms a group disband (removing this member leaves only one). Returns true to proceed.</summary>
+    private async Task<bool> ConfirmDisbandAsync()
+    {
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = "Disband group?",
+            Content = "Removing this device leaves the group with a single device, so the group will be disbanded.",
+            PrimaryButtonText = "Disband",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Close,
+        };
+        return await dialog.ShowAsync() == ContentDialogResult.Primary;
     }
 
     /// <summary>Compacts a raw "insert before block index" into the source-excluded space the gap and
@@ -421,9 +674,9 @@ public sealed partial class HomePage : Page
     {
         if (sender is not FrameworkElement { Tag: DeviceCard card }) return;
 
-        // A block-reorder drag (our own) is positioned at the container (OnBlocksDragOver); bubble
+        // A card / group drag (our own) is positioned at the container (OnBlocksDragOver); bubble
         // immediately without touching the DataView so the blocking payload read only runs for chips.
-        if (_draggedBlock is not null) return;
+        if (_draggedCard is not null || _draggedGroup is not null) return;
 
         // Bail early when the drag isn't ours. Other drags (file drops onto the window, etc.)
         // shouldn't get our acceptance.
@@ -466,8 +719,8 @@ public sealed partial class HomePage : Page
     {
         if (sender is not FrameworkElement { Tag: DeviceCard card }) return;
 
-        // Block-reorder drops are committed at the container (OnBlocksDrop); bubble immediately.
-        if (_draggedBlock is not null) return;
+        // Card / group drops are committed at the container (OnBlocksDrop); bubble immediately.
+        if (_draggedCard is not null || _draggedGroup is not null) return;
 
         var text = TryReadText(e.DataView);
         if (text is null) return;

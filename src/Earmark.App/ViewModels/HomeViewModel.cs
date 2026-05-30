@@ -1470,6 +1470,114 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         SyncBlocks();
     }
 
+    /// <summary>Whether an endpoint is currently a member of a live group (drives the "ungrouped"
+    /// guard on create / join).</summary>
+    private bool IsMember(string endpointId) => FindCard(endpointId)?.IsGroupMember ?? false;
+
+    /// <summary>Total persisted member count of a group (including absent endpoints), or 0. The page
+    /// uses this to decide whether a member drag-out needs the disband confirmation.</summary>
+    public int GroupMemberCount(string groupId) => FindGroupRecord(groupId)?.MemberIds.Count ?? 0;
+
+    /// <summary>Creates a new two-member group from a lone <paramref name="sourceId"/> dropped onto a
+    /// lone <paramref name="targetId"/>. The target leads the member order; the group takes the
+    /// target's slot in the block order and the source's lone slot is dropped.</summary>
+    public void CreateGroup(string sourceId, string targetId)
+    {
+        if (string.IsNullOrEmpty(sourceId) || string.IsNullOrEmpty(targetId)) return;
+        if (string.Equals(sourceId, targetId, StringComparison.OrdinalIgnoreCase)) return;
+        if (FindCard(sourceId) is null || FindCard(targetId) is null) return;
+        if (IsMember(sourceId) || IsMember(targetId)) return;
+
+        var full = ComputeOrderedBlockIds(out _);   // source + target are lone blocks here
+        var group = new DeviceGroup
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            Title = "New group",
+            MemberIds = [targetId, sourceId],
+        };
+        _settings.Current.DeviceGroups.Add(group);
+
+        var ti = full.FindIndex(id => string.Equals(id, targetId, StringComparison.OrdinalIgnoreCase));
+        if (ti >= 0) full[ti] = group.Id; else full.Add(group.Id);
+        full.RemoveAll(id => string.Equals(id, sourceId, StringComparison.OrdinalIgnoreCase));
+
+        _settings.Current.DeviceOrder = full;
+        QueueSettingsSave();
+        SyncBlocks();
+    }
+
+    /// <summary>Adds a lone <paramref name="sourceId"/> to the existing group <paramref name="groupId"/>,
+    /// appended to the member order. The source's lone block slot is dropped.</summary>
+    public void AddToGroup(string sourceId, string groupId)
+    {
+        if (string.IsNullOrEmpty(sourceId) || string.IsNullOrEmpty(groupId)) return;
+        if (FindCard(sourceId) is null || IsMember(sourceId)) return;
+        var group = FindGroupRecord(groupId);
+        if (group is null) return;
+        if (group.MemberIds.Any(id => string.Equals(id, sourceId, StringComparison.OrdinalIgnoreCase))) return;
+
+        group.MemberIds.Add(sourceId);
+        _settings.Current.DeviceOrder = ComputeOrderedBlockIds(out _);   // source is now a member, not a lone block
+        QueueSettingsSave();
+        SyncBlocks();
+    }
+
+    /// <summary>Removes a member from its group and re-inserts it as a lone block before
+    /// <paramref name="anchorBlockId"/> (null = at the end). Disbands the group (its remaining
+    /// member takes the group's slot) when fewer than two remain; the page confirms first.</summary>
+    public void RemoveFromGroup(string memberId, string? anchorBlockId)
+    {
+        var group = _settings.Current.DeviceGroups.FirstOrDefault(g =>
+            g.MemberIds.Any(id => string.Equals(id, memberId, StringComparison.OrdinalIgnoreCase)));
+        if (group is null) return;
+
+        group.MemberIds.RemoveAll(id => string.Equals(id, memberId, StringComparison.OrdinalIgnoreCase));
+        if (group.MemberIds.Count < 2)
+        {
+            // Disband: drop the group; its remaining member(s) take its slot in the block order.
+            var remaining = group.MemberIds.ToList();
+            _settings.Current.DeviceGroups.Remove(group);
+            var gi = _settings.Current.DeviceOrder.FindIndex(id => string.Equals(id, group.Id, StringComparison.OrdinalIgnoreCase));
+            if (gi >= 0)
+            {
+                _settings.Current.DeviceOrder.RemoveAt(gi);
+                _settings.Current.DeviceOrder.InsertRange(gi, remaining);
+            }
+        }
+
+        // Place the freed member as a lone block before the anchor.
+        var full = ComputeOrderedBlockIds(out _);
+        full.RemoveAll(id => string.Equals(id, memberId, StringComparison.OrdinalIgnoreCase));
+        var insertAt = anchorBlockId is not null
+            ? full.FindIndex(id => string.Equals(id, anchorBlockId, StringComparison.OrdinalIgnoreCase))
+            : full.Count;
+        if (insertAt < 0) insertAt = full.Count;
+        full.Insert(insertAt, memberId);
+
+        _settings.Current.DeviceOrder = full;
+        QueueSettingsSave();
+        SyncBlocks();
+    }
+
+    /// <summary>Reorders a member within its own group to land before <paramref name="anchorMemberId"/>
+    /// (null = at the end of the group). Re-derives the group's member order and persists it.</summary>
+    public void ReorderWithinGroup(string memberId, string? anchorMemberId)
+    {
+        var group = _settings.Current.DeviceGroups.FirstOrDefault(g =>
+            g.MemberIds.Any(id => string.Equals(id, memberId, StringComparison.OrdinalIgnoreCase)));
+        if (group is null) return;
+
+        group.MemberIds.RemoveAll(id => string.Equals(id, memberId, StringComparison.OrdinalIgnoreCase));
+        var insertAt = anchorMemberId is not null
+            ? group.MemberIds.FindIndex(id => string.Equals(id, anchorMemberId, StringComparison.OrdinalIgnoreCase))
+            : group.MemberIds.Count;
+        if (insertAt < 0) insertAt = group.MemberIds.Count;
+        group.MemberIds.Insert(insertAt, memberId);
+
+        QueueSettingsSave();
+        SyncBlocks();
+    }
+
     private void OnCardVisibilityToggled(DeviceCard card, DeviceCard.VisibilityState prev)
     {
         _undoStack.PushVisibility(card.Endpoint.Id, prev.IsHidden, prev.IsPinned);

@@ -66,6 +66,11 @@ public sealed class BlockWrapLayout : VirtualizingLayout
         set => SetValue(RowSpacingProperty, value);
     }
 
+    /// <summary>Extra vertical gap added at a row boundary that touches a group section, on top of
+    /// <see cref="RowSpacing"/>, so a group reads as a distinct cluster and an adjacent ungrouped card
+    /// isn't mistaken for one of its members.</summary>
+    public const double GroupSeparation = 12.0;
+
     private static void OnLayoutPropertyChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
         if (d is BlockWrapLayout layout) layout.InvalidateMeasure();
@@ -82,6 +87,10 @@ public sealed class BlockWrapLayout : VirtualizingLayout
     /// <summary>No-gap rect per block index, refreshed every arrange. Frozen reference for drag
     /// hit-testing so opening the gap doesn't move the answer.</summary>
     private Rect[] _identityRects = [];
+
+    /// <summary>Per block, the rect of its visible content: the full rect for a lone card, the
+    /// left-aligned member-extent box for a group section. Used for join / create / leave intent.</summary>
+    private Rect[] _contentRects = [];
 
     /// <summary>Lift block <paramref name="draggedIndex"/> and re-insert it at <paramref name="gapIndex"/>
     /// (a position in the block-excluded / compacted sequence).</summary>
@@ -154,12 +163,24 @@ public sealed class BlockWrapLayout : VirtualizingLayout
         if (context.ItemCount == 0)
         {
             _identityRects = [];
+            _contentRects = [];
             return new Size(finalSize.Width, 0);
         }
 
         var identity = new int[context.ItemCount];
         for (var i = 0; i < identity.Length; i++) identity[i] = i;
         _identityRects = ComputeSlotRects(context, finalSize.Width, identity, out var identityHeight);
+
+        // Content rects: a group's full block rect spans the whole row, but its visible box is the
+        // left-aligned member extent (element.DesiredSize.Width). Drag intent (join / leave) tests
+        // against these so the empty trailing columns of a group section don't read as "over the group".
+        _contentRects = new Rect[context.ItemCount];
+        for (var i = 0; i < context.ItemCount; i++)
+        {
+            var r = _identityRects[i];
+            var cw = Math.Min(context.GetOrCreateElementAt(i).DesiredSize.Width, r.Width);
+            _contentRects[i] = new Rect(r.X, r.Y, cw, r.Height);
+        }
 
         var display = BuildDisplayOrder(context.ItemCount);
         double totalHeight;
@@ -242,7 +263,18 @@ public sealed class BlockWrapLayout : VirtualizingLayout
             }
 
             y = rowStartY + rowTotal;
-            if (i < order.Length) y += RowSpacing;
+            if (i < order.Length)
+            {
+                // Extra gap at a boundary that touches a group, so a group reads as a distinct cluster
+                // and an adjacent ungrouped card isn't mistaken for a member.
+                var thisRowHasGroup = false;
+                foreach (var slot in rowSlots)
+                {
+                    if (Info(context, order[slot])?.BreaksRow ?? false) { thisRowHasGroup = true; break; }
+                }
+                var nextIsGroup = Info(context, order[i])?.BreaksRow ?? false;
+                y += RowSpacing + (thisRowHasGroup || nextIsGroup ? GroupSeparation : 0);
+            }
         }
 
         totalHeight = y;
@@ -280,10 +312,11 @@ public sealed class BlockWrapLayout : VirtualizingLayout
         return rects.Length;
     }
 
-    /// <summary>Block index whose no-gap rect contains <paramref name="point"/>, or -1.</summary>
+    /// <summary>Block index whose visible content rect contains <paramref name="point"/>, or -1. Uses
+    /// the content rects, so a group section's empty trailing columns don't count as "over the group".</summary>
     public int GetBlockIndexAt(Point point)
     {
-        var rects = _identityRects;
+        var rects = _contentRects;
         for (var i = 0; i < rects.Length; i++)
         {
             if (rects[i].Contains(point)) return i;
@@ -291,9 +324,14 @@ public sealed class BlockWrapLayout : VirtualizingLayout
         return -1;
     }
 
-    /// <summary>No-gap rect of the block at <paramref name="index"/>, or empty if out of range.</summary>
+    /// <summary>No-gap full block rect of the block at <paramref name="index"/>, or empty if out of range.</summary>
     public Rect GetBlockRect(int index) =>
         index >= 0 && index < _identityRects.Length ? _identityRects[index] : default;
+
+    /// <summary>Visible content rect of the block (the member-extent box for a group, the full rect
+    /// for a lone card), or empty if out of range.</summary>
+    public Rect GetContentRect(int index) =>
+        index >= 0 && index < _contentRects.Length ? _contentRects[index] : default;
 
     private int ComputeColumnCount(double availableWidth)
     {
