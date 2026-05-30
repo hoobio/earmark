@@ -15,20 +15,27 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     private readonly ISettingsService _settings;
     private readonly IWaveLinkService _waveLink;
     private readonly IDispatcherQueueProvider _dispatcher;
+    private readonly IDeviceDefaultsService _defaults;
     private bool _suppress;
 
     public SettingsViewModel(
         ISettingsService settings,
         IWaveLinkService waveLink,
-        IDispatcherQueueProvider dispatcher)
+        IDispatcherQueueProvider dispatcher,
+        IDeviceDefaultsService defaults)
     {
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
         _waveLink = waveLink ?? throw new ArgumentNullException(nameof(waveLink));
         _dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
+        _defaults = defaults ?? throw new ArgumentNullException(nameof(defaults));
         _waveLink.StateChanged += OnWaveLinkStateChanged;
         SyncFromSettings();
         SyncFromWaveLink();
     }
+
+    /// <summary>Restores the Devices page to its default groups, order, and visibility. Rules and all
+    /// other settings are left untouched. The Devices page rebuilds via the service's event.</summary>
+    public Task ResetDeviceLayoutAsync() => _defaults.ResetDeviceLayoutAsync();
 
     [ObservableProperty]
     public partial bool LaunchOnStartup { get; set; }

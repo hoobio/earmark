@@ -184,6 +184,14 @@
                     </ctrl:SettingsExpander.Items>
                 </ctrl:SettingsExpander>
 
+                <ctrl:SettingsCard Header="Reset Devices page"
+                                   Description="Restore the default device groups, order, and visibility. Your rules and other settings aren't changed.">
+                    <ctrl:SettingsCard.HeaderIcon>
+                        <FontIcon Glyph="&#xE777;" />
+                    </ctrl:SettingsCard.HeaderIcon>
+                    <Button Content="Reset to default" Click="OnResetDeviceLayout" />
+                </ctrl:SettingsCard>
+
                 <TextBlock Text="System tray" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,12,0,0" />
                 <ctrl:SettingsExpander Header="Show tray icon"
                                        Description="Display the Earmark icon in the Windows notification area. The behaviours below need it on."
