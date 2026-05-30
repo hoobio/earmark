@@ -71,6 +71,11 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     public partial int AppThemeIndex { get; set; }
 
+    /// <summary>Bound to the backdrop ComboBox SelectedIndex. Maps 1:1 to <see cref="BackdropMode"/>
+    /// (Mica=0, Acrylic=1, Solid=2).</summary>
+    [ObservableProperty]
+    public partial int BackdropIndex { get; set; }
+
     [ObservableProperty]
     public partial bool EnableWaveLink { get; set; }
 
@@ -146,6 +151,7 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
             FilterAudioForwarders = _settings.Current.FilterAudioForwarders;
             AppChipLingerSeconds = _settings.Current.AppChipLingerSeconds;
             AppThemeIndex = (int)_settings.Current.Theme;
+            BackdropIndex = (int)_settings.Current.Backdrop;
             EnableWaveLink = _settings.Current.EnableWaveLink;
             ReconcileWaveLinkNames = _settings.Current.ReconcileWaveLinkNames;
             WaveLinkChannelStyleIndex = (int)_settings.Current.WaveLinkChannelStyle;
@@ -192,6 +198,7 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         Persist(s => s.AppChipLingerSeconds = seconds);
     }
     partial void OnAppThemeIndexChanged(int value) => Persist(s => s.Theme = (AppTheme)value);
+    partial void OnBackdropIndexChanged(int value) => Persist(s => s.Backdrop = (BackdropMode)value);
     partial void OnEnableWaveLinkChanged(bool value) => Persist(s => s.EnableWaveLink = value);
     partial void OnReconcileWaveLinkNamesChanged(bool value) => Persist(s => s.ReconcileWaveLinkNames = value);
     partial void OnWaveLinkChannelStyleIndexChanged(int value) => Persist(s => s.WaveLinkChannelStyle = (WaveLinkChannelStyle)value);

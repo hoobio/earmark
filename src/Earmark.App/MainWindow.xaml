@@ -9,13 +9,23 @@
     Title="Earmark"
     mc:Ignorable="d">
 
-    <!-- Mica is applied in code (MicaController) rather than <Window.SystemBackdrop> so its
-         tint can follow the app's Theme setting, not just the OS. See MainWindow.xaml.cs. -->
+    <!-- The backdrop (Mica / Acrylic / Solid) is applied in code rather than via
+         <Window.SystemBackdrop> so its tint can follow the app's Theme setting, not just the OS,
+         and so the user can switch material at runtime. See MainWindow.xaml.cs. -->
     <Grid x:Name="RootGrid">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
+
+        <!-- Opaque fill shown only in Solid backdrop mode (no Mica/Acrylic controller attached).
+             Painted via ThemeResource so it re-resolves on a theme switch; collapsed otherwise so
+             the system backdrop shows through. -->
+        <Border x:Name="SolidBackdrop"
+                Grid.Row="0"
+                Grid.RowSpan="2"
+                Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+                Visibility="Collapsed" />
 
         <!-- Only AppTitleBarDragRegion is handed to SetTitleBar. The pane toggle must NOT be
              parented under it: the system treats the SetTitleBar element as the caption and

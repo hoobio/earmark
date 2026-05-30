@@ -26,6 +26,11 @@ public sealed class AppSettings
     /// <summary>App theme. <see cref="AppTheme.System"/> (default) follows Windows.</summary>
     public AppTheme Theme { get; set; } = AppTheme.System;
 
+    /// <summary>Window background material. <see cref="BackdropMode.Mica"/> (default) matches the
+    /// original look; Acrylic blurs the desktop behind the window; Solid drops the system backdrop
+    /// for an opaque themed surface. Falls back to Solid on OSes that lack the chosen material.</summary>
+    public BackdropMode Backdrop { get; set; } = BackdropMode.Mica;
+
     public bool EnableWaveLink { get; set; }
 
     /// <summary>
