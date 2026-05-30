@@ -30,6 +30,12 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
     // mirrors the Devices page's 600ms user-grace window.
     private static readonly TimeSpan VolumeReconcileDebounce = TimeSpan.FromMilliseconds(500);
 
+    // Device connect / disconnect can flip a DevicePresent / DeviceMissing condition, which gates
+    // whether a rule's main vs else actions fire. Debounced because one Bluetooth connect raises a
+    // burst of endpoint events (and can briefly flicker present/absent) - re-arming on each change
+    // means we only re-apply once the topology settles, instead of oscillating the rule's branches.
+    private static readonly TimeSpan EndpointsChangeDebounce = TimeSpan.FromMilliseconds(750);
+
     private readonly IRulesService _rules;
     private readonly IAudioSessionService _sessions;
     private readonly IAudioEndpointService _endpoints;
@@ -47,6 +53,7 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
     private bool _started;
     private Timer? _timer;
     private Timer? _volumeReconcileTimer;
+    private Timer? _endpointsChangeTimer;
     private CancellationTokenSource? _cts;
 
     public RoutingApplier(
@@ -87,6 +94,7 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
         _sessions.SessionAdded += OnSessionAdded;
         _sessions.SessionRemoved += OnSessionRemoved;
         _rules.RulesChanged += OnRulesChanged;
+        _endpoints.EndpointsChanged += OnEndpointsChanged;
         _endpoints.DefaultsChanged += OnDefaultsChanged;
         _endpoints.ExternalVolumeChanged += OnExternalVolumeChanged;
         _endpoints.ExternalMuteChanged += OnExternalMuteChanged;
@@ -108,6 +116,8 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
         _timer = new Timer(OnTimerTick, null, PeriodicInterval, PeriodicInterval);
         // Single-shot debounce timer for external-change reconcile; armed by ScheduleVolumeReconcile.
         _volumeReconcileTimer = new Timer(OnVolumeReconcileTick, null, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+        // Single-shot debounce timer for device connect/disconnect; armed by OnEndpointsChanged.
+        _endpointsChangeTimer = new Timer(OnEndpointsChangeTick, null, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
         _logger.LogInformation("Routing applier started; periodic interval = {Interval}", PeriodicInterval);
     }
 
@@ -368,6 +378,33 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
         catch (Exception ex)
         {
             _logger.LogError(ex, "Reapply on rules change failed");
+        }
+    }
+
+    // A device connecting / disconnecting can flip a DevicePresent / DeviceMissing condition, so
+    // the rule stack must re-evaluate. Debounced (re-armed on each event) so a connect's burst of
+    // endpoint events - and any brief present/absent flicker - settles into a single re-apply
+    // instead of oscillating a presence-gated rule between its main and else branches.
+    private void OnEndpointsChanged(object? sender, EventArgs e)
+    {
+        if (_cts is null || _cts.IsCancellationRequested) return;
+        _endpointsChangeTimer?.Change(EndpointsChangeDebounce, Timeout.InfiniteTimeSpan);
+    }
+
+    private async void OnEndpointsChangeTick(object? state)
+    {
+        if (_cts is null || _cts.IsCancellationRequested) return;
+        try
+        {
+            // skipIfBusy coalesces with any in-flight apply; the volume/mute/Wave Link passes
+            // re-resolve from scratch each run, so a passive (non-forced) re-apply is enough to
+            // enact a freshly-met (or freshly-unmet) condition.
+            await ApplyAllInternalAsync(force: false, skipIfBusy: true).ConfigureAwait(false);
+            _logger.LogInformation("Reapplied rules after endpoint topology change");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Endpoints-changed reapply failed");
         }
     }
 
@@ -733,9 +770,12 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
         _timer = null;
         _volumeReconcileTimer?.Dispose();
         _volumeReconcileTimer = null;
+        _endpointsChangeTimer?.Dispose();
+        _endpointsChangeTimer = null;
         _sessions.SessionAdded -= OnSessionAdded;
         _sessions.SessionRemoved -= OnSessionRemoved;
         _rules.RulesChanged -= OnRulesChanged;
+        _endpoints.EndpointsChanged -= OnEndpointsChanged;
         _endpoints.DefaultsChanged -= OnDefaultsChanged;
         _endpoints.ExternalVolumeChanged -= OnExternalVolumeChanged;
         _endpoints.ExternalMuteChanged -= OnExternalMuteChanged;
