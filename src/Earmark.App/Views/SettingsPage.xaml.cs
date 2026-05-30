@@ -60,6 +60,25 @@ public sealed partial class SettingsPage : Page
 
     private void OnResetMeterColour(object sender, RoutedEventArgs e) => ViewModel.ResetPeakMeterColour();
 
+    private async void OnResetDeviceLayout(object sender, RoutedEventArgs e)
+    {
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = "Reset Devices page?",
+            Content = "This restores the default device groups, order, and visibility on the Devices page, "
+                + "and un-hides any hidden app chips. Your rules and other settings aren't changed.",
+            PrimaryButtonText = "Reset",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Close,
+        };
+
+        if (await dialog.ShowAsync() == ContentDialogResult.Primary)
+        {
+            await ViewModel.ResetDeviceLayoutAsync();
+        }
+    }
+
     private async void OnCheckForUpdates(object sender, RoutedEventArgs e) => await About.CheckForUpdatesAsync();
 
     private void OnOpenLatestRelease(object sender, RoutedEventArgs e) => About.OpenLatestRelease();

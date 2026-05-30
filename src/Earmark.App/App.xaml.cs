@@ -81,6 +81,12 @@ public partial class App : Application
                 await _host.Services.GetRequiredService<IRulesService>().LoadAsync();
                 _logger.LogInformation("Rules loaded");
 
+                // Blank-slate installs only: seed the starter device groups + two disabled example
+                // rules. A no-op when any rule or Devices-page config already exists, so it never
+                // wipes an existing layout. Wave Link groups seed only if Wave Link is already
+                // connected (off by default on a fresh install).
+                await _host.Services.GetRequiredService<IDeviceDefaultsService>().SeedDefaultsIfEmptyAsync();
+
                 _host.Services.GetRequiredService<IRoutingApplier>().Start();
                 _logger.LogInformation("Routing applier started");
             });
