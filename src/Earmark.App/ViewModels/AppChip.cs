@@ -83,11 +83,11 @@ public partial class AppChip : ObservableObject
         _iconService = iconService ?? throw new ArgumentNullException(nameof(iconService));
         MeterOptions = meterOptions ?? throw new ArgumentNullException(nameof(meterOptions));
         LockingRule = lockingRule;
-        // Audible chips start active with a fresh audible timestamp (drives full-strength
-        // brightness). Silent rule-pinned chips start idle and dimmed, with LastAudibleAt parked
-        // one active-window in the past so IsActive reads false at once.
-        IsActive = startsActive;
-        LastAudibleAt = startsActive ? DateTime.UtcNow : DateTime.UtcNow - ActiveWindow;
+        // An audible chip is treated as having started its run the moment we first see it (we can't
+        // know when it truly started before observing). A silent rule-pinned chip starts with both
+        // timestamps null - "never produced audio" - so it sits in the back tier, dimmed, until it
+        // makes a sound.
+        if (startsActive) PlayingSince = DateTime.UtcNow;
 
         // First call kicks the async load; subsequent calls (driven by the peak tick) pick
         // up the cached ImageSource once the load completes.
@@ -96,27 +96,40 @@ public partial class AppChip : ObservableObject
             : _iconService.TryGetIcon(session.ProcessId, session.ExecutablePath);
     }
 
-    /// <summary>Wall-clock timestamp of the last tick whose peak crossed the audibility
-    /// threshold. Drives the "currently playing" brightness window and, for idle (silent but
-    /// running) chips, the removal clock the HomeViewModel ages out against.</summary>
-    public DateTime LastAudibleAt { get; private set; }
+    /// <summary>When the current audio run started - the rising edge from silence - or null when the
+    /// app isn't producing audio right now. Together with <see cref="LastStoppedAt"/> this fully
+    /// describes a chip's audio history for ordering; there's no per-tick "last audible" bump.
+    /// Playing chips sort to the front, earliest start first.</summary>
+    public DateTime? PlayingSince { get; private set; }
+
+    /// <summary>When the app's most recent run's audio ceased, or null if it has never played.
+    /// Stopped chips sort after playing ones, most-recently-stopped first; a chip that has never
+    /// played (both timestamps null) sinks behind them.</summary>
+    public DateTime? LastStoppedAt { get; private set; }
+
+    // Falling-edge marker: when the peak first dropped below threshold during the current run. Drives
+    // the ActiveWindow grace so a brief dip (track change, seek, short pause) doesn't end the run.
+    // Null whenever the chip is audible or already stopped.
+    private DateTime? _silentSince;
 
     /// <summary>Peak amplitude below which we treat the session as silent. -46 dBFS is comfortably
     /// below speech-noise but well above the digital-zero floor most clean exits land at.</summary>
     public const float AudibleAmplitudeThreshold = 0.005f;
 
-    /// <summary>How long a chip stays at full brightness after its last audible tick. Deliberately
-    /// short so opacity reads as a live "currently playing" indicator: a brief track gap, seek, or
-    /// quiet passage keeps it bright, but a sustained pause or stop dims it within a few seconds.
-    /// Removal is a separate, longer, user-configurable window owned by <c>HomeViewModel</c> - a
-    /// chip dims here but lingers (dimmed) until that window elapses.</summary>
+    /// <summary>Grace window: a run stays "playing" (full brightness, front tier) for this long after
+    /// its last audible tick, so a brief track gap, seek, or quiet passage doesn't end it - only a
+    /// sustained silence does. Removal is a separate, longer, user-configurable window owned by
+    /// <c>HomeViewModel</c>, measured from <see cref="LastStoppedAt"/>.</summary>
     public static readonly TimeSpan ActiveWindow = TimeSpan.FromSeconds(4);
 
-    /// <summary>True while the session produced audio on its card within <see cref="ActiveWindow"/>.
-    /// Drives brightness and sort order: active chips render full-strength and sort first; chips
-    /// silent past the window dim and sort last. Always false once <see cref="IsClosed"/>.
-    /// Recomputed each peak tick from <see cref="LastAudibleAt"/>.</summary>
-    public bool IsActive { get; private set; }
+    /// <summary>True iff the app has produced audio at least once (it's playing now, or has stopped
+    /// after a run). Distinguishes the "stopped" tier from the "never played" tier.</summary>
+    public bool HasEverPlayed => PlayingSince is not null || LastStoppedAt is not null;
+
+    /// <summary>True while the app is producing audio (within the <see cref="ActiveWindow"/> grace of
+    /// its last audible tick). Drives brightness and tiering: active chips render full-strength and
+    /// sort to the front. Always false once <see cref="IsClosed"/> (closing ends the run).</summary>
+    public bool IsActive => PlayingSince is not null;
 
     /// <summary>When the chip's app was detected to have exited (it owns no audio session and no
     /// matching process is running). Null while the app is alive. A closed chip lingers - dimmed,
@@ -215,15 +228,17 @@ public partial class AppChip : ObservableObject
     /// closed. The chip lingers at the dimmed levels until <c>HomeViewModel</c> prunes it.</summary>
     public double ChipOpacity => IsClosed ? 0.3 : IsActive ? 1.0 : 0.45;
 
-    /// <summary>Tick entry point. Updates peak, refreshes the active/idle state from the clock,
-    /// and, if the icon hasn't arrived yet, re-queries the cache (the icon service loads
-    /// asynchronously on first request).</summary>
+    /// <summary>Tick entry point. Updates peak, advances the playing/stopped run state via edge
+    /// detection (a rising edge starts a run; a sustained silence past <see cref="ActiveWindow"/>
+    /// ends it), and re-queries the icon cache if it hasn't arrived yet.</summary>
     public void Tick(float peak)
     {
         PeakLevel = MathF.Min(peak, 1f);
+        var now = DateTime.UtcNow;
+
         if (peak >= AudibleAmplitudeThreshold)
         {
-            LastAudibleAt = DateTime.UtcNow;
+            _silentSince = null;
             // Audio is flowing for this app again - it reopened. Drop the closed badge now for
             // snappy feedback; the next debounced reconcile adopts the live session so drag /
             // metering identity follow the new process.
@@ -235,38 +250,57 @@ public partial class AppChip : ObservableObject
                 OnPropertyChanged(nameof(CanDrag));
                 OnPropertyChanged(nameof(ChipOpacity));
             }
+            if (PlayingSince is null)
+            {
+                // Rising edge: a new run starts now. (Resuming after a silence longer than the
+                // grace is a fresh "started playing" - the order sub-rule 2 wants.)
+                PlayingSince = now;
+                RaisePlayingChanged();
+            }
         }
-        RefreshActivity();
+        else if (PlayingSince is not null)
+        {
+            // Silent mid-run: hold the run through the grace, then end it once silence is sustained.
+            _silentSince ??= now;
+            if (now - _silentSince.Value >= ActiveWindow)
+            {
+                LastStoppedAt = _silentSince;   // stamp when audio actually ceased, not when grace expired
+                PlayingSince = null;
+                _silentSince = null;
+                RaisePlayingChanged();
+            }
+        }
+
         if (Icon is null && !string.IsNullOrEmpty(Session.ExecutablePath))
         {
             Icon = _iconService.TryGetIcon(Session.ProcessId, Session.ExecutablePath);
         }
     }
 
-    /// <summary>Recomputes <see cref="IsActive"/> from <see cref="LastAudibleAt"/> and raises the
-    /// dependent change notifications when it flips, so the bound opacity updates live and the
-    /// owner can reorder the chip. A closed chip is never active.</summary>
-    private void RefreshActivity()
+    /// <summary>Raises the notifications that depend on the playing/stopped flip so the bound opacity
+    /// updates live and the owner can reorder the chip.</summary>
+    private void RaisePlayingChanged()
     {
-        var active = !IsClosed && DateTime.UtcNow - LastAudibleAt < ActiveWindow;
-        if (active == IsActive) return;
-        IsActive = active;
         OnPropertyChanged(nameof(IsActive));
         OnPropertyChanged(nameof(ChipOpacity));
     }
 
-    /// <summary>Marks the chip closed (its app exited). Idempotent. Drops it out of the active
-    /// tier, dims it, shows the badge, and starts the linger clock from now so a freshly-closed
-    /// app gets the full removal window before it disappears.</summary>
+    /// <summary>Marks the chip closed (its app exited). Idempotent. Ends any live run, dims it, shows
+    /// the badge, and starts the linger clock from now so a freshly-closed app gets the full removal
+    /// window before it disappears.</summary>
     public void MarkClosed()
     {
         if (ClosedAt is not null) return;
         ClosedAt = DateTime.UtcNow;
-        if (IsActive)
+        if (PlayingSince is not null)
         {
-            IsActive = false;
+            // Exited mid-run: record the stop so a revive lands it in the "has played" tier rather
+            // than looking like it never made a sound.
+            LastStoppedAt = ClosedAt;
+            PlayingSince = null;
             OnPropertyChanged(nameof(IsActive));
         }
+        _silentSince = null;
         OnPropertyChanged(nameof(IsClosed));
         OnPropertyChanged(nameof(ShowClosedBadge));
         OnPropertyChanged(nameof(ChipOpacity));
@@ -275,7 +309,7 @@ public partial class AppChip : ObservableObject
 
     /// <summary>Reverses <see cref="MarkClosed"/> when the app comes back within the linger window.
     /// Adopts the live session and rule match so metering and drag target the current process. The
-    /// brightness window recomputes on the next tick from <see cref="LastAudibleAt"/>.</summary>
+    /// run stays stopped until the revived app's next audible tick starts a fresh run.</summary>
     public void Revive(AudioSession session, RoutingRule? lockingRule)
     {
         Session = session ?? throw new ArgumentNullException(nameof(session));
