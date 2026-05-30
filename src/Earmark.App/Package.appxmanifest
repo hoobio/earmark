@@ -9,8 +9,8 @@
   IgnorableNamespaces="uap rescap systemai">
 
   <Identity
-    Name="3C95B08C-54CA-4725-93C4-C53BA82DB29E"
-    Publisher="CN=Hoobi"
+    Name="Hoobi.Earmark"
+    Publisher="CN=D74C026B-1081-4787-BDE6-0CFA2F1EDD71"
     Version="1.0.0.0" />
 
   <mp:PhoneIdentity PhoneProductId="3C95B08C-54CA-4725-93C4-C53BA82DB29E" PhonePublisherId="00000000-0000-0000-0000-000000000000"/>
