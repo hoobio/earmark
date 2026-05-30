@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.1.9](https://github.com/hoobio/earmark/compare/v0.1.8...v0.1.9) (2026-05-30)
+
+
+### Features
+
+* add device grouping (container model) to the Devices page ([#38](https://github.com/hoobio/earmark/issues/38)) ([f607013](https://github.com/hoobio/earmark/commit/f607013f6b614e817b1b1e08e28a726f37693891))
+* in-app update check with version and About in Settings ([f607013](https://github.com/hoobio/earmark/commit/f607013f6b614e817b1b1e08e28a726f37693891))
+* peak meter colour modes, single-colour fill, and a Settings colour ([f607013](https://github.com/hoobio/earmark/commit/f607013f6b614e817b1b1e08e28a726f37693891))
+* per-app indicator linger, audio-order, and show/hide toggles ([f607013](https://github.com/hoobio/earmark/commit/f607013f6b614e817b1b1e08e28a726f37693891))
+* re-apply routing rules when audio devices connect or disconnect ([f607013](https://github.com/hoobio/earmark/commit/f607013f6b614e817b1b1e08e28a726f37693891))
+
+
+### Bug Fixes
+
+* include Wave Link mix rules in device rule summaries ([f607013](https://github.com/hoobio/earmark/commit/f607013f6b614e817b1b1e08e28a726f37693891))
+
+
+### Build System
+
+* set Microsoft Store package identity for Earmark ([d9ad050](https://github.com/hoobio/earmark/commit/d9ad050944342d739582000890e0c56fdfd2f528))
+
 ## [0.1.8](https://github.com/hoobio/earmark/compare/v0.1.7...v0.1.8) (2026-05-29)
 
 
