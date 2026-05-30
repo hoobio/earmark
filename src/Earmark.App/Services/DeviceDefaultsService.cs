@@ -65,14 +65,15 @@ public sealed class DeviceDefaultsService : IDeviceDefaultsService
     }
 
     /// <summary>True when the install already carries user state - any rule, or any Devices-page
-    /// customisation (groups, manual order, or per-device config).</summary>
+    /// customisation (groups, manual order, per-device config, or hidden app chips).</summary>
     private bool HasExistingConfig()
     {
         var s = _settings.Current;
         return _rules.Rules.Count > 0
             || s.DeviceGroups.Count > 0
             || s.DeviceOrder.Count > 0
-            || s.Devices.Count > 0;
+            || s.Devices.Count > 0
+            || s.HiddenApps.Count > 0;
     }
 
     public async Task ResetDeviceLayoutAsync(CancellationToken ct = default)
@@ -83,8 +84,8 @@ public sealed class DeviceDefaultsService : IDeviceDefaultsService
     }
 
     /// <summary>
-    /// Clears the Devices-page state (per-device config, groups, block order) and rebuilds the two
-    /// starter groups, pinning their members visible and floating them to the top of the block order.
+    /// Clears the Devices-page state (per-device config, groups, block order, hidden app chips) and
+    /// rebuilds the two starter groups, pinning their members visible and floating them to the top.
     /// Returns the default-device endpoints (render + capture, default + communications) so the
     /// first-run seeder can build the example volume rule against them.
     /// </summary>
@@ -94,6 +95,7 @@ public sealed class DeviceDefaultsService : IDeviceDefaultsService
         s.Devices.Clear();
         s.DeviceGroups.Clear();
         s.DeviceOrder.Clear();
+        s.HiddenApps.Clear();
 
         var render = _endpoints.GetEndpoints(EndpointFlow.Render).Where(e => e.State == EndpointState.Active).ToList();
         var capture = _endpoints.GetEndpoints(EndpointFlow.Capture).Where(e => e.State == EndpointState.Active).ToList();

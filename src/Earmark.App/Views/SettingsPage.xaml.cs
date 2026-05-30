@@ -66,8 +66,8 @@ public sealed partial class SettingsPage : Page
         {
             XamlRoot = XamlRoot,
             Title = "Reset Devices page?",
-            Content = "This restores the default device groups, order, and visibility on the Devices page. "
-                + "Your rules and other settings aren't changed.",
+            Content = "This restores the default device groups, order, and visibility on the Devices page, "
+                + "and un-hides any hidden app chips. Your rules and other settings aren't changed.",
             PrimaryButtonText = "Reset",
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Close,

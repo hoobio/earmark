@@ -185,7 +185,7 @@
                 </ctrl:SettingsExpander>
 
                 <ctrl:SettingsCard Header="Reset Devices page"
-                                   Description="Restore the default device groups, order, and visibility. Your rules and other settings aren't changed.">
+                                   Description="Restore the default device groups, order, and visibility, and un-hide any hidden app chips. Asks for confirmation first. Your rules and other settings aren't changed.">
                     <ctrl:SettingsCard.HeaderIcon>
                         <FontIcon Glyph="&#xE777;" />
                     </ctrl:SettingsCard.HeaderIcon>
