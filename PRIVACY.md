@@ -32,7 +32,11 @@ Logs include process names, executable paths, and audio endpoint identifiers (fo
 
 ## Network Access
 
-Earmark does not declare the `internetClient` capability and makes no outbound network requests.
+The Microsoft Store (MSIX) build declares no `internetClient` capability and makes no outbound network requests. It receives updates through the Store.
+
+The standalone (MSI) build checks GitHub Releases for a newer version: once in the background on launch, and again whenever you click "Check for updates" in Settings. This is a single request to `api.github.com` that sends no personal data (only the standard user-agent string) and is used solely to compare version numbers. You can turn off the automatic check under Settings > About > "Check automatically on launch"; the manual button still works on demand.
+
+Beyond that, Earmark makes no outbound requests and has no analytics, crash reporting, or telemetry of any kind.
 
 ## Third-Party Services
 

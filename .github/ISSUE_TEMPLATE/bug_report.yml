@@ -86,7 +86,7 @@ body:
     attributes:
       label: Log Snippet
       description: |
-        Paste the last 50-100 lines from `%LocalAppData%\Earmark\logs\earmark-*.log` (the latest file). PowerShell:
+        For the most useful log: open **Settings > Diagnostics** and turn on **Verbose logging**, reproduce the issue, then grab the newest log file. The quickest way to find it is **Settings > Help & feedback > Logs > Open logs folder** (logs live at `%LocalAppData%\Earmark\logs\`, one file per launch). Paste the last 50-100 lines. PowerShell:
         `Get-ChildItem "$env:LocalAppData\Earmark\logs\*.log" | Sort-Object LastWriteTime -Descending | Select-Object -First 1 | Get-Content -Tail 100`
       render: shell
     validations:

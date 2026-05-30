@@ -57,8 +57,10 @@ Open a [Bug Report](https://github.com/hoobio/earmark/issues/new?template=bug_re
 
 - Steps to reproduce
 - Expected vs actual behavior
-- Your Windows version and Earmark version
+- Your Windows version and Earmark version (Settings > About)
 - A snippet of the latest log file (most useful) or screenshots
+
+For a useful log, turn on **Verbose logging** (Settings > Diagnostics), reproduce the issue, then grab the newest file via **Settings > Help & feedback > Logs > Open logs folder**.
 
 ### Suggesting Features
 

@@ -21,6 +21,7 @@ Per-app audio routing for Windows, driven by regex rules. Pin a browser to your 
 - **Drag to reorder**: rules apply top-down, so reordering changes precedence.
 - **Auto-reapply**: routing reapplies on rule changes, on device add/remove, on default-device changes, and on a 10-second safety tick.
 - **Tray-friendly**: launch hidden, close to tray, single-instance.
+- **Stays current**: the standalone build checks GitHub for new releases and shows an "Update available" badge in the title bar (toggle it off in Settings). Version, logs, and one-click bug/feature links live in Settings > About.
 
 ## Prerequisites
 
