@@ -93,6 +93,10 @@ public sealed partial class HomePage : Page
     /// <summary>The inner member repeater currently carrying the implicit slide animation, or null.</summary>
     private ItemsRepeater? _animatedInner;
 
+    /// <summary>The group whose title is currently being edited, or null. Used to commit the edit when
+    /// the user clicks away onto a non-focusable area (which wouldn't otherwise blur the text box).</summary>
+    private DeviceGroupCard? _editingGroup;
+
     private async void OnDeviceCardDragStarting(UIElement sender, DragStartingEventArgs args)
     {
         if (sender is not FrameworkElement { Tag: DeviceCard card } element) return;
@@ -171,6 +175,7 @@ public sealed partial class HomePage : Page
     {
         if (sender is not FrameworkElement { Tag: DeviceGroupCard group } header) return;
         group.IsEditingTitle = true;
+        _editingGroup = group;
         FocusTitleEditor(header);
         e.Handled = true;
     }
@@ -179,6 +184,7 @@ public sealed partial class HomePage : Page
     {
         if (sender is not FrameworkElement fe || GroupFromTag(fe.Tag) is not { } group) return;
         group.IsEditingTitle = true;
+        _editingGroup = group;
         // The flyout item isn't in the header's tree; focus the editor via the realised block element.
         var idx = ViewModel.Blocks.IndexOf(group);
         if (idx >= 0 && DevicesRepeater.TryGetElement(idx) is FrameworkElement blockEl)
@@ -225,7 +231,27 @@ public sealed partial class HomePage : Page
         if (sender is FrameworkElement { Tag: DeviceGroupCard group })
         {
             group.IsEditingTitle = false;   // the two-way binding already committed the title on focus loss
+            if (ReferenceEquals(_editingGroup, group)) _editingGroup = null;
         }
+    }
+
+    /// <summary>Commits an in-progress title edit when the user clicks anywhere outside the editor.
+    /// Clicking a non-focusable area (empty space, a card body) wouldn't otherwise blur the text box,
+    /// so move focus off it - which fires its LostFocus, committing the rename and leaving edit mode.</summary>
+    private void OnContentTapped(object sender, TappedRoutedEventArgs e)
+    {
+        if (_editingGroup is null) return;
+        if (e.OriginalSource is DependencyObject node && IsWithinTextBox(node)) return;   // tapped the editor itself
+        DevicesRepeater.Focus(FocusState.Programmatic);
+    }
+
+    private static bool IsWithinTextBox(DependencyObject node)
+    {
+        for (var current = node; current is not null; current = VisualTreeHelper.GetParent(current))
+        {
+            if (current is TextBox) return true;
+        }
+        return false;
     }
 
     /// <summary>Focuses + selects the group's title text box once it becomes visible.</summary>

@@ -754,7 +754,8 @@
                 <Grid Background="Transparent"
                       AllowDrop="True"
                       DragOver="OnBlocksDragOver"
-                      Drop="OnBlocksDrop">
+                      Drop="OnBlocksDrop"
+                      Tapped="OnContentTapped">
                     <ItemsRepeater x:Name="DevicesRepeater"
                                    ItemsSource="{x:Bind ViewModel.Blocks}"
                                    ElementPrepared="OnBlockElementPrepared"
