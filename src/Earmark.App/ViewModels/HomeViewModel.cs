@@ -49,6 +49,10 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     private WaveLinkChannelStyle? _lastAppliedStyle;
     private bool? _lastFilterForwarders;
     private bool? _lastShowAppIndicators;
+    private int? _lastHiddenAppsCount;
+    /// <summary>Identity keys of apps the user has permanently hidden from the chip rows, mirrored
+    /// from <see cref="AppSettings.HiddenApps"/> for O(1) lookups on the 20Hz tick.</summary>
+    private readonly HashSet<string> _hiddenAppKeys = new(StringComparer.OrdinalIgnoreCase);
     private readonly INotificationService _notifications;
     private readonly ILogger<HomeViewModel> _logger;
     private readonly Dictionary<string, DateTime> _lastReconcileToast = new(StringComparer.OrdinalIgnoreCase);
@@ -141,6 +145,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         // to the style field so unrelated saves (hidden/pinned devices) don't trigger work.
         _settings.SettingsChanged += OnSettingsChanged;
         SyncMeterOptions();
+        RefreshHiddenApps();
 
         IsInitializing = true;
         QueueRefresh();
@@ -341,6 +346,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
                 foreach (var session in sessionsSnapshot)
                 {
                     if (!ShouldShow(session)) continue;
+                    if (IsAppHidden(session.IdentityKey)) continue;
                     if (seenAppsOnThisCard.Contains(session.IdentityKey)) continue;
 
                     var livePeak = _sessionMeters.GetPeak(session.ProcessId, card.Endpoint.Id) ?? 0f;
@@ -350,7 +356,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
                         .Concat(_endpoints.GetEndpoints(EndpointFlow.Capture))
                         .ToList();
                     var match = _matcher.FindAppRoute(session, EndpointFlow.Render, rulesSnapshot, combinedEndpointsCache, sessionsSnapshot);
-                    var revivedChip = new AppChip(session, card.Endpoint.Id, _iconService, _meterOptions, match?.Rule)
+                    var revivedChip = new AppChip(session, card.Endpoint.Id, _iconService, _meterOptions, match?.Rule, ownerCard: card, onHide: HideApp)
                     {
                         RulePinnedHere = match is not null &&
                             string.Equals(match.Endpoint.Id, card.Endpoint.Id, StringComparison.OrdinalIgnoreCase),
@@ -597,7 +603,13 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             // indicators are off the reconcile clears every row and the 20Hz app-meter tick is
             // skipped, idling the per-session meter service. Tracked so unrelated saves don't
             // churn the apps rows.
-            if (_settings.Current.FilterAudioForwarders != _lastFilterForwarders ||
+            // A hidden-apps add/remove (count change) is detected here too - unhiding from the
+            // Settings modal lands via this path. RefreshHiddenApps updates the count baseline so
+            // it doesn't re-trigger; the chip's own Hide path already updated it before saving.
+            var hiddenAppsChanged = _settings.Current.HiddenApps.Count != _lastHiddenAppsCount;
+            if (hiddenAppsChanged) RefreshHiddenApps();
+            if (hiddenAppsChanged ||
+                _settings.Current.FilterAudioForwarders != _lastFilterForwarders ||
                 _settings.Current.ShowAppIndicators != _lastShowAppIndicators)
             {
                 _lastFilterForwarders = _settings.Current.FilterAudioForwarders;
@@ -950,6 +962,22 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             return;
         }
 
+        // Drop any chip whose app the user has permanently hidden (the set may have grown since the
+        // chip was placed). The additions loop below skips hidden apps too, so nothing re-adds them.
+        if (_hiddenAppKeys.Count > 0)
+        {
+            var removedHidden = false;
+            for (var i = card.Apps.Count - 1; i >= 0; i--)
+            {
+                if (IsAppHidden(card.Apps[i].Session.IdentityKey))
+                {
+                    card.Apps.RemoveAt(i);
+                    removedHidden = true;
+                }
+            }
+            if (removedHidden) card.NotifyAppsChanged();
+        }
+
         // Classify + age out existing chips. An app whose identity is on no live source (no audio
         // session, no running process) has exited -> mark the chip closed (it lingers, dimmed +
         // badged). An app that's back -> revive a stale closed chip, adopting its live session.
@@ -1030,6 +1058,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             if (!ShouldShow(session)) continue;
 
             var key = session.IdentityKey;
+            if (IsAppHidden(key)) continue;
             routeByPid.TryGetValue(session.ProcessId, out var match);
             var pinnedHere = match is not null &&
                 string.Equals(match.Endpoint.Id, card.Endpoint.Id, StringComparison.OrdinalIgnoreCase);
@@ -1061,7 +1090,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         foreach (var add in additions.Values
             .OrderBy(a => a.Session.IsSystemSounds ? "System Sounds" : a.Session.DisplayName, StringComparer.OrdinalIgnoreCase))
         {
-            var chip = new AppChip(add.Session, card.Endpoint.Id, _iconService, _meterOptions, add.Rule, startsActive: add.Audible)
+            var chip = new AppChip(add.Session, card.Endpoint.Id, _iconService, _meterOptions, add.Rule, startsActive: add.Audible, ownerCard: card, onHide: HideApp)
             {
                 RulePinnedHere = add.PinnedHere,
             };
@@ -1221,6 +1250,60 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         {
             // Errors surface via the logger inside the policy service.
         }
+    }
+
+    /// <summary>Rebuilds <see cref="_hiddenAppKeys"/> from <see cref="AppSettings.HiddenApps"/> and
+    /// refreshes the count baseline used to detect changes in <see cref="OnSettingsChanged"/>.</summary>
+    private void RefreshHiddenApps()
+    {
+        _hiddenAppKeys.Clear();
+        foreach (var app in _settings.Current.HiddenApps)
+        {
+            if (!string.IsNullOrEmpty(app.Key)) _hiddenAppKeys.Add(app.Key);
+        }
+        _lastHiddenAppsCount = _settings.Current.HiddenApps.Count;
+    }
+
+    private bool IsAppHidden(string identityKey) => _hiddenAppKeys.Contains(identityKey);
+
+    /// <summary>
+    /// Permanently hides an app from every device card's chip row (the chip's "Hide this app"
+    /// context menu). Records the app's identity key + friendly name in settings, drops every chip
+    /// for it now for instant feedback, and persists. The app keeps routing / playing; only its
+    /// chip is suppressed. Reversible from Settings &gt; App indicators.
+    /// </summary>
+    public void HideApp(AppChip chip)
+    {
+        ArgumentNullException.ThrowIfNull(chip);
+        var key = chip.Session.IdentityKey;
+        if (string.IsNullOrEmpty(key)) return;
+
+        if (!_settings.Current.HiddenApps.Any(h => string.Equals(h.Key, key, StringComparison.OrdinalIgnoreCase)))
+        {
+            _settings.Current.HiddenApps.Add(new HiddenApp { Key = key, Name = chip.DisplayLabel });
+        }
+        // Update the live set + count baseline now so the 20Hz tick can't re-add the chip and our
+        // own save's SettingsChanged doesn't trigger a redundant reconcile.
+        _hiddenAppKeys.Add(key);
+        _lastHiddenAppsCount = _settings.Current.HiddenApps.Count;
+
+        // An app can be audible on more than one card; drop every chip that matches.
+        foreach (var card in _allCards)
+        {
+            var removed = false;
+            for (var i = card.Apps.Count - 1; i >= 0; i--)
+            {
+                if (string.Equals(card.Apps[i].Session.IdentityKey, key, StringComparison.OrdinalIgnoreCase))
+                {
+                    card.Apps.RemoveAt(i);
+                    removed = true;
+                }
+            }
+            if (removed) card.NotifyAppsChanged();
+        }
+
+        _logger.LogInformation("App hidden from chip rows: key='{Key}'", key);
+        QueueSettingsSave();
     }
 
     private DeviceCard? FindCard(string endpointId) =>

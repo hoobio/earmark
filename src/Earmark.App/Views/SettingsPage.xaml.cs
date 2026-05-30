@@ -30,6 +30,10 @@ public sealed partial class SettingsPage : Page
         About = about;
         MeterSwatches = BuildMeterSwatches();
         InitializeComponent();
+
+        // The hidden-apps count can change from the Devices page while this singleton page is
+        // off-screen, so refresh its card description each time the page is shown.
+        Loaded += (_, _) => ViewModel.RefreshHiddenAppsState();
     }
 
     public SettingsViewModel ViewModel { get; }
@@ -67,4 +71,21 @@ public sealed partial class SettingsPage : Page
     private void OnOpenGitHub(object sender, RoutedEventArgs e) => About.OpenGitHub();
 
     private void OnOpenLogsFolder(object sender, RoutedEventArgs e) => About.OpenLogsFolder();
+
+    private async void OnManageHiddenApps(object sender, RoutedEventArgs e)
+    {
+        ViewModel.LoadHiddenApps();
+        HiddenAppsDialog.XamlRoot = XamlRoot;
+        await HiddenAppsDialog.ShowAsync();
+    }
+
+    private void OnUnhideApp(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: HiddenAppRow row })
+        {
+            ViewModel.UnhideApp(row);
+        }
+    }
+
+    private void OnClearAllHiddenApps(object sender, RoutedEventArgs e) => ViewModel.ClearAllHiddenApps();
 }

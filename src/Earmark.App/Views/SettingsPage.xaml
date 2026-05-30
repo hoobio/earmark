@@ -8,6 +8,32 @@
     xmlns:ui="using:Windows.UI"
     Background="Transparent">
 
+    <Page.Resources>
+        <!-- One row in the hidden-apps manage modal: friendly name + (muted) identity path + Unhide. -->
+        <DataTemplate x:Key="HiddenAppRowTemplate" x:DataType="vm:HiddenAppRow">
+            <Grid ColumnSpacing="{StaticResource SpacingMedium}" Padding="0,4">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" VerticalAlignment="Center" Spacing="{StaticResource SpacingXXSmall}">
+                    <TextBlock Text="{x:Bind Name}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+                    <TextBlock Text="{x:Bind Detail}"
+                               Style="{StaticResource CaptionTextBlockStyle}"
+                               Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                               TextTrimming="CharacterEllipsis"
+                               TextWrapping="NoWrap"
+                               Visibility="{x:Bind HasDetail, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                </StackPanel>
+                <Button Grid.Column="1"
+                        Content="Unhide"
+                        Click="OnUnhideApp"
+                        Tag="{x:Bind}"
+                        VerticalAlignment="Center" />
+            </Grid>
+        </DataTemplate>
+    </Page.Resources>
+
     <Grid Padding="{StaticResource PagePadding}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -67,6 +93,14 @@
                                        SpinButtonPlacementMode="Inline"
                                        SmallChange="5" LargeChange="30"
                                        MinWidth="140" />
+                        </ctrl:SettingsCard>
+                        <ctrl:SettingsCard Header="Hidden apps"
+                                           Description="{x:Bind ViewModel.HiddenAppsDescription, Mode=OneWay}"
+                                           IsEnabled="{x:Bind ViewModel.AppIndicatorChildrenEnabled, Mode=OneWay}">
+                            <ctrl:SettingsCard.HeaderIcon>
+                                <FontIcon Glyph="&#xED1A;" />
+                            </ctrl:SettingsCard.HeaderIcon>
+                            <Button Content="Manage" Click="OnManageHiddenApps" />
                         </ctrl:SettingsCard>
                     </ctrl:SettingsExpander.Items>
                 </ctrl:SettingsExpander>
@@ -273,5 +307,50 @@
 
             </StackPanel>
         </ScrollViewer>
+
+        <!-- Hidden-apps manage modal. Lives in the visual tree (not Page.Resources) so its x:Binds
+             compile; ContentDialog renders nothing until ShowAsync, so it claims no layout. -->
+        <ContentDialog x:Name="HiddenAppsDialog"
+                       Grid.RowSpan="2"
+                       Title="Hidden apps"
+                       CloseButtonText="Done"
+                       DefaultButton="Close">
+            <Grid MinWidth="380" RowSpacing="{StaticResource SpacingMedium}">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <TextBlock Grid.Row="0"
+                           Text="These apps don't show a chip on any device. Unhide one to bring its chip back."
+                           Style="{StaticResource CaptionTextBlockStyle}"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                           TextWrapping="Wrap" />
+                <TextBlock Grid.Row="1"
+                           Text="No apps are hidden."
+                           Style="{StaticResource MutedCaptionTextStyle}"
+                           Margin="0,4,0,0"
+                           Visibility="{x:Bind ViewModel.NoHiddenApps, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                <ListView Grid.Row="1"
+                          ItemsSource="{x:Bind ViewModel.HiddenApps, Mode=OneWay}"
+                          ItemTemplate="{StaticResource HiddenAppRowTemplate}"
+                          SelectionMode="None"
+                          MaxHeight="320"
+                          Visibility="{x:Bind ViewModel.HasHiddenApps, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <ListView.ItemContainerStyle>
+                        <Style TargetType="ListViewItem">
+                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                            <Setter Property="Padding" Value="0" />
+                            <Setter Property="MinHeight" Value="0" />
+                        </Style>
+                    </ListView.ItemContainerStyle>
+                </ListView>
+                <Button Grid.Row="2"
+                        Content="Clear all"
+                        Click="OnClearAllHiddenApps"
+                        HorizontalAlignment="Right"
+                        Visibility="{x:Bind ViewModel.HasHiddenApps, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
+            </Grid>
+        </ContentDialog>
     </Grid>
 </Page>

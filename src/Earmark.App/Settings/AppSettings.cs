@@ -112,10 +112,36 @@ public sealed class AppSettings
     /// </summary>
     public List<DeviceGroup> DeviceGroups { get; set; } = new();
 
+    /// <summary>
+    /// Apps the user has permanently hidden from the device cards' app-indicator rows, via a chip's
+    /// "Hide this app" context menu. Hidden everywhere (on every device card), keyed by the app's
+    /// <see cref="Earmark.Core.Models.AudioSession.IdentityKey"/> (lower-cased executable path, or
+    /// process name when the path is unavailable). The app still routes / plays normally; only its
+    /// chip is suppressed. Managed (unhidden) from Settings &gt; App indicators.
+    /// </summary>
+    public List<HiddenApp> HiddenApps { get; set; } = new();
+
     /// <summary>Persisted window size in physical pixels. Null until the user has resized
     /// at least once (so first launch picks the WinUI default).</summary>
     public int? WindowWidth { get; set; }
     public int? WindowHeight { get; set; }
+}
+
+/// <summary>
+/// One app the user has hidden from the Devices-page chip rows. <see cref="Key"/> is the match
+/// target (an <see cref="Earmark.Core.Models.AudioSession.IdentityKey"/>); <see cref="Name"/> is the
+/// friendly label captured when it was hidden, so the manage list reads "Discord" rather than a raw
+/// path even when the app isn't currently running.
+/// </summary>
+public sealed class HiddenApp
+{
+    /// <summary>Match key: the app's <see cref="Earmark.Core.Models.AudioSession.IdentityKey"/>
+    /// (lower-cased executable path, or process name when no path is available).</summary>
+    public string Key { get; set; } = string.Empty;
+
+    /// <summary>Friendly display name captured at hide time. Null falls back to a name derived from
+    /// <see cref="Key"/>.</summary>
+    public string? Name { get; set; }
 }
 
 /// <summary>
