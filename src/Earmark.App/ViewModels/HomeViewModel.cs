@@ -1279,26 +1279,22 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         var cardById = new Dictionary<string, DeviceCard>(StringComparer.OrdinalIgnoreCase);
         foreach (var c in _allCards) cardById[c.Endpoint.Id] = c;
 
-        // Live groups: those with at least two present members. Clear membership first, then stamp
-        // it (and build the member -> group map) for the live ones.
-        foreach (var c in _allCards) c.IsGroupMember = false;
-        var groupByMemberId = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        var liveGroupCardById = new Dictionary<string, DeviceGroupCard>(StringComparer.OrdinalIgnoreCase);
+        // Full block order (lone cards incl. hidden + live groups), and which member maps to which
+        // live group.
+        var orderedBlockIds = ComputeOrderedBlockIds(out var groupByMemberId);
 
+        // Stamp membership (drives the per-card context menu and the visible pin).
+        foreach (var c in _allCards) c.IsGroupMember = groupByMemberId.ContainsKey(c.Endpoint.Id);
+
+        // Build / reuse a group card per live group, refreshing its members in place.
+        var liveGroupCardById = new Dictionary<string, DeviceGroupCard>(StringComparer.OrdinalIgnoreCase);
         foreach (var group in _settings.Current.DeviceGroups)
         {
-            var members = new List<DeviceCard>();
-            foreach (var id in group.MemberIds)
-            {
-                if (cardById.TryGetValue(id, out var card)) members.Add(card);
-            }
+            var members = group.MemberIds
+                .Where(cardById.ContainsKey)
+                .Select(id => cardById[id])
+                .ToList();
             if (members.Count < 2) continue;   // a sub-two group isn't live this build
-
-            foreach (var m in members)
-            {
-                m.IsGroupMember = true;
-                groupByMemberId[m.Endpoint.Id] = group.Id;
-            }
 
             if (!_groupCards.TryGetValue(group.Id, out var gc))
             {
@@ -1317,23 +1313,6 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         {
             _groupCards.Remove(goneId);
         }
-
-        // Default block order: walk the default-sorted cards, emitting each lone card and each group
-        // once (at its earliest present member). Then layer the persisted manual block order on top.
-        var defaultBlockIds = new List<string>(_allCards.Count);
-        var emittedGroups = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var card in _allCards)
-        {
-            if (groupByMemberId.TryGetValue(card.Endpoint.Id, out var gid))
-            {
-                if (emittedGroups.Add(gid)) defaultBlockIds.Add(gid);
-            }
-            else
-            {
-                defaultBlockIds.Add(card.Endpoint.Id);
-            }
-        }
-        var orderedBlockIds = ApplyManualBlockOrder(defaultBlockIds, _settings.Current.DeviceOrder);
 
         // Materialise the visible block list: a group container always shows; a lone card shows only
         // when it's listed (visible-or-show-hidden).
@@ -1412,6 +1391,83 @@ public partial class HomeViewModel : ObservableObject, IDisposable
                 members.Insert(i, card);
             }
         }
+    }
+
+    /// <summary>
+    /// Computes the full top-level block order: every lone card (visible or hidden) plus every live
+    /// group (>=2 present members), by block id, from the default sort overlaid with the persisted
+    /// manual order. Pure - no VM mutation. <paramref name="groupByMemberId"/> maps each live member
+    /// endpoint id to its group id.
+    /// </summary>
+    private List<string> ComputeOrderedBlockIds(out Dictionary<string, string> groupByMemberId)
+    {
+        var present = new HashSet<string>(_allCards.Select(c => c.Endpoint.Id), StringComparer.OrdinalIgnoreCase);
+        groupByMemberId = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var group in _settings.Current.DeviceGroups)
+        {
+            if (group.MemberIds.Count(present.Contains) < 2) continue;   // a sub-two group isn't live
+            foreach (var id in group.MemberIds)
+            {
+                if (present.Contains(id)) groupByMemberId[id] = group.Id;
+            }
+        }
+
+        // Default block order: walk the default-sorted cards, emitting each lone card and each group
+        // once (at its earliest-appearing present member).
+        var defaultBlockIds = new List<string>(_allCards.Count);
+        var emitted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var card in _allCards)
+        {
+            if (groupByMemberId.TryGetValue(card.Endpoint.Id, out var gid))
+            {
+                if (emitted.Add(gid)) defaultBlockIds.Add(gid);
+            }
+            else
+            {
+                defaultBlockIds.Add(card.Endpoint.Id);
+            }
+        }
+        return ApplyManualBlockOrder(defaultBlockIds, _settings.Current.DeviceOrder);
+    }
+
+    /// <summary>Block id of a top-level item: the endpoint id for a lone card, the group id for a
+    /// group section.</summary>
+    private static string BlockIdOf(object block) => block switch
+    {
+        DeviceCard card => card.Endpoint.Id,
+        DeviceGroupCard group => group.Id,
+        _ => string.Empty,
+    };
+
+    /// <summary>
+    /// Reorders the block <paramref name="blockId"/> (a lone card's endpoint id or a group id) to land
+    /// before the visible block at <paramref name="compactIndex"/> in the block-excluded visible list
+    /// (what the page computes from layout geometry). Operates on the full block order so hidden lone
+    /// cards keep their slots, persists it, and resyncs. A group moves as one unit, so a reorder can
+    /// never split it.
+    /// </summary>
+    public void ReorderBlock(string blockId, int compactIndex)
+    {
+        if (string.IsNullOrEmpty(blockId)) return;
+
+        var visibleIds = Blocks.Select(BlockIdOf).ToList();
+        if (!visibleIds.Any(id => string.Equals(id, blockId, StringComparison.OrdinalIgnoreCase))) return;
+
+        var others = visibleIds.Where(id => !string.Equals(id, blockId, StringComparison.OrdinalIgnoreCase)).ToList();
+        compactIndex = Math.Clamp(compactIndex, 0, others.Count);
+        var anchorId = compactIndex < others.Count ? others[compactIndex] : null;
+
+        var full = ComputeOrderedBlockIds(out _);
+        full.RemoveAll(id => string.Equals(id, blockId, StringComparison.OrdinalIgnoreCase));
+        var insertAt = anchorId is not null
+            ? full.FindIndex(id => string.Equals(id, anchorId, StringComparison.OrdinalIgnoreCase))
+            : full.Count;
+        if (insertAt < 0) insertAt = full.Count;
+        full.Insert(insertAt, blockId);
+
+        _settings.Current.DeviceOrder = full;
+        QueueSettingsSave();
+        SyncBlocks();
     }
 
     private void OnCardVisibilityToggled(DeviceCard card, DeviceCard.VisibilityState prev)

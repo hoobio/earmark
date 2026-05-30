@@ -5,8 +5,10 @@ using Earmark.App.ViewModels;
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.UI.Composition;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Hosting;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media.Imaging;
 
@@ -49,6 +51,193 @@ public sealed partial class HomePage : Page
     public HomeViewModel ViewModel { get; }
 
     private BlockWrapLayout? Layout => DevicesRepeater.Layout as BlockWrapLayout;
+
+    // ---- Block reorder + move-whole-group ----
+    //
+    // The top level is a list of blocks (a lone DeviceCard or a DeviceGroupCard section). A reorder
+    // drag lifts one block and the others slide to open a gap; the dropped block lands at the gap.
+    // A group is one block, so a reorder can never split it. Drag sources: a lone card's Border, and
+    // a group's title band (header handle). Payloads: "earmark:card:{endpointId}" /
+    // "earmark:group:{groupId}". The drop is committed at the container (OnBlocksDrop) using the
+    // layout's frozen no-gap geometry, so the insert point is stable while blocks slide.
+
+    private const string DragPayloadCardPrefix = "earmark:card:";
+    private const string DragPayloadGroupPrefix = "earmark:group:";
+
+    /// <summary>The block being dragged (a DeviceCard or DeviceGroupCard), or null when no reorder is
+    /// in flight. App-chip drags leave this null (they're handled per card).</summary>
+    private object? _draggedBlock;
+
+    /// <summary>Block id of <see cref="_draggedBlock"/> (endpoint id for a card, group id for a group).</summary>
+    private string? _draggedBlockId;
+
+    /// <summary>True between a reorder drag start and its completion; gates whether newly realised
+    /// blocks get the implicit slide animation attached as they scroll into view.</summary>
+    private bool _reorderActive;
+
+    private async void OnDeviceCardDragStarting(UIElement sender, DragStartingEventArgs args)
+    {
+        if (sender is not FrameworkElement { Tag: DeviceCard card } element) return;
+
+        // A member card drag is a cross-container reparent (leave / reorder within group), handled in
+        // a later stage. For now only lone cards reorder as blocks.
+        if (card.IsGroupMember)
+        {
+            args.Cancel = true;
+            return;
+        }
+
+        args.Data.SetText($"{DragPayloadCardPrefix}{card.Endpoint.Id}");
+        args.Data.RequestedOperation = DataPackageOperation.Move;
+
+        _draggedBlock = card;
+        _draggedBlockId = card.Endpoint.Id;
+        EnableReorderAnimations(true);
+        SetDragInProgress(true);
+
+        // Opaque drag bitmap (the card fill is translucent, so lifted off the backdrop it reads as
+        // see-through). Render before hiding the source.
+        var deferral = args.GetDeferral();
+        try
+        {
+            var bitmap = await RenderCardOpaqueAsync(element);
+            if (bitmap is not null) args.DragUI.SetContentFromSoftwareBitmap(bitmap);
+        }
+        catch { /* keep the default visual if the snapshot fails */ }
+        finally { deferral.Complete(); }
+
+        card.IsBeingDragged = true;
+    }
+
+    private void OnDeviceCardDropCompleted(UIElement sender, DropCompletedEventArgs args)
+    {
+        if (_draggedBlock is DeviceCard card) card.IsBeingDragged = false;
+        EndBlockReorder();
+    }
+
+    private void OnGroupHeaderDragStarting(UIElement sender, DragStartingEventArgs args)
+    {
+        if (sender is not FrameworkElement { Tag: DeviceGroupCard group }) return;
+
+        args.Data.SetText($"{DragPayloadGroupPrefix}{group.Id}");
+        args.Data.RequestedOperation = DataPackageOperation.Move;
+
+        _draggedBlock = group;
+        _draggedBlockId = group.Id;
+        group.IsBeingDragged = true;
+        EnableReorderAnimations(true);
+        SetDragInProgress(true);
+    }
+
+    private void OnGroupHeaderDropCompleted(UIElement sender, DropCompletedEventArgs args)
+    {
+        if (_draggedBlock is DeviceGroupCard group) group.IsBeingDragged = false;
+        EndBlockReorder();
+    }
+
+    /// <summary>Shared teardown for a reorder drag (committed or cancelled): drop the gap, hide the
+    /// outlines, detach the slide animation, and clear the dragged-block state.</summary>
+    private void EndBlockReorder()
+    {
+        _draggedBlock = null;
+        _draggedBlockId = null;
+        Layout?.ClearReorderState();
+        SetDragInProgress(false);
+        EnableReorderAnimations(false);
+    }
+
+    private void OnBlocksDragOver(object sender, DragEventArgs e)
+    {
+        if (Layout is null || _draggedBlock is null)
+        {
+            e.AcceptedOperation = DataPackageOperation.None;
+            return;
+        }
+
+        var source = ViewModel.Blocks.IndexOf(_draggedBlock);
+        if (source < 0)
+        {
+            e.AcceptedOperation = DataPackageOperation.None;
+            return;
+        }
+
+        var compact = ToCompactIndex(Layout.GetInsertionIndex(e.GetPosition(DevicesRepeater)), source);
+        Layout.SetReorderState(source, compact);
+        SetDragCaption(e, _draggedBlock is DeviceGroupCard ? "Move group" : "Move");
+        e.AcceptedOperation = DataPackageOperation.Move;
+        e.Handled = true;
+    }
+
+    private void OnBlocksDrop(object sender, DragEventArgs e)
+    {
+        if (Layout is null || _draggedBlock is null || _draggedBlockId is null) return;
+
+        var source = ViewModel.Blocks.IndexOf(_draggedBlock);
+        if (source < 0) return;
+
+        var compact = ToCompactIndex(Layout.GetInsertionIndex(e.GetPosition(DevicesRepeater)), source);
+        Layout.ClearReorderState();
+        e.Handled = true;
+
+        _logger?.LogInformation("Block reorder: {Block} -> compact index {Index}", _draggedBlockId, compact);
+        ViewModel.ReorderBlock(_draggedBlockId, compact);
+    }
+
+    /// <summary>Compacts a raw "insert before block index" into the source-excluded space the gap and
+    /// <see cref="HomeViewModel.ReorderBlock"/> both use.</summary>
+    private int ToCompactIndex(int raw, int source)
+    {
+        var compact = raw > source ? raw - 1 : raw;
+        return Math.Clamp(compact, 0, Math.Max(0, ViewModel.Blocks.Count - 1));
+    }
+
+    /// <summary>Shows a drag caption (e.g. "Move", "Move group") on the OS drag cursor.</summary>
+    private static void SetDragCaption(DragEventArgs e, string caption)
+    {
+        e.DragUIOverride.Caption = caption;
+        e.DragUIOverride.IsCaptionVisible = true;
+        e.DragUIOverride.IsContentVisible = true;
+        e.DragUIOverride.IsGlyphVisible = true;
+    }
+
+    /// <summary>Attaches (or removes) a Composition implicit Offset animation on each realised block so
+    /// any layout re-arrange slides smoothly. On only during a reorder drag.</summary>
+    private void EnableReorderAnimations(bool enable)
+    {
+        _reorderActive = enable;
+        for (var i = 0; i < ViewModel.Blocks.Count; i++)
+        {
+            if (DevicesRepeater.TryGetElement(i) is UIElement element)
+            {
+                ApplyReorderAnimation(element, enable);
+            }
+        }
+    }
+
+    private static void ApplyReorderAnimation(UIElement element, bool enable)
+    {
+        var visual = ElementCompositionPreview.GetElementVisual(element);
+        if (!enable)
+        {
+            visual.ImplicitAnimations = null;
+            return;
+        }
+
+        var compositor = visual.Compositor;
+        var offset = compositor.CreateVector3KeyFrameAnimation();
+        offset.Target = "Offset";
+        offset.InsertExpressionKeyFrame(1.0f, "this.FinalValue");
+        offset.Duration = TimeSpan.FromMilliseconds(220);
+
+        var animations = compositor.CreateImplicitAnimationCollection();
+        animations["Offset"] = offset;
+        visual.ImplicitAnimations = animations;
+    }
+
+    private void OnBlockElementPrepared(ItemsRepeater sender, ItemsRepeaterElementPreparedEventArgs args)
+    {
+        if (_reorderActive) ApplyReorderAnimation(args.Element, true);
+    }
 
     private void OnUndoInvoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
     {
@@ -211,6 +400,10 @@ public sealed partial class HomePage : Page
     {
         if (sender is not FrameworkElement { Tag: DeviceCard card }) return;
 
+        // A block-reorder drag (our own) is positioned at the container (OnBlocksDragOver); bubble
+        // immediately without touching the DataView so the blocking payload read only runs for chips.
+        if (_draggedBlock is not null) return;
+
         // Bail early when the drag isn't ours. Other drags (file drops onto the window, etc.)
         // shouldn't get our acceptance.
         if (!e.DataView.Contains(StandardDataFormats.Text))
@@ -251,6 +444,9 @@ public sealed partial class HomePage : Page
     private void OnDeviceCardDrop(object sender, DragEventArgs e)
     {
         if (sender is not FrameworkElement { Tag: DeviceCard card }) return;
+
+        // Block-reorder drops are committed at the container (OnBlocksDrop); bubble immediately.
+        if (_draggedBlock is not null) return;
 
         var text = TryReadText(e.DataView);
         if (text is null) return;
