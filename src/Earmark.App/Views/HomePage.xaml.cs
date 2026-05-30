@@ -240,7 +240,7 @@ public sealed partial class HomePage : Page
         var targetIdx = Layout.GetBlockIndexAt(point);
         var target = targetIdx >= 0 && targetIdx < ViewModel.Blocks.Count ? ViewModel.Blocks[targetIdx] : null;
 
-        if (target is DeviceGroupCard joinGroup)
+        if (target is DeviceGroupCard joinGroup && ResolveGroupIntent(targetIdx, point) == GroupDropIntent.Join)
         {
             Layout.ClearReorderState();
             ClearCreateTarget();
@@ -253,6 +253,18 @@ public sealed partial class HomePage : Page
                 SetActiveInnerGap(joinLayout);
             }
             SetDragCaption(e, "Add to group");
+        }
+        else if (target is DeviceGroupCard edgeGroup)
+        {
+            // Top / bottom strip of a group section = insert the card before / after the group (a
+            // block reorder). This is the only way to drop above a first-in-row group.
+            ClearHighlights();
+            ClearActiveInnerGap();
+            var src = ViewModel.Blocks.IndexOf(_draggedCard);
+            var insertIdx = ResolveGroupIntent(targetIdx, point) == GroupDropIntent.Before ? targetIdx : targetIdx + 1;
+            if (src >= 0) Layout.SetReorderState(src, ToCompactIndex(insertIdx, src));
+            _ = edgeGroup;
+            SetDragCaption(e, "Move");
         }
         else if (target is DeviceCard targetCard
                  && !ReferenceEquals(targetCard, _draggedCard)
@@ -333,9 +345,24 @@ public sealed partial class HomePage : Page
 
         if (target is DeviceGroupCard joinGroup)
         {
-            var anchor = MemberAnchorBefore(joinGroup, point, draggedMemberId: null);
-            _logger?.LogInformation("Join group {Group}: {Source}", joinGroup.Id, sourceId);
-            ViewModel.AddToGroup(sourceId, joinGroup.Id, anchor);
+            var intent = ResolveGroupIntent(targetIdx, point);
+            if (intent == GroupDropIntent.Join)
+            {
+                var anchor = MemberAnchorBefore(joinGroup, point, draggedMemberId: null);
+                _logger?.LogInformation("Join group {Group}: {Source}", joinGroup.Id, sourceId);
+                ViewModel.AddToGroup(sourceId, joinGroup.Id, anchor);
+            }
+            else
+            {
+                // Top / bottom strip: reorder the card before / after the group block.
+                var src = ViewModel.Blocks.IndexOf(_draggedCard);
+                var insertIdx = intent == GroupDropIntent.Before ? targetIdx : targetIdx + 1;
+                if (src >= 0)
+                {
+                    _logger?.LogInformation("Reorder around group {Group}: {Source} ({Intent})", joinGroup.Id, sourceId, intent);
+                    ViewModel.ReorderBlock(sourceId, ToCompactIndex(insertIdx, src));
+                }
+            }
             return;
         }
         if (target is DeviceCard targetCard
@@ -480,6 +507,21 @@ public sealed partial class HomePage : Page
         var insetY = r.Height * 0.3;
         return p.X >= r.Left + insetX && p.X <= r.Right - insetX
             && p.Y >= r.Top + insetY && p.Y <= r.Bottom - insetY;
+    }
+
+    private enum GroupDropIntent { Before, Join, After }
+
+    /// <summary>For a lone card dragged over a group section: the thin top strip (its title band) =
+    /// insert before, the bottom strip = insert after, the middle = join. The top strip is the only
+    /// way to drop a card above a first-in-row group (nothing sits above it to aim at).</summary>
+    private GroupDropIntent ResolveGroupIntent(int groupIndex, Point point)
+    {
+        var r = Layout!.GetContentRect(groupIndex);
+        if (r.Height <= 0) return GroupDropIntent.Join;
+        var edge = Math.Min(28.0, r.Height * 0.25);
+        if (point.Y < r.Top + edge) return GroupDropIntent.Before;
+        if (point.Y > r.Bottom - edge) return GroupDropIntent.After;
+        return GroupDropIntent.Join;
     }
 
     private void SetCreateTarget(DeviceCard card)

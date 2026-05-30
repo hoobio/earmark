@@ -684,9 +684,12 @@
                 </StackPanel>
             </Border>
 
+            <!-- Right padding insets the cards from the scrollbar so the (overlay) scrollbar sits in
+                 the gutter beside them instead of hugging the cards' right edge. -->
             <ScrollViewer Visibility="{x:Bind ViewModel.HasItems, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
                           VerticalScrollBarVisibility="Auto"
                           HorizontalScrollBarVisibility="Disabled"
+                          Padding="0,0,16,0"
                           VerticalContentAlignment="Top">
                 <!-- Transparent drop surface around the repeater: block reorder is handled here (not
                      per-card) so the insertion point is computed from the layout's frozen no-gap
