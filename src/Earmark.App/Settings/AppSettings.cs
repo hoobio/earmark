@@ -80,36 +80,28 @@ public sealed class AppSettings
     /// shows them like any other app.</summary>
     public bool FilterAudioForwarders { get; set; } = true;
 
-    public List<string> HiddenDeviceIds { get; set; } = new();
-
     /// <summary>
-    /// Devices the user has explicitly chosen to keep visible. Overrides the auto-hide rule
-    /// that hides non-default devices with no rules. <see cref="HiddenDeviceIds"/> still wins
-    /// if the same device somehow ends up in both lists.
+    /// Per-device configuration, keyed by endpoint id. Only devices that deviate from the
+    /// defaults get an entry (all-default entries are pruned on save), so the map stays sparse.
+    /// Replaces the old parallel hidden / pinned / volume-controls-hidden id lists.
     /// </summary>
-    public List<string> PinnedDeviceIds { get; set; } = new();
+    public Dictionary<string, DeviceConfig> Devices { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Devices whose volume slider + mute toggle the user has hidden. For endpoints whose volume
-    /// control doesn't actually affect output (e.g. a USB DAC/amp where the real volume is an
-    /// analog knob), Windows still reports a normal, writable control, so there's no way to
-    /// auto-detect this - it's a manual per-device opt-out. The card stays visible; only the
-    /// volume controls are suppressed.
-    /// </summary>
-    public List<string> VolumeControlsHiddenDeviceIds { get; set; } = new();
-
-    /// <summary>
-    /// Manual device-card order (endpoint ids, top-to-bottom across the grid). Empty until the
-    /// user first drags a card to reorder, which snapshots the entire current order; thereafter
-    /// the user rearranges freely. Lists every card, visible or hidden, so a hidden device keeps
-    /// its slot. A device not in this list slots into its default-sort position among the rest.
+    /// Top-level block arrangement on the Devices page, top-to-bottom across the grid. Each entry
+    /// is either a lone device's endpoint id or a <see cref="DeviceGroup.Id"/>; an entry that
+    /// matches a known group id is a group block, everything else a lone card. Devices that belong
+    /// to a group are <b>omitted</b> here (their slot is the group's, their order is the group's
+    /// <see cref="DeviceGroup.MemberIds"/>). Empty until the user first reorders. A block not in
+    /// this list slots into its default-sort position among the rest.
     /// </summary>
     public List<string> DeviceOrder { get; set; } = new();
 
     /// <summary>
-    /// User-defined device groups on the Devices page. A group bundles two or more device cards
-    /// under an editable title; members render contiguously (their adjacency is enforced over
-    /// <see cref="DeviceOrder"/>, which stays the single source of truth for absolute order).
+    /// User-defined device groups on the Devices page. A group is an atomic block that bundles two
+    /// or more device cards under an editable title. <see cref="DeviceGroup.MemberIds"/> is the
+    /// single source of truth for membership and intra-group order; the group's position among
+    /// other blocks comes from its id's slot in <see cref="DeviceOrder"/>.
     /// </summary>
     public List<DeviceGroup> DeviceGroups { get; set; } = new();
 
@@ -120,10 +112,34 @@ public sealed class AppSettings
 }
 
 /// <summary>
-/// A device group: an editable title over two-or-more contiguous device cards. <see
-/// cref="MemberIds"/> are endpoint ids in member (left-to-right) order. <see cref="DedicatedRow"/>
-/// makes the group reserve its own grid row(s). Groups with fewer than two present members are
-/// pruned / disbanded.
+/// Per-device user configuration. Flags are nullable so an unset flag is omitted from the JSON
+/// (null = the default), keeping persisted entries compact; null is read as false.
+/// </summary>
+public sealed class DeviceConfig
+{
+    /// <summary>User has explicitly hidden this card. Wins over auto / pin.</summary>
+    public bool? Hidden { get; set; }
+
+    /// <summary>User has explicitly pinned this card visible, overriding the auto-hide-no-rules
+    /// rule (but not <see cref="Hidden"/>).</summary>
+    public bool? Pinned { get; set; }
+
+    /// <summary>User has hidden this device's volume slider + mute toggle (the card stays visible).
+    /// For endpoints whose volume control doesn't affect output (e.g. a USB DAC/amp with an analog
+    /// knob), Windows still reports a writable control, so this is a manual opt-out.</summary>
+    public bool? VolumeControlsHidden { get; set; }
+
+    /// <summary>True when every flag is unset/false, so the entry carries no information and can be
+    /// pruned from the map on save.</summary>
+    public bool IsDefault => Hidden is not true && Pinned is not true && VolumeControlsHidden is not true;
+}
+
+/// <summary>
+/// A device group: an editable title over two-or-more device cards rendered as one atomic,
+/// full-width section. <see cref="MemberIds"/> are endpoint ids in member (left-to-right) order and
+/// are the single source of truth for membership; the group's position among other blocks comes from
+/// its id's slot in <see cref="AppSettings.DeviceOrder"/>. Groups with fewer than two present members
+/// are disbanded.
 /// </summary>
 public sealed class DeviceGroup
 {
@@ -131,10 +147,6 @@ public sealed class DeviceGroup
     public string Id { get; set; } = string.Empty;
 
     public string Title { get; set; } = string.Empty;
-
-    /// <summary>When true the group reserves the whole grid row(s) it occupies; other cards bump
-    /// to the row above / below by order.</summary>
-    public bool DedicatedRow { get; set; }
 
     /// <summary>Member endpoint ids, in left-to-right member order.</summary>
     public List<string> MemberIds { get; set; } = new();

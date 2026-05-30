@@ -147,21 +147,24 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         StartPeakPolling();
     }
 
-    public ObservableCollection<DeviceCard> Devices { get; } = new();
+    /// <summary>Top-level blocks bound to the Devices repeater: each item is a lone <see cref="DeviceCard"/>
+    /// or a <see cref="DeviceGroupCard"/> container. A group is one atomic block, so a reorder can
+    /// never split it and a lone card can never land inside it.</summary>
+    public ObservableCollection<object> Blocks { get; } = new();
 
-    /// <summary>Chrome view-models (editable title + dedicated-row) per present group id, reused
-    /// across rebuilds. The page reads this to position the overlay and to answer the layout's
-    /// dedicated-row queries.</summary>
-    private readonly Dictionary<string, DeviceGroupInfo> _groupInfos = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>Flat list of the currently-visible cards (lone cards + group members), kept in sync
+    /// with <see cref="Blocks"/>. The peak / meter / app-chip machinery iterates this instead of the
+    /// heterogeneous <see cref="Blocks"/>.</summary>
+    private readonly List<DeviceCard> _visibleCards = new();
 
-    public IReadOnlyDictionary<string, DeviceGroupInfo> GroupInfos => _groupInfos;
+    public IReadOnlyList<DeviceCard> VisibleCards => _visibleCards;
 
-    /// <summary>Raised after the set of group infos changes (group added/removed, or a dedicated-row
-    /// flip) so the page can refresh its overlay layer / relayout.</summary>
-    public event Action? GroupInfosChanged;
+    /// <summary>Group container VMs by id, reused across rebuilds so an in-progress title edit and
+    /// the member card instances survive.</summary>
+    private readonly Dictionary<string, DeviceGroupCard> _groupCards = new(StringComparer.OrdinalIgnoreCase);
 
-    public bool HasItems => Devices.Count > 0;
-    public bool IsEmpty => Devices.Count == 0;
+    public bool HasItems => Blocks.Count > 0;
+    public bool IsEmpty => Blocks.Count == 0;
 
     /// <summary>True until the first card rebuild completes. Lets the page show a loading
     /// placeholder during the initial enumeration instead of the misleading "Nothing to show"
@@ -187,7 +190,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         {
             card.RefreshListed(value);
         }
-        SyncVisibleDevices();
+        SyncBlocks();
     }
 
     /// <summary>
@@ -232,7 +235,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         // call on the dispatcher cross-apartment-marshals to the MTA audio threads and can
         // deadlock the UI (that's what made the app stop responding). External mute/volume are
         // reflected event-driven via ExternalMuteChanged / ExternalVolumeChanged - no poll.
-        foreach (var card in Devices)
+        foreach (var card in _visibleCards)
         {
             // Fall back to a zero sample at the card's current channel count so the bar count
             // stays stable until the background sampler publishes the first read.
@@ -265,7 +268,9 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     {
         if (chip.IsClosed) return now - chip.ClosedAt!.Value > linger;
         if (chip.RulePinnedHere) return false;
-        return now - chip.LastAudibleAt > linger;
+        if (chip.PlayingSince is not null) return false;            // still producing audio
+        if (chip.LastStoppedAt is { } stopped) return now - stopped > linger;
+        return false;   // never played and not pinned - nothing to age out from
     }
 
     /// <summary>Whether a session earns an app chip, honouring the live "filter audio forwarders"
@@ -304,12 +309,12 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             pids.Add(session.ProcessId);
         }
 
-        foreach (var card in Devices)
+        foreach (var card in _visibleCards)
         {
-            // Phase 1: update peaks on existing chips, keeping LastAudibleAt fresh. Each chip's
-            // peak is the max across all processes of its app on this endpoint. When a chip's
-            // active state flips, its sort rank changes, so re-sort the card (Remove+Insert inside
-            // SortCardApps, never Move - see the note there).
+            // Phase 1: tick peaks on existing chips, advancing their playing/stopped run state. Each
+            // chip's peak is the max across all processes of its app on this endpoint. When a chip's
+            // active state flips its tier changes, so re-sort the card (SortCardApps slides chips
+            // with Move so the reorder animates).
             var orderMayChange = false;
             foreach (var chip in card.Apps)
             {
@@ -366,7 +371,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
                     // of the same app); rule-pinned chips stay (the rule still pins it there);
                     // multi-endpoint apps (e.g. Edge on two devices) survive because we only drop
                     // cards where this app is currently silent.
-                    foreach (var otherCard in Devices)
+                    foreach (var otherCard in _visibleCards)
                     {
                         if (ReferenceEquals(otherCard, card)) continue;
                         if (otherCard.Endpoint.Flow != EndpointFlow.Render) continue;
@@ -560,17 +565,14 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             return;
         }
 
-        var hiddenIds = new HashSet<string>(_settings.Current.HiddenDeviceIds, StringComparer.OrdinalIgnoreCase);
-        var pinnedIds = new HashSet<string>(_settings.Current.PinnedDeviceIds, StringComparer.OrdinalIgnoreCase);
-        var volumeControlsHiddenIds = new HashSet<string>(_settings.Current.VolumeControlsHiddenDeviceIds, StringComparer.OrdinalIgnoreCase);
-        // Snapshot the manual order on the UI thread so the background BuildCards reads a stable
-        // copy (a concurrent ReorderDevice replaces the list reference rather than mutating it).
-        var deviceOrder = new List<string>(_settings.Current.DeviceOrder);
-        // Same for groups - mutations replace the list wholesale, so a shallow snapshot is stable.
-        var deviceGroups = new List<DeviceGroup>(_settings.Current.DeviceGroups);
+        // Snapshot the per-device config map on the UI thread so the background BuildCards reads a
+        // stable copy (mutations replace entries rather than the dictionary reference).
+        var deviceConfigs = new Dictionary<string, DeviceConfig>(_settings.Current.Devices, StringComparer.OrdinalIgnoreCase);
         var showHidden = ShowHiddenDevices;
 
-        var built = await Task.Run(() => BuildCards(hiddenIds, pinnedIds, volumeControlsHiddenIds, deviceOrder, deviceGroups, showHidden), ct).ConfigureAwait(false);
+        // BuildCards produces the cards in default-sort order only; the manual block order and
+        // grouping are applied on the UI thread in SyncBlocks (which reads _settings directly).
+        var built = await Task.Run(() => BuildCards(deviceConfigs, showHidden), ct).ConfigureAwait(false);
 
         if (ct.IsCancellationRequested) return;
 
@@ -579,8 +581,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             if (ct.IsCancellationRequested) return;
             _allCards.Clear();
             _allCards.AddRange(built);
-            SyncVisibleDevices();
-            ReconcileGroupInfos(deviceGroups);
+            SyncBlocks();
             SyncAllCardsApps();
             _ = ApplyWaveLinkVisualsAsync(ct);
         });
@@ -806,7 +807,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         return result;
     }
 
-    private List<DeviceCard> BuildCards(HashSet<string> hiddenIds, HashSet<string> pinnedIds, HashSet<string> volumeControlsHiddenIds, List<string> deviceOrder, List<DeviceGroup> deviceGroups, bool showHidden)
+    private List<DeviceCard> BuildCards(Dictionary<string, DeviceConfig> deviceConfigs, bool showHidden)
     {
         var renderEndpoints = _endpoints.GetEndpoints(EndpointFlow.Render);
         var captureEndpoints = _endpoints.GetEndpoints(EndpointFlow.Capture);
@@ -814,7 +815,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         var rules = _rules.Rules;
         var waveLinkOutputDeviceNames = BuildWaveLinkDeviceNameSet(_waveLink.LastSnapshot);
 
-        // Sort tiers (top -> bottom):
+        // Default sort tiers (top -> bottom):
         //   1. System default render  (output before input within defaults)
         //   2. System default capture
         //   3. System default-communications render (only relevant when distinct from #1)
@@ -822,7 +823,8 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         //   5. Wave Link mix targets (physical "listening" endpoints)
         //   6. Wave Link virtual channels (Elgato Virtual Audio pairs)
         //   7. Everything else
-        // Within each tier: render before capture, then alphabetical.
+        // Within each tier: render before capture, then alphabetical. The manual block order and
+        // grouping are layered on top later, on the UI thread, in SyncBlocks.
         var ordered = renderEndpoints.Concat(captureEndpoints)
             .Where(e => e.State == EndpointState.Active)
             .OrderByDescending(e => e.IsDefault && e.Flow == EndpointFlow.Render)
@@ -835,31 +837,13 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             .ThenBy(e => e.FriendlyName, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        // A manual order, once set, wins: lay the persisted endpoints out first, then slot any
-        // device not in that list into its default-sort position among the rest.
-        if (deviceOrder.Count > 0)
-        {
-            ordered = ApplyManualOrder(ordered, deviceOrder);
-        }
-
-        // Pull each group's members together (anchored at the earliest-appearing member) so they
-        // render contiguously, regardless of how DeviceOrder was persisted. Endpoint id -> group id
-        // for decorating the cards below.
-        var groupIdByEndpoint = BuildGroupIdMap(ordered.Select(e => e.Id), deviceGroups);
-        if (groupIdByEndpoint.Count > 0)
-        {
-            ordered = ApplyGroupContiguity(ordered, e => e.Id, deviceGroups);
-        }
-
         var cards = new List<DeviceCard>(ordered.Count);
         foreach (var endpoint in ordered)
         {
             var summary = DeviceRulesSummary.For(endpoint, rules, renderEndpoints, captureEndpoints, sessions, _matcher, _evaluator);
             var volume = _endpoints.GetVolume(endpoint.Id) ?? 0f;
             var muted = _endpoints.GetMuted(endpoint.Id) ?? false;
-            var hiddenByUser = hiddenIds.Contains(endpoint.Id);
-            var pinnedByUser = pinnedIds.Contains(endpoint.Id);
-            var volumeControlsHiddenByUser = volumeControlsHiddenIds.Contains(endpoint.Id);
+            deviceConfigs.TryGetValue(endpoint.Id, out var cfg);
 
             var card = new DeviceCard(
                 _endpoints,
@@ -873,147 +857,71 @@ public partial class HomeViewModel : ObservableObject, IDisposable
                 summary.RuleMutedSource,
                 summary.RuleVolumeSource,
                 summary.Rules,
-                hiddenByUser,
-                pinnedByUser,
+                cfg?.Hidden == true,
+                cfg?.Pinned == true,
                 showHidden,
                 _meterOptions,
-                volumeControlsHiddenByUser,
+                cfg?.VolumeControlsHidden == true,
                 OnCardVisibilityToggled,
                 OnCardVolumeControlsToggled);
-            if (groupIdByEndpoint.TryGetValue(endpoint.Id, out var groupId))
-            {
-                card.GroupId = groupId;
-            }
-            // Apps are filled later on the UI thread; ObservableCollection mutations have to
-            // happen there, and the rule-lock recompute needs the same fresh snapshot.
+            // Group membership + apps are filled later on the UI thread (SyncBlocks / SyncAllCardsApps);
+            // ObservableCollection mutations have to happen there.
             cards.Add(card);
         }
         return cards;
     }
 
-    /// <summary>Endpoint id -> group id, restricted to groups that still have at least two of their
-    /// members present in <paramref name="presentIds"/>. A group that has dropped below two present
-    /// members (unplugged / removed) is treated as disbanded for this build.</summary>
-    private static Dictionary<string, string> BuildGroupIdMap(IEnumerable<string> presentIds, List<DeviceGroup> groups)
-    {
-        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        if (groups.Count == 0) return map;
-
-        var present = new HashSet<string>(presentIds, StringComparer.OrdinalIgnoreCase);
-        foreach (var group in groups)
-        {
-            var members = group.MemberIds.Where(present.Contains).ToList();
-            if (members.Count < 2) continue;   // a sub-two group isn't a group anymore
-            foreach (var id in members)
-            {
-                map[id] = group.Id;
-            }
-        }
-        return map;
-    }
-
-    /// <summary>Reorders <paramref name="items"/> so each group's members sit contiguously, anchored
-    /// at the position of the group's earliest-appearing member, in the group's own member order.
-    /// Non-members keep their relative slots. Members of a group not present here are skipped.</summary>
-    private static List<T> ApplyGroupContiguity<T>(List<T> items, Func<T, string> idOf, List<DeviceGroup> groups)
-    {
-        var groupByMember = new Dictionary<string, DeviceGroup>(StringComparer.OrdinalIgnoreCase);
-        foreach (var group in groups)
-        {
-            foreach (var id in group.MemberIds)
-            {
-                groupByMember[id] = group;
-            }
-        }
-
-        var itemById = new Dictionary<string, T>(StringComparer.OrdinalIgnoreCase);
-        foreach (var item in items)
-        {
-            itemById[idOf(item)] = item;
-        }
-
-        var emittedGroups = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var result = new List<T>(items.Count);
-        foreach (var item in items)
-        {
-            var id = idOf(item);
-            if (groupByMember.TryGetValue(id, out var group))
-            {
-                if (!emittedGroups.Add(group.Id)) continue;   // group's block already emitted
-                foreach (var memberId in group.MemberIds)
-                {
-                    if (itemById.TryGetValue(memberId, out var member))
-                    {
-                        result.Add(member);
-                    }
-                }
-            }
-            else
-            {
-                result.Add(item);
-            }
-        }
-        return result;
-    }
-
     /// <summary>
-    /// Merges the persisted manual order with the freshly computed default sort. Endpoints listed
-    /// in <paramref name="deviceOrder"/> that still exist lead, in that order; each endpoint NOT in
-    /// the list slots into its default-sort position by sitting after its nearest already-placed
-    /// predecessor (else before its nearest already-placed successor, else last). So a device that
-    /// appears after the order was frozen lands where the default sort would have put it among the
-    /// devices around it, then keeps that slot.
+    /// Merges the persisted manual block order with the freshly computed default block order. Block
+    /// ids listed in <paramref name="manualOrder"/> that still exist lead, in that order; each block
+    /// NOT in the list slots into its default-sort position by sitting after its nearest
+    /// already-placed predecessor (else before its nearest already-placed successor, else last).
     /// </summary>
-    private static List<AudioEndpoint> ApplyManualOrder(List<AudioEndpoint> ordered, List<string> deviceOrder)
+    private static List<string> ApplyManualBlockOrder(List<string> defaultOrder, List<string> manualOrder)
     {
-        var byId = new Dictionary<string, AudioEndpoint>(StringComparer.OrdinalIgnoreCase);
-        foreach (var endpoint in ordered) byId.TryAdd(endpoint.Id, endpoint);
-
+        var valid = new HashSet<string>(defaultOrder, StringComparer.OrdinalIgnoreCase);
         var placed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var result = new List<AudioEndpoint>(ordered.Count);
-        foreach (var id in deviceOrder)
+        var result = new List<string>(defaultOrder.Count);
+        foreach (var id in manualOrder)
         {
-            if (byId.TryGetValue(id, out var endpoint) && placed.Add(endpoint.Id))
-            {
-                result.Add(endpoint);
-            }
+            if (valid.Contains(id) && placed.Add(id)) result.Add(id);
         }
 
-        for (var i = 0; i < ordered.Count; i++)
+        for (var i = 0; i < defaultOrder.Count; i++)
         {
-            var endpoint = ordered[i];
-            if (placed.Contains(endpoint.Id)) continue;
+            var id = defaultOrder[i];
+            if (placed.Contains(id)) continue;
 
-            // Nearest already-placed predecessor in the default sort -> insert just after it.
+            // Nearest already-placed predecessor in the default order -> insert just after it.
             var insertAt = -1;
             for (var p = i - 1; p >= 0; p--)
             {
-                var idx = IndexOfId(result, ordered[p].Id);
+                var idx = IndexOfId(result, defaultOrder[p]);
                 if (idx >= 0) { insertAt = idx + 1; break; }
             }
             // Else nearest already-placed successor -> insert just before it. Else append.
             if (insertAt < 0)
             {
-                for (var s = i + 1; s < ordered.Count; s++)
+                for (var s = i + 1; s < defaultOrder.Count; s++)
                 {
-                    var idx = IndexOfId(result, ordered[s].Id);
+                    var idx = IndexOfId(result, defaultOrder[s]);
                     if (idx >= 0) { insertAt = idx; break; }
                 }
             }
             if (insertAt < 0) insertAt = result.Count;
 
-            result.Insert(insertAt, endpoint);
-            placed.Add(endpoint.Id);
+            result.Insert(insertAt, id);
+            placed.Add(id);
         }
 
         return result;
     }
 
-    private static int IndexOfId(List<AudioEndpoint> list, string id)
+    private static int IndexOfId(List<string> list, string id)
     {
         for (var i = 0; i < list.Count; i++)
         {
-            if (string.Equals(list[i].Id, id, StringComparison.OrdinalIgnoreCase)) return i;
+            if (string.Equals(list[i], id, StringComparison.OrdinalIgnoreCase)) return i;
         }
         return -1;
     }
@@ -1068,8 +976,8 @@ public partial class HomeViewModel : ObservableObject, IDisposable
                 chip.Revive(live, liveMatch?.Rule);
             }
 
-            // Never prune a chip that's audible right now: LastAudibleAt can be stale here (the
-            // 20Hz tick that refreshes it is paused while the Home page is off-screen). The visible
+            // Never prune a chip that's audible right now: the run state can be stale here (the
+            // 20Hz tick that advances it is paused while the Home page is off-screen). The visible
             // path's Phase 3 prune ages idle/closed chips out with a fresh clock.
             if (!audibleHere && ShouldPrune(chip, now, linger))
             {
@@ -1177,7 +1085,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             chip.RulePinnedHere = rulePinnedApps.Contains(chip.Session.IdentityKey);
         }
 
-        // Pin / close state just changed for some chips - re-sort so the weighted order holds.
+        // Pin / close state just changed for some chips - re-sort so the audio-activity order holds.
         SortCardApps(card);
 
         card.NotifyAppsChanged();
@@ -1202,27 +1110,43 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// Weighted sort key (higher sorts earlier). Producing audio outranks being pinned, so a
-    /// playing unpinned app still sits above a silent pinned one - but among two equally-active
-    /// apps the pinned one wins. Closed apps always sink to the bottom. Net order:
-    /// active+pinned > active > pinned (idle) > idle > closed.
+    /// Front-to-back tier for a chip (higher sorts earlier): 3 playing now, 2 played then stopped,
+    /// 1 never produced audio, 0 closed. Ordering is driven purely by audio activity - rule-pinning
+    /// no longer weights the order (it still keeps a silent chip from being pruned).
     /// </summary>
-    private static int ChipSortRank(AppChip c)
+    private static int ChipTier(AppChip c)
     {
-        if (c.IsClosed) return -1;
-        return (c.IsActive ? 2 : 0) + (c.RulePinnedHere ? 1 : 0);
+        if (c.IsClosed) return 0;
+        if (c.PlayingSince is not null) return 3;
+        if (c.LastStoppedAt is not null) return 2;
+        return 1;
     }
 
-    /// <summary>Orders chips by <see cref="ChipSortRank"/> (descending), then alphabetically by
-    /// display name within a tier. Returns &lt;0 when <paramref name="a"/> sorts before <paramref name="b"/>.</summary>
+    /// <summary>Orders chips by <see cref="ChipTier"/> (descending), then within a tier: playing
+    /// chips by start time ascending (first to start sits in front), stopped chips by stop time
+    /// descending (most recently stopped in front), and the rest alphabetically for a stable order.
+    /// Returns &lt;0 when <paramref name="a"/> sorts before <paramref name="b"/>.</summary>
     private static int CompareChips(AppChip a, AppChip b)
     {
-        var byRank = ChipSortRank(b).CompareTo(ChipSortRank(a));
-        if (byRank != 0) return byRank;
-        var an = a.Session.IsSystemSounds ? "System Sounds" : a.Session.DisplayName;
-        var bn = b.Session.IsSystemSounds ? "System Sounds" : b.Session.DisplayName;
-        return string.Compare(an, bn, StringComparison.OrdinalIgnoreCase);
+        var byTier = ChipTier(b).CompareTo(ChipTier(a));
+        if (byTier != 0) return byTier;
+
+        if (a.PlayingSince is { } aStart && b.PlayingSince is { } bStart)
+        {
+            var byStart = aStart.CompareTo(bStart);
+            if (byStart != 0) return byStart;
+        }
+        else if (a.LastStoppedAt is { } aStop && b.LastStoppedAt is { } bStop)
+        {
+            var byStop = bStop.CompareTo(aStop);
+            if (byStop != 0) return byStop;
+        }
+
+        return string.Compare(NameOf(a), NameOf(b), StringComparison.OrdinalIgnoreCase);
     }
+
+    private static string NameOf(AppChip c) =>
+        c.Session.IsSystemSounds ? "System Sounds" : c.Session.DisplayName;
 
     private static void InsertChipSorted(ObservableCollection<AppChip> chips, AppChip chip)
     {
@@ -1269,7 +1193,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         {
             _logger.LogInformation("Apps re-sorted on '{Card}': {Order}",
                 card.Endpoint.DisplayName,
-                string.Join(" > ", chips.Select(c => $"{c.DisplayLabel}[r{ChipSortRank(c)}]")));
+                string.Join(" > ", chips.Select(c => $"{c.DisplayLabel}[t{ChipTier(c)}]")));
         }
     }
 
@@ -1299,351 +1223,21 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         }
     }
 
-    /// <summary>
-    /// Moves the dragged card next to <paramref name="targetCard"/> in <see cref="_allCards"/>
-    /// (the single source of truth) and persists the resulting full order. The first reorder
-    /// snapshots the entire current order into <see cref="AppSettings.DeviceOrder"/>; thereafter
-    /// the setting just mirrors <c>_allCards</c>. <paramref name="insertAfter"/> places the source
-    /// on the target's right. Hidden cards stay in <c>_allCards</c>, so the persisted list keeps
-    /// every device's slot, visible or not. Runs on the UI thread (drag/drop handler).
-    /// </summary>
-    public void ReorderDevice(string sourceId, DeviceCard targetCard, bool insertAfter)
-    {
-        ArgumentNullException.ThrowIfNull(targetCard);
-        if (string.IsNullOrEmpty(sourceId)) return;
-
-        var sourceIndex = _allCards.FindIndex(c =>
-            string.Equals(c.Endpoint.Id, sourceId, StringComparison.OrdinalIgnoreCase));
-        if (sourceIndex < 0) return;
-
-        var source = _allCards[sourceIndex];
-        if (ReferenceEquals(source, targetCard)) return;
-
-        _allCards.RemoveAt(sourceIndex);
-
-        // Recompute the target index after the removal so the insert lands relative to the
-        // post-removal list (removing a source that sat before the target shifts it left by one).
-        var targetIndex = _allCards.IndexOf(targetCard);
-        if (targetIndex < 0)
-        {
-            // Target vanished mid-drag - put the source back where it was and bail.
-            _allCards.Insert(Math.Min(sourceIndex, _allCards.Count), source);
-            return;
-        }
-
-        var insertIndex = insertAfter ? targetIndex + 1 : targetIndex;
-        _allCards.Insert(insertIndex, source);
-
-        _settings.Current.DeviceOrder = _allCards.Select(c => c.Endpoint.Id).ToList();
-        QueueSettingsSave();
-        SyncVisibleDevices();
-    }
-
-    /// <summary>
-    /// Reorders by a visible-list insertion index expressed in the source-excluded ("compact")
-    /// space the Home page computes from layout geometry: the dragged card lands at position
-    /// <paramref name="compactIndex"/> among the other visible cards. Maps that to a neighbour +
-    /// side and defers to <see cref="ReorderDevice"/> (which owns the <c>_allCards</c> /
-    /// persistence path, including hidden-card interleaving).
-    /// </summary>
-    public void ReorderDeviceToCompactIndex(string sourceId, int compactIndex)
-    {
-        if (string.IsNullOrEmpty(sourceId)) return;
-
-        var others = Devices
-            .Where(c => !string.Equals(c.Endpoint.Id, sourceId, StringComparison.OrdinalIgnoreCase))
-            .ToList();
-        if (others.Count == 0) return;
-
-        compactIndex = Math.Clamp(compactIndex, 0, others.Count);
-        if (compactIndex < others.Count)
-        {
-            ReorderDevice(sourceId, others[compactIndex], insertAfter: false);
-        }
-        else
-        {
-            ReorderDevice(sourceId, others[^1], insertAfter: true);
-        }
-    }
-
-    /// <summary>Creates a new two-member group from a drag of <paramref name="sourceId"/> onto
-    /// <paramref name="targetId"/>'s centre. Both must currently be ungrouped (the page enforces
-    /// this for the gesture). The target leads the member order; the dropped source follows.</summary>
-    public void CreateGroup(string sourceId, string targetId)
-    {
-        if (string.IsNullOrEmpty(sourceId) || string.IsNullOrEmpty(targetId)) return;
-        if (string.Equals(sourceId, targetId, StringComparison.OrdinalIgnoreCase)) return;
-
-        var source = FindCard(sourceId);
-        var target = FindCard(targetId);
-        if (source is null || target is null) return;
-        if (source.GroupId is not null || target.GroupId is not null) return;
-
-        var group = new DeviceGroup
-        {
-            Id = Guid.NewGuid().ToString("N"),
-            Title = "New group",
-            MemberIds = [target.Endpoint.Id, source.Endpoint.Id],
-        };
-        _settings.Current.DeviceGroups.Add(group);
-        target.GroupId = group.Id;
-        source.GroupId = group.Id;
-        ApplyGroupChange();
-    }
-
-    /// <summary>Adds an ungrouped <paramref name="sourceId"/> to the existing group
-    /// <paramref name="groupId"/>, appended to the member order.</summary>
-    public void AddToGroup(string sourceId, string groupId)
-    {
-        if (string.IsNullOrEmpty(sourceId) || string.IsNullOrEmpty(groupId)) return;
-
-        var source = FindCard(sourceId);
-        if (source is null || source.GroupId is not null) return;
-
-        var group = _settings.Current.DeviceGroups
-            .FirstOrDefault(g => string.Equals(g.Id, groupId, StringComparison.OrdinalIgnoreCase));
-        if (group is null) return;
-        if (group.MemberIds.Any(id => string.Equals(id, source.Endpoint.Id, StringComparison.OrdinalIgnoreCase))) return;
-
-        group.MemberIds.Add(source.Endpoint.Id);
-        source.GroupId = group.Id;
-        ApplyGroupChange();
-    }
-
-    /// <summary>Shared tail for a membership change: pull each group's members contiguous in
-    /// <c>_allCards</c>, re-derive the persisted order, save, then refresh the visible list and
-    /// the group infos. Preserves card instances (no full rebuild).</summary>
-    private void ApplyGroupChange()
-    {
-        var groups = _settings.Current.DeviceGroups;
-        var reordered = ApplyGroupContiguity(_allCards, c => c.Endpoint.Id, groups);
-        _allCards.Clear();
-        _allCards.AddRange(reordered);
-
-        _settings.Current.DeviceOrder = _allCards.Select(c => c.Endpoint.Id).ToList();
-        QueueSettingsSave();
-        SyncVisibleDevices();
-        ReconcileGroupInfos(groups);
-    }
-
     private DeviceCard? FindCard(string endpointId) =>
         _allCards.FirstOrDefault(c => string.Equals(c.Endpoint.Id, endpointId, StringComparison.OrdinalIgnoreCase));
 
-    /// <summary>Total member count of a group (including hidden members), or 0 if unknown. The page
-    /// uses this to decide whether a drag-out needs the disband confirmation.</summary>
-    public int GroupMemberCount(string groupId) =>
-        _settings.Current.DeviceGroups
-            .FirstOrDefault(g => string.Equals(g.Id, groupId, StringComparison.OrdinalIgnoreCase))?.MemberIds.Count ?? 0;
+    /// <summary>The persisted group record for a group id, or null.</summary>
+    private DeviceGroup? FindGroupRecord(string groupId) =>
+        _settings.Current.DeviceGroups.FirstOrDefault(g => string.Equals(g.Id, groupId, StringComparison.OrdinalIgnoreCase));
 
-    /// <summary>Removes a member dragged out of its group and reorders it to the dropped top-level
-    /// position. Disbands the group if it drops below two members (the page confirms first).</summary>
-    public void RemoveFromGroup(string sourceId, int compactIndex)
+    /// <summary>Persists a title edit from a <see cref="DeviceGroupCard"/> back to its
+    /// <see cref="DeviceGroup"/> record.</summary>
+    private void OnGroupCardChanged(DeviceGroupCard card)
     {
-        var source = FindCard(sourceId);
-        if (source is null || source.GroupId is null) return;
-
-        RemoveMemberFromGroupModel(source);
-        ReorderDeviceToCompactIndex(sourceId, compactIndex);   // moves + persists order + resyncs
-        ReconcileGroupInfos(_settings.Current.DeviceGroups);
-    }
-
-    /// <summary>Reorders a member within its own group, keeping it grouped, and re-derives the
-    /// group's member order from the new card order.</summary>
-    public void ReorderWithinGroup(string sourceId, int compactIndex)
-    {
-        var source = FindCard(sourceId);
-        var gid = source?.GroupId;
-        if (source is null || gid is null) return;
-
-        ReorderDeviceToCompactIndex(sourceId, compactIndex);
-        var group = _settings.Current.DeviceGroups
-            .FirstOrDefault(g => string.Equals(g.Id, gid, StringComparison.OrdinalIgnoreCase));
-        if (group is not null)
-        {
-            group.MemberIds = _allCards
-                .Where(c => string.Equals(c.GroupId, gid, StringComparison.OrdinalIgnoreCase))
-                .Select(c => c.Endpoint.Id)
-                .ToList();
-            QueueSettingsSave();
-        }
-    }
-
-    /// <summary>Removes <paramref name="card"/> from its group in the model (clears its
-    /// <c>GroupId</c>, drops it from the group's member list, and disbands the group - clearing the
-    /// remaining member's <c>GroupId</c> - if that leaves fewer than two). Persistence / resync is
-    /// the caller's job. Returns true if the card was grouped.</summary>
-    private bool RemoveMemberFromGroupModel(DeviceCard card)
-    {
-        var gid = card.GroupId;
-        if (gid is null) return false;
-
-        card.GroupId = null;
-        var group = _settings.Current.DeviceGroups
-            .FirstOrDefault(g => string.Equals(g.Id, gid, StringComparison.OrdinalIgnoreCase));
-        if (group is null) return true;
-
-        group.MemberIds.RemoveAll(id => string.Equals(id, card.Endpoint.Id, StringComparison.OrdinalIgnoreCase));
-        if (group.MemberIds.Count < 2)
-        {
-            foreach (var memberId in group.MemberIds.ToList())
-            {
-                var remaining = FindCard(memberId);
-                if (remaining is not null) remaining.GroupId = null;
-            }
-            _settings.Current.DeviceGroups.Remove(group);
-        }
-        return true;
-    }
-
-    /// <summary>Moves a whole group (all its members, as a contiguous block in member order) so it
-    /// lands before the visible card at <paramref name="visibleInsertIndex"/> in the block-excluded
-    /// visible list (what the page computes from geometry). Maps that to the full
-    /// <see cref="_allCards"/> list and re-asserts group contiguity, so the block can never end up
-    /// splitting another group regardless of where the live preview pointed.</summary>
-    public void ReorderGroup(string groupId, int visibleInsertIndex)
-    {
-        var group = _settings.Current.DeviceGroups
-            .FirstOrDefault(g => string.Equals(g.Id, groupId, StringComparison.OrdinalIgnoreCase));
-        if (group is null) return;
-
-        var members = group.MemberIds
-            .Select(FindCard)
-            .Where(c => c is not null)
-            .Cast<DeviceCard>()
-            .ToList();
-        if (members.Count == 0) return;
-        var memberSet = new HashSet<DeviceCard>(members);
-
-        // The drop index is against the visible list minus this group's members. Resolve it to the
-        // card the block should land in front of.
-        var visibleOthers = Devices.Where(c => !memberSet.Contains(c)).ToList();
-        var anchor = visibleInsertIndex >= 0 && visibleInsertIndex < visibleOthers.Count
-            ? visibleOthers[visibleInsertIndex]
-            : null;
-
-        // Insert the block before that anchor in the full list, then re-contiguate every group so
-        // none is left split (the ultimate guard against the block landing inside another group).
-        var allOthers = _allCards.Where(c => !memberSet.Contains(c)).ToList();
-        var insertAt = anchor is not null ? allOthers.IndexOf(anchor) : allOthers.Count;
-        if (insertAt < 0) insertAt = allOthers.Count;
-        allOthers.InsertRange(insertAt, members);
-
-        var reordered = ApplyGroupContiguity(allOthers, c => c.Endpoint.Id, _settings.Current.DeviceGroups);
-        _allCards.Clear();
-        _allCards.AddRange(reordered);
-        _settings.Current.DeviceOrder = _allCards.Select(c => c.Endpoint.Id).ToList();
-        QueueSettingsSave();
-        SyncVisibleDevices();
-    }
-
-    /// <summary>Disbands a whole group: clears every member's <c>GroupId</c> and drops the group.
-    /// Members keep their positions.</summary>
-    public void UngroupAll(string groupId)
-    {
-        var group = _settings.Current.DeviceGroups
-            .FirstOrDefault(g => string.Equals(g.Id, groupId, StringComparison.OrdinalIgnoreCase));
-        if (group is null) return;
-
-        foreach (var memberId in group.MemberIds.ToList())
-        {
-            var card = FindCard(memberId);
-            if (card is not null) card.GroupId = null;
-        }
-        _settings.Current.DeviceGroups.Remove(group);
-        QueueSettingsSave();
-        SyncVisibleDevices();
-        ReconcileGroupInfos(_settings.Current.DeviceGroups);
-    }
-
-    /// <summary>Removes a single device from its group (context-menu "Ungroup device") and drops it
-    /// right behind the group (after the former last member), rather than leaving it wedged among the
-    /// members. Disbands the group if that leaves fewer than two members.</summary>
-    public void UngroupDevice(string endpointId)
-    {
-        var card = FindCard(endpointId);
-        if (card is null || card.GroupId is null) return;
-
-        var gid = card.GroupId;
-        var otherMemberIds = _settings.Current.DeviceGroups
-            .FirstOrDefault(g => string.Equals(g.Id, gid, StringComparison.OrdinalIgnoreCase))
-            ?.MemberIds
-            .Where(id => !string.Equals(id, endpointId, StringComparison.OrdinalIgnoreCase))
-            .ToList() ?? new List<string>();
-
-        RemoveMemberFromGroupModel(card);
-
-        // Re-contiguate the remaining groups, then place the ungrouped card just after the (former)
-        // group's last member so it reads as "bumped out behind the group".
-        var reordered = ApplyGroupContiguity(_allCards, c => c.Endpoint.Id, _settings.Current.DeviceGroups);
-        reordered.Remove(card);
-        var insertAt = reordered.Count;
-        for (var i = 0; i < reordered.Count; i++)
-        {
-            if (otherMemberIds.Any(id => string.Equals(id, reordered[i].Endpoint.Id, StringComparison.OrdinalIgnoreCase)))
-            {
-                insertAt = i + 1;
-            }
-        }
-        reordered.Insert(insertAt, card);
-
-        _allCards.Clear();
-        _allCards.AddRange(reordered);
-        _settings.Current.DeviceOrder = _allCards.Select(c => c.Endpoint.Id).ToList();
-        QueueSettingsSave();
-        SyncVisibleDevices();
-        ReconcileGroupInfos(_settings.Current.DeviceGroups);
-    }
-
-    /// <summary>Reconciles <see cref="_groupInfos"/> against the groups present after a rebuild
-    /// (a group is "present" when at least one visible card carries its id). Existing infos are kept
-    /// (and refreshed) so an in-progress title edit survives; gone groups are dropped.</summary>
-    private void ReconcileGroupInfos(List<DeviceGroup> groups)
-    {
-        var byId = new Dictionary<string, DeviceGroup>(StringComparer.OrdinalIgnoreCase);
-        foreach (var group in groups) byId[group.Id] = group;
-
-        var presentIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var card in _allCards)
-        {
-            if (card.GroupId is not null) presentIds.Add(card.GroupId);
-        }
-
-        var changed = false;
-        foreach (var goneId in _groupInfos.Keys.Where(id => !presentIds.Contains(id)).ToList())
-        {
-            _groupInfos.Remove(goneId);
-            changed = true;
-        }
-        foreach (var id in presentIds)
-        {
-            if (!byId.TryGetValue(id, out var record)) continue;
-            if (_groupInfos.TryGetValue(id, out var info))
-            {
-                info.SyncFrom(record.Title, record.DedicatedRow);
-            }
-            else
-            {
-                _groupInfos[id] = new DeviceGroupInfo(id, record.Title, record.DedicatedRow, OnGroupInfoChanged);
-                changed = true;
-            }
-        }
-
-        if (changed) GroupInfosChanged?.Invoke();
-    }
-
-    /// <summary>Persists a title / dedicated-row edit back to the matching <see cref="DeviceGroup"/>
-    /// record. A dedicated-row flip also needs a relayout, signalled via <see cref="GroupInfosChanged"/>.</summary>
-    private void OnGroupInfoChanged(DeviceGroupInfo info)
-    {
-        var record = _settings.Current.DeviceGroups
-            .FirstOrDefault(g => string.Equals(g.Id, info.Id, StringComparison.OrdinalIgnoreCase));
+        var record = FindGroupRecord(card.Id);
         if (record is null) return;
-
-        var dedicatedChanged = record.DedicatedRow != info.DedicatedRow;
-        record.Title = info.Title;
-        record.DedicatedRow = info.DedicatedRow;
+        record.Title = card.Title;
         QueueSettingsSave();
-        if (dedicatedChanged) GroupInfosChanged?.Invoke();
     }
 
     /// <summary>
@@ -1675,38 +1269,91 @@ public partial class HomeViewModel : ObservableObject, IDisposable
            && endpoint.DeviceDescription.Contains("Elgato Virtual Audio", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Diffs <see cref="_allCards"/> against the visible <see cref="Devices"/> collection.
-    /// Preserves instance identity for cards that stay visible so the UI doesn't churn
-    /// (avoids tearing down peak meters and slider bindings on every event).
+    /// Rebuilds the top-level <see cref="Blocks"/> (lone cards + group containers) and the flat
+    /// <see cref="_visibleCards"/> list from <see cref="_allCards"/> plus the persisted groups and
+    /// block order. Reconciles both the outer block collection and each group's members in place so
+    /// instances survive (peak meters, slider bindings, in-progress title edits don't churn).
     /// </summary>
-    private void SyncVisibleDevices()
+    private void SyncBlocks()
     {
-        var listed = _allCards.Where(c => c.IsListed).ToList();
+        var cardById = new Dictionary<string, DeviceCard>(StringComparer.OrdinalIgnoreCase);
+        foreach (var c in _allCards) cardById[c.Endpoint.Id] = c;
 
-        for (var i = Devices.Count - 1; i >= 0; i--)
+        // Live groups: those with at least two present members. Clear membership first, then stamp
+        // it (and build the member -> group map) for the live ones.
+        foreach (var c in _allCards) c.IsGroupMember = false;
+        var groupByMemberId = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var liveGroupCardById = new Dictionary<string, DeviceGroupCard>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var group in _settings.Current.DeviceGroups)
         {
-            if (!listed.Contains(Devices[i]))
+            var members = new List<DeviceCard>();
+            foreach (var id in group.MemberIds)
             {
-                Devices.RemoveAt(i);
+                if (cardById.TryGetValue(id, out var card)) members.Add(card);
             }
+            if (members.Count < 2) continue;   // a sub-two group isn't live this build
+
+            foreach (var m in members)
+            {
+                m.IsGroupMember = true;
+                groupByMemberId[m.Endpoint.Id] = group.Id;
+            }
+
+            if (!_groupCards.TryGetValue(group.Id, out var gc))
+            {
+                gc = new DeviceGroupCard(group.Id, group.Title, OnGroupCardChanged);
+                _groupCards[group.Id] = gc;
+            }
+            else
+            {
+                gc.SyncFrom(group.Title);
+            }
+            SyncMembersInPlace(gc.Members, members);
+            liveGroupCardById[group.Id] = gc;
         }
 
-        for (var i = 0; i < listed.Count; i++)
+        foreach (var goneId in _groupCards.Keys.Where(id => !liveGroupCardById.ContainsKey(id)).ToList())
         {
-            var card = listed[i];
-            var currentIndex = Devices.IndexOf(card);
-            if (currentIndex < 0)
+            _groupCards.Remove(goneId);
+        }
+
+        // Default block order: walk the default-sorted cards, emitting each lone card and each group
+        // once (at its earliest present member). Then layer the persisted manual block order on top.
+        var defaultBlockIds = new List<string>(_allCards.Count);
+        var emittedGroups = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var card in _allCards)
+        {
+            if (groupByMemberId.TryGetValue(card.Endpoint.Id, out var gid))
             {
-                Devices.Insert(i, card);
+                if (emittedGroups.Add(gid)) defaultBlockIds.Add(gid);
             }
-            else if (currentIndex != i)
+            else
             {
-                // Remove + Insert rather than Move: ItemsRepeater under a custom VirtualizingLayout
-                // doesn't re-arrange realized elements on a Move notification (the data moves but the
-                // tile stays put), which is what froze drag-reorder visually. Remove/Add forces the
-                // layout to re-realize the element at its new index.
-                Devices.RemoveAt(currentIndex);
-                Devices.Insert(i, card);
+                defaultBlockIds.Add(card.Endpoint.Id);
+            }
+        }
+        var orderedBlockIds = ApplyManualBlockOrder(defaultBlockIds, _settings.Current.DeviceOrder);
+
+        // Materialise the visible block list: a group container always shows; a lone card shows only
+        // when it's listed (visible-or-show-hidden).
+        var desired = new List<object>(orderedBlockIds.Count);
+        foreach (var id in orderedBlockIds)
+        {
+            if (liveGroupCardById.TryGetValue(id, out var gc)) desired.Add(gc);
+            else if (cardById.TryGetValue(id, out var card) && card.IsListed) desired.Add(card);
+        }
+
+        ReconcileBlocks(desired);
+
+        // Rebuild the flat visible-cards list the peak / meter / app-chip machinery iterates.
+        _visibleCards.Clear();
+        foreach (var block in Blocks)
+        {
+            switch (block)
+            {
+                case DeviceCard card: _visibleCards.Add(card); break;
+                case DeviceGroupCard gc: _visibleCards.AddRange(gc.Members); break;
             }
         }
 
@@ -1718,23 +1365,90 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(ShowEmptyState));
     }
 
+    /// <summary>Reconciles <see cref="Blocks"/> to <paramref name="desired"/> in place (Remove/Insert
+    /// by reference, never Move - ItemsRepeater under a custom VirtualizingLayout ignores Move),
+    /// preserving instances that stay.</summary>
+    private void ReconcileBlocks(List<object> desired)
+    {
+        for (var i = Blocks.Count - 1; i >= 0; i--)
+        {
+            if (!desired.Contains(Blocks[i])) Blocks.RemoveAt(i);
+        }
+        for (var i = 0; i < desired.Count; i++)
+        {
+            var item = desired[i];
+            var current = Blocks.IndexOf(item);
+            if (current < 0)
+            {
+                Blocks.Insert(i, item);
+            }
+            else if (current != i)
+            {
+                Blocks.RemoveAt(current);
+                Blocks.Insert(i, item);
+            }
+        }
+    }
+
+    /// <summary>Reconciles a group's <c>Members</c> to <paramref name="desired"/> in place, same
+    /// Remove/Insert discipline as <see cref="ReconcileBlocks"/>.</summary>
+    private static void SyncMembersInPlace(ObservableCollection<DeviceCard> members, List<DeviceCard> desired)
+    {
+        for (var i = members.Count - 1; i >= 0; i--)
+        {
+            if (!desired.Contains(members[i])) members.RemoveAt(i);
+        }
+        for (var i = 0; i < desired.Count; i++)
+        {
+            var card = desired[i];
+            var current = members.IndexOf(card);
+            if (current < 0)
+            {
+                members.Insert(i, card);
+            }
+            else if (current != i)
+            {
+                members.RemoveAt(current);
+                members.Insert(i, card);
+            }
+        }
+    }
+
     private void OnCardVisibilityToggled(DeviceCard card, DeviceCard.VisibilityState prev)
     {
         _undoStack.PushVisibility(card.Endpoint.Id, prev.IsHidden, prev.IsPinned);
-        // Hiding a grouped device removes it from its group (groups aren't hideable); that disbands
-        // the group if it drops below two members.
-        var groupChanged = card.IsHiddenByUser && card.GroupId is not null && RemoveMemberFromGroupModel(card);
+        // Hiding a grouped device removes it from its group (a group's members are always shown);
+        // that disbands the group if it drops below two members.
+        if (card.IsHiddenByUser && card.IsGroupMember)
+        {
+            RemoveMemberFromGroupRecord(card.Endpoint.Id);
+        }
         PersistAndResync(card);
-        if (groupChanged) ReconcileGroupInfos(_settings.Current.DeviceGroups);
     }
 
     private void OnCardVolumeControlsToggled(DeviceCard card)
     {
-        var list = _settings.Current.VolumeControlsHiddenDeviceIds ??= new();
-        SyncIdInList(list, card.Endpoint.Id, include: card.IsVolumeControlsHiddenByUser);
+        UpdateDeviceConfig(card);
         QueueSettingsSave();
-        // No SyncVisibleDevices: the card stays listed, only its inner controls toggle, and that's
-        // already bound live on the existing card instance.
+        // No resync: the card stays listed, only its inner controls toggle, and that's already
+        // bound live on the existing card instance.
+    }
+
+    /// <summary>Removes an endpoint from whichever group's persisted record holds it, disbanding the
+    /// group (dropping its record + block-order slot) when that leaves fewer than two members. The
+    /// caller persists and resyncs.</summary>
+    private void RemoveMemberFromGroupRecord(string endpointId)
+    {
+        var group = _settings.Current.DeviceGroups.FirstOrDefault(g =>
+            g.MemberIds.Any(id => string.Equals(id, endpointId, StringComparison.OrdinalIgnoreCase)));
+        if (group is null) return;
+
+        group.MemberIds.RemoveAll(id => string.Equals(id, endpointId, StringComparison.OrdinalIgnoreCase));
+        if (group.MemberIds.Count < 2)
+        {
+            _settings.Current.DeviceGroups.Remove(group);
+            _settings.Current.DeviceOrder.RemoveAll(id => string.Equals(id, group.Id, StringComparison.OrdinalIgnoreCase));
+        }
     }
 
     /// <summary>Records a volume / mute change as a single undo entry. Called by the page
@@ -1774,27 +1488,24 @@ public partial class HomeViewModel : ObservableObject, IDisposable
 
     private void PersistAndResync(DeviceCard card)
     {
-        var hiddenList = _settings.Current.HiddenDeviceIds ??= new();
-        var pinnedList = _settings.Current.PinnedDeviceIds ??= new();
-        SyncIdInList(hiddenList, card.Endpoint.Id, include: card.IsHiddenByUser);
-        SyncIdInList(pinnedList, card.Endpoint.Id, include: card.IsPinnedByUser);
+        UpdateDeviceConfig(card);
         QueueSettingsSave();
-        SyncVisibleDevices();
+        SyncBlocks();
     }
 
-    private static void SyncIdInList(List<string> list, string id, bool include)
+    /// <summary>Writes the card's current per-device flags into the <see cref="AppSettings.Devices"/>
+    /// map, pruning the entry when every flag is back to its default so the map stays sparse.</summary>
+    private void UpdateDeviceConfig(DeviceCard card)
     {
-        if (include)
+        var map = _settings.Current.Devices;
+        var cfg = new DeviceConfig
         {
-            if (!list.Any(existing => string.Equals(existing, id, StringComparison.OrdinalIgnoreCase)))
-            {
-                list.Add(id);
-            }
-        }
-        else
-        {
-            list.RemoveAll(existing => string.Equals(existing, id, StringComparison.OrdinalIgnoreCase));
-        }
+            Hidden = card.IsHiddenByUser ? true : null,
+            Pinned = card.IsPinnedByUser ? true : null,
+            VolumeControlsHidden = card.IsVolumeControlsHiddenByUser ? true : null,
+        };
+        if (cfg.IsDefault) map.Remove(card.Endpoint.Id);
+        else map[card.Endpoint.Id] = cfg;
     }
 
     public void Dispose()

@@ -3,6 +3,7 @@ using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
+using Earmark.App.Controls;
 using Earmark.App.Services;
 using Earmark.App.Settings;
 using Earmark.Core.Audio;
@@ -21,7 +22,7 @@ namespace Earmark.App.ViewModels;
 /// Per-device card view-model for the Home page. Owns its volume / mute / peak-meter /
 /// hide state and routes user actions to <see cref="IAudioEndpointService"/>.
 /// </summary>
-public partial class DeviceCard : ObservableObject
+public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
 {
     private const double PeakHoldSeconds = 1.5;
     private const float PeakHoldDecayPerSecond = 0.55f;
@@ -296,23 +297,34 @@ public partial class DeviceCard : ObservableObject
 
     // ---- Grouping ----
     //
-    // Id of the group this card belongs to, or null when ungrouped. Set by HomeViewModel during the
-    // card build (and on membership changes). Drives the membership-aware context menu and the
-    // per-card grouping affordances; the group's title / outline chrome is drawn by an overlay layer
-    // keyed off the same id.
+    // Membership is structural in the container model: this card is in a group iff it lives in that
+    // group's Members collection. HomeViewModel sets IsGroupMember when it builds the blocks so the
+    // card can drive its membership-aware context menu and pin itself visible (a grouped card always
+    // renders, regardless of the auto-hide-no-rules rule).
 
-    /// <summary>Group id this card is a member of, or null if ungrouped.</summary>
+    /// <summary>True while this card is a member of a group container.</summary>
     [ObservableProperty]
-    public partial string? GroupId { get; set; }
+    public partial bool IsGroupMember { get; set; }
 
-    public bool IsGroupMember => GroupId is not null;
-
-    partial void OnGroupIdChanged(string? value) => OnPropertyChanged(nameof(IsGroupMember));
+    partial void OnIsGroupMemberChanged(bool value)
+    {
+        OnPropertyChanged(nameof(IsListed));
+        OnPropertyChanged(nameof(CardOpacity));
+    }
 
     /// <summary>True while a drag is hovering this card's centre with intent to group onto it.
     /// Drives a transient accent dotted outline on the card.</summary>
     [ObservableProperty]
     public partial bool IsGroupDropTarget { get; set; }
+
+    // ---- IBlockLayoutInfo (top-level block placement; a lone card is one column) ----
+
+    int IBlockLayoutInfo.ColumnSpan(int availableColumns) => 1;
+    bool IBlockLayoutInfo.BreaksRow => false;
+
+    /// <summary>A plain card stretches to its row baseline so siblings stay aligned; a card with
+    /// extra content (expanded rules / apps row) keeps its own height.</summary>
+    bool IBlockLayoutInfo.StretchToRowHeight => !IsLayoutCustomSized;
 
     /// <summary>
     /// Resolves visibility per the spec:
@@ -333,12 +345,14 @@ public partial class DeviceCard : ObservableObject
         }
     }
 
-    /// <summary>True when the card should render in the grid (visible-or-show-hidden).</summary>
-    public bool IsListed => _showHidden || !IsEffectivelyHidden;
+    /// <summary>True when the card should render in the grid. A group member always renders
+    /// (membership pins it visible, overriding the auto-hide-no-rules rule); otherwise it's
+    /// visible-or-show-hidden.</summary>
+    public bool IsListed => IsGroupMember || _showHidden || !IsEffectivelyHidden;
 
     /// <summary>Invisible while this card is the reorder drag source (its slot is the drop gap);
-    /// otherwise reduced when shown via the "show hidden" toggle.</summary>
-    public double CardOpacity => IsBeingDragged ? 0.0 : (IsListed && IsEffectivelyHidden ? 0.5 : 1.0);
+    /// otherwise reduced when shown via the "show hidden" toggle (but a grouped card stays solid).</summary>
+    public double CardOpacity => IsBeingDragged ? 0.0 : (IsListed && IsEffectivelyHidden && !IsGroupMember ? 0.5 : 1.0);
 
     // ---- Volume ----
 
