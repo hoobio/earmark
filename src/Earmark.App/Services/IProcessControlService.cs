@@ -48,13 +48,18 @@ public interface IProcessControlService
     /// elevation), matching the Windows UAC-shield convention.</summary>
     bool IsElevated(uint pid);
 
-    /// <summary>Politely asks the process to close (posts <c>WM_CLOSE</c> to its main window), giving
-    /// it the chance to run its own shutdown / save-prompt path. The Windows equivalent of SIGTERM.</summary>
-    ProcessActionResult Close(uint pid);
+    /// <summary>Politely asks the app to close (posts <c>WM_CLOSE</c> to the top-level windows across
+    /// <paramref name="pids"/>), giving it the chance to run its own shutdown / save-prompt path. The
+    /// Windows equivalent of SIGTERM. A multi-process app (a browser's renderer / audio children) only
+    /// owns its main window on the browser process, which is usually NOT the pid that holds the audio
+    /// session - so the whole identity's pid set is passed, not just the chip's representative.</summary>
+    ProcessActionResult Close(IReadOnlyCollection<uint> pids);
 
-    /// <summary>Force-terminates the process (<c>TerminateProcess</c>) with no chance to save. The
-    /// Windows equivalent of SIGKILL.</summary>
-    ProcessActionResult Kill(uint pid);
+    /// <summary>Force-terminates the app (<c>TerminateProcess</c> on every pid in <paramref name="pids"/>)
+    /// with no chance to save. The Windows equivalent of SIGKILL. Multi-process apps spawn a process
+    /// tree (a browser's GPU / renderer / audio children); killing only the chip's pid leaves the rest
+    /// running, so the whole identity's pid set is killed.</summary>
+    ProcessActionResult Kill(IReadOnlyCollection<uint> pids);
 }
 
 internal sealed class ProcessControlService : IProcessControlService
@@ -175,22 +180,24 @@ internal sealed class ProcessControlService : IProcessControlService
         finally { CloseHandle(token); }
     }
 
-    public ProcessActionResult Close(uint pid)
+    public ProcessActionResult Close(IReadOnlyCollection<uint> pids)
     {
-        var probe = Probe(pid);
-        if (probe != ProcessActionResult.Success) return probe;   // AccessDenied / NotFound
+        if (pids.Count == 0) return ProcessActionResult.NotFound;
+        var pidSet = pids as HashSet<uint> ?? new HashSet<uint>(pids);
 
-        // Post WM_CLOSE to the process's own top-level, un-owned, visible windows - the same message
-        // the title-bar X sends, so the app runs its save / shutdown path. Enumerating the windows
+        // Post WM_CLOSE to the app's top-level, un-owned, visible windows - the same message the
+        // title-bar X sends, so the app runs its save / shutdown path. Enumerating the windows
         // ourselves is far more reliable than Process.CloseMainWindow(): its MainWindowHandle heuristic
         // returns 0 for many real apps (wxWidgets like Audacity, some Qt / Electron shells), which made
         // a perfectly closeable app report "no window". Owned windows (dialogs, palettes) are skipped so
-        // we hit the main frame, not a tool window.
+        // we hit the main frame, not a tool window. A browser's window lives on its main process, which
+        // is rarely the pid holding the audio session, so we match any window owned by the identity's
+        // pid set - one EnumWindows pass, filtered by the set.
         var windows = new List<IntPtr>();
         bool Collect(IntPtr hWnd, IntPtr _)
         {
             if (GetWindowThreadProcessId(hWnd, out var windowPid) != 0
-                && windowPid == pid
+                && pidSet.Contains(windowPid)
                 && IsWindowVisible(hWnd)
                 && GetWindow(hWnd, GW_OWNER) == IntPtr.Zero)
             {
@@ -215,31 +222,42 @@ internal sealed class ProcessControlService : IProcessControlService
         // Capture the error BEFORE logging: the file logger flushes per call, and that write resets the
         // thread's last-error, so a second GetLastWin32Error() would read the log's syscall, not ours.
         var lastError = Marshal.GetLastWin32Error();
-        _logger.LogWarning("Close refused for pid {Pid} (lastError={Err})", pid, lastError);
+        _logger.LogWarning("Close refused for pids [{Pids}] (lastError={Err})", string.Join(",", pids), lastError);
         return lastError == ERROR_ACCESS_DENIED
             ? ProcessActionResult.AccessDenied
             : ProcessActionResult.Failed;
     }
 
-    public ProcessActionResult Kill(uint pid)
+    public ProcessActionResult Kill(IReadOnlyCollection<uint> pids)
     {
-        var probe = Probe(pid);
-        if (probe != ProcessActionResult.Success) return probe;   // AccessDenied / NotFound
+        if (pids.Count == 0) return ProcessActionResult.NotFound;
 
-        try
+        var anyKilled = false;
+        var anyFound = false;
+        var anyAccessDenied = false;
+        foreach (var pid in pids)
         {
-            using var process = Process.GetProcessById((int)pid);
-            process.Kill();
-            return ProcessActionResult.Success;
+            try
+            {
+                using var process = Process.GetProcessById((int)pid);
+                anyFound = true;
+                process.Kill();   // each pid individually: the audio child and the browser parent are
+                                  // siblings under the identity, not a single tree rooted at our pid.
+                anyKilled = true;
+            }
+            catch (ArgumentException) { }            // pid isn't a running process (already gone)
+            catch (InvalidOperationException) { }    // exited between snapshot and kill
+            catch (Win32Exception) { anyFound = true; anyAccessDenied = true; }
+            catch (Exception ex)
+            {
+                anyFound = true;
+                _logger.LogWarning(ex, "Kill failed for pid {Pid}", pid);
+            }
         }
-        catch (ArgumentException) { return ProcessActionResult.NotFound; }
-        catch (InvalidOperationException) { return ProcessActionResult.NotFound; }
-        catch (Win32Exception) { return ProcessActionResult.AccessDenied; }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Kill failed for pid {Pid}", pid);
-            return ProcessActionResult.Failed;
-        }
+
+        if (anyKilled) return ProcessActionResult.Success;
+        if (anyAccessDenied) return ProcessActionResult.AccessDenied;
+        return anyFound ? ProcessActionResult.Failed : ProcessActionResult.NotFound;
     }
 
     /// <summary>Probes for terminate access without side effects: opening a handle and closing it

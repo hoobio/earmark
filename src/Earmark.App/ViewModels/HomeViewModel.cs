@@ -1368,9 +1368,10 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     public void CloseApp(AppChip chip)
     {
         ArgumentNullException.ThrowIfNull(chip);
-        var result = _processControl.Close(chip.Session.ProcessId);
-        _logger.LogInformation("Close requested: pid={Pid} name='{Name}' result={Result}",
-            chip.ProcessId, chip.DisplayLabel, result);
+        var pids = AppProcessIds(chip);
+        var result = _processControl.Close(pids);
+        _logger.LogInformation("Close requested: pids=[{Pids}] name='{Name}' result={Result}",
+            string.Join(",", pids), chip.DisplayLabel, result);
 
         switch (result)
         {
@@ -1399,9 +1400,10 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     public void TerminateApp(AppChip chip)
     {
         ArgumentNullException.ThrowIfNull(chip);
-        var result = _processControl.Kill(chip.Session.ProcessId);
-        _logger.LogInformation("Terminate requested: pid={Pid} name='{Name}' result={Result}",
-            chip.ProcessId, chip.DisplayLabel, result);
+        var pids = AppProcessIds(chip);
+        var result = _processControl.Kill(pids);
+        _logger.LogInformation("Terminate requested: pids=[{Pids}] name='{Name}' result={Result}",
+            string.Join(",", pids), chip.DisplayLabel, result);
 
         switch (result)
         {
@@ -1417,6 +1419,27 @@ public partial class HomeViewModel : ObservableObject, IDisposable
                 _inAppNotifications.Show($"Couldn't terminate {chip.DisplayLabel}. See the log for details.");
                 break;
         }
+    }
+
+    /// <summary>Every running pid that shares the chip's app identity (its lowercase executable path),
+    /// so close / terminate act on the whole app, not just the one process holding the audio session.
+    /// A browser fans out into GPU / renderer / audio children all running the same exe; the chip's
+    /// pid is usually a child, so closing it alone does nothing visible. Unions the running-process
+    /// snapshot and the live session list (either may know a pid the other hasn't caught yet), always
+    /// including the chip's own pid.</summary>
+    private HashSet<uint> AppProcessIds(AppChip chip)
+    {
+        var key = chip.Session.IdentityKey;
+        var pids = new HashSet<uint> { chip.ProcessId };
+        foreach (var process in _processes.GetRunningProcesses())
+        {
+            if (string.Equals(process.IdentityKey, key, StringComparison.OrdinalIgnoreCase)) pids.Add(process.ProcessId);
+        }
+        foreach (var session in _sessions.GetSessions())
+        {
+            if (string.Equals(session.IdentityKey, key, StringComparison.OrdinalIgnoreCase)) pids.Add(session.ProcessId);
+        }
+        return pids;
     }
 
     /// <summary>Flags every chip of the just-closed app (it can sit on more than one card) so the
