@@ -63,6 +63,33 @@ public static class DeviceAccentPalette
         return best;
     }
 
+    /// <summary>
+    /// Picks a palette swatch deterministically from <paramref name="key"/> (an endpoint id), so a
+    /// device with no Wave Link / user accent still gets a stable colour that survives reboots
+    /// without being persisted. Uses FNV-1a rather than <see cref="string.GetHashCode()"/>, which is
+    /// randomised per process and so would pick a different colour on every launch.
+    /// </summary>
+    public static Color DeterministicSwatch(string key)
+    {
+        unchecked
+        {
+            uint hash = 2166136261;
+            foreach (var ch in key)
+            {
+                hash ^= ch;
+                hash *= 16777619;
+            }
+            return Swatches[(int)(hash % (uint)Swatches.Count)];
+        }
+    }
+
+    /// <summary>The persisted sentinel for an explicit "None" accent (force the plain tile).</summary>
+    public const string NoneSentinel = "none";
+
+    /// <summary>True when a persisted accent string is the "None" sentinel.</summary>
+    public static bool IsNoneSentinel(string? s) =>
+        string.Equals(s, NoneSentinel, System.StringComparison.OrdinalIgnoreCase);
+
     /// <summary>Serialises a colour to "#AARRGGBB" (matches <c>PeakMeterOptions.ToHex</c>).</summary>
     public static string ToHex(Color c) => $"#{c.A:X2}{c.R:X2}{c.G:X2}{c.B:X2}";
 

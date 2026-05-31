@@ -69,6 +69,7 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         bool isVolumeControlsHiddenByUser,
         string? userGlyphOverride,
         Color? userAccent,
+        bool userAccentNone,
         Action<DeviceCard, VisibilityState> onUserVisibilityToggled,
         Action<DeviceCard> onVolumeControlsToggled,
         Action<DeviceCard> onCustomisationChanged)
@@ -80,8 +81,13 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         _onCustomisationChanged = onCustomisationChanged;
         _userGlyphOverride = userGlyphOverride;
         _userAccent = userAccent;
+        _userAccentNone = userAccentNone;
         MeterOptions = meterOptions;
         Endpoint = endpoint;
+        // Deterministic resting accent for devices with no Wave Link colour: hash the stable
+        // endpoint id into the palette so a given device keeps the same tile colour across reboots
+        // without persisting anything. A Wave Link accent or a user override still wins over this.
+        _autoAccent = Controls.DeviceAccentPalette.DeterministicSwatch(endpoint.Id);
         _split = SplitFriendlyName(endpoint.FriendlyName);
         // Resolve the thematic glyph once - the name doesn't change for the lifetime of
         // the card (a rename triggers a full rebuild) and the prefix scan, while cheap,
@@ -558,13 +564,15 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
 
     // ---- Icon visuals ----
 
-    public string Glyph
+    public string Glyph => _userGlyphOverride ?? AutoGlyph;
+
+    /// <summary>The glyph the card would show with no user override: the Wave Link mix glyph, then
+    /// the name-derived themed glyph, then the render/mute fallback. The customisation picker uses
+    /// this to preview an "Auto"/pending choice without mutating the card.</summary>
+    public string AutoGlyph
     {
         get
         {
-            // A user-chosen glyph wins over everything below.
-            if (_userGlyphOverride is not null) return _userGlyphOverride;
-
             // A Wave Link mix exposes a named icon (no bitmap); we map that to the closest
             // Fluent glyph and let it win over the device-name guess below.
             if (_waveLinkGlyphOverride is not null) return _waveLinkGlyphOverride;
@@ -598,10 +606,18 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     private ImageSource? _waveLinkIcon;
     private string? _waveLinkGlyphOverride;
 
-    // User overrides win over the Wave Link / themed visuals. A null override defers to the
-    // auto-derived value ("Auto"). Seeded from the persisted DeviceConfig at construction.
+    // User overrides win over the Wave Link / themed visuals. Seeded from the persisted DeviceConfig
+    // at construction. The accent override is tri-state:
+    //   _userAccentNone=false, _userAccent=null  -> auto (Wave Link / deterministic id colour)
+    //   _userAccentNone=false, _userAccent=Color -> that explicit colour
+    //   _userAccentNone=true                      -> "None": force the plain default tile, no accent
     private string? _userGlyphOverride;
     private Color? _userAccent;
+    private bool _userAccentNone;
+
+    // Deterministic resting accent derived from the endpoint id (see constructor). The lowest
+    // priority in the accent chain: shown when neither a user override nor a Wave Link accent applies.
+    private readonly Color _autoAccent;
 
     /// <summary>Applies (or clears) the Wave Link visual. Called on the UI thread by the Home
     /// view-model after a rebuild or a style-setting change. The caller snaps an artwork-derived
@@ -631,10 +647,11 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     /// the card falls back to its derived glyph / Wave Link accent. Mirrors
     /// <see cref="SetWaveLinkVisual"/> in the set of visual properties it refreshes.
     /// </summary>
-    public void SetUserCustomisation(string? glyph, Color? accent)
+    public void SetUserCustomisation(string? glyph, Color? accent, bool accentNone = false)
     {
         _userGlyphOverride = glyph;
-        _userAccent = accent;
+        _userAccent = accentNone ? null : accent;
+        _userAccentNone = accentNone;
         OnPropertyChanged(nameof(Glyph));
         OnPropertyChanged(nameof(ShowAccentTile));
         OnPropertyChanged(nameof(ShowDefaultTile));
@@ -645,18 +662,41 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         OnPropertyChanged(nameof(GlyphNormalThemed));
         OnPropertyChanged(nameof(CurrentGlyphOverride));
         OnPropertyChanged(nameof(CurrentAccent));
+        OnPropertyChanged(nameof(CurrentEffectiveAccent));
+        OnPropertyChanged(nameof(IsAccentNone));
         _onCustomisationChanged?.Invoke(this);
     }
 
-    /// <summary>Current user glyph override (null = Auto), read by the picker to seed selection.</summary>
+    /// <summary>Current user glyph override (null = derive automatically).</summary>
     public string? CurrentGlyphOverride => _userGlyphOverride;
 
-    /// <summary>Current user accent override (null = Auto), read by the picker to seed selection.</summary>
+    /// <summary>Current explicit user accent colour (null when None or auto).</summary>
     public Color? CurrentAccent => _userAccent;
 
-    /// <summary>The accent actually painted on the tile: a user override wins over the snapped
-    /// Wave Link accent.</summary>
-    private Color? EffectiveAccent => _userAccent ?? _waveLinkAccent;
+    /// <summary>True when the user chose "None" (force the plain default tile, no accent colour).</summary>
+    public bool IsAccentNone => _userAccentNone;
+
+    /// <summary>The accent actually shown on the tile right now (user override, Wave Link, or the
+    /// deterministic id colour); null while "None" or muted. The picker highlights the matching
+    /// swatch so the current colour reads as selected even when it's auto-derived.</summary>
+    public Color? CurrentEffectiveAccent => EffectiveAccent;
+
+    /// <summary>The accent override serialised for persistence: "none", an "#AARRGGBB" colour, or
+    /// null (auto - no entry).</summary>
+    public string? AccentOverrideHex => _userAccentNone
+        ? "none"
+        : _userAccent is { } c ? Controls.DeviceAccentPalette.ToHex(c) : null;
+
+    /// <summary>The accent painted on the tile, in priority order: "None" (no accent), then a user
+    /// colour, then the snapped Wave Link accent, then the deterministic id-derived accent.</summary>
+    private Color? EffectiveAccent => _userAccentNone ? null : _userAccent ?? _waveLinkAccent ?? _autoAccent;
+
+    /// <summary>The accent the card would show with no user override (Wave Link or the deterministic
+    /// id colour). The picker uses this to preview an "Auto"/pending colour without mutating the card.</summary>
+    public Color? AutoAccent => _waveLinkAccent ?? _autoAccent;
+
+    /// <summary>A legible (near-black / white) contrast brush for a glyph drawn on the given accent.</summary>
+    public static Brush ContrastBrushFor(Color accent) => new SolidColorBrush(ContrastingGlyph(accent));
 
     public ImageSource? WaveLinkIconSource => _waveLinkIcon;
 
@@ -668,16 +708,16 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     /// Wave Link channel colour, or white for a mix. Null when no tint applies.</summary>
     public Brush? WaveLinkTileBrush => EffectiveAccent is Color c ? new SolidColorBrush(c) : null;
 
-    /// <summary>Show the absolute-colour accent tile: a tint exists, the device isn't muted (the
-    /// muted card tint owns that signal), and it isn't showing a bitmap. A rule-lock suppresses the
-    /// auto Wave Link accent (the lock owns the tile state), but a deliberate <em>user</em> colour
-    /// is honoured regardless - the user explicitly chose it.</summary>
-    public bool ShowAccentTile => EffectiveAccent.HasValue && !IsMuted && !ShowWaveLinkIcon
-        && (_userAccent is not null || !IsMuteLockedByRule);
+    /// <summary>Show the absolute-colour accent tile: every device has an accent (user override,
+    /// Wave Link, or the deterministic id-derived colour), so this shows unless the device is muted
+    /// (the red muted card tint owns the tile) or showing a Wave Link bitmap. A mute-lock no longer
+    /// greys the tile - the disabled mute button + padlock signal the lock, and the card keeps its
+    /// identity colour.</summary>
+    public bool ShowAccentTile => EffectiveAccent.HasValue && !IsMuted && !ShowWaveLinkIcon;
 
-    /// <summary>Show the default theme tile ({ThemeResource} subtle fill): no tint or bitmap, and
-    /// not rule-locked (a rule-locked device with no user accent stays transparent / non-interactive).</summary>
-    public bool ShowDefaultTile => !ShowWaveLinkIcon && !IsMuteLockedByRule && !ShowAccentTile;
+    /// <summary>Show the default theme tile ({ThemeResource} subtle fill): only when no accent tile
+    /// shows (i.e. while muted, where the red card tint sits over it) and there's no Wave Link bitmap.</summary>
+    public bool ShowDefaultTile => !ShowWaveLinkIcon && !ShowAccentTile;
 
     // The glyph is drawn by one of three overlaid FontIcons in XAML, chosen by the bools below,
     // so the two theme-dependent colours can stay {ThemeResource} (which a code-resolved brush

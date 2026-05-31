@@ -11,6 +11,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Hosting;
 using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Markup;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 
@@ -49,7 +50,45 @@ public sealed partial class HomePage : Page
         // UI-thread COM reads from starving the navigate-away transition and from burning CPU
         // on other pages. Loaded/Unloaded fire on every Frame content swap.
         Loaded += (_, _) => ViewModel.ResumePeakPolling();
-        Unloaded += (_, _) => ViewModel.PausePeakPolling();
+        Unloaded += (_, _) =>
+        {
+            ViewModel.PausePeakPolling();
+            // Pointer-exit may not fire on navigate-away; clear so the "..." doesn't linger.
+            _pointerOverDevices = false;
+            UpdateOverflowVisibility();
+        };
+
+        // The floating "..." auto-hides: shown only while the pointer is over the page, it's
+        // keyboard-focused, or its menu is open. Pointer-over is tracked on the page root.
+        DevicesRootGrid.PointerEntered += (_, _) => { _pointerOverDevices = true; UpdateOverflowVisibility(); };
+        DevicesRootGrid.PointerExited += (_, _) => { _pointerOverDevices = false; UpdateOverflowVisibility(); };
+        UpdateOverflowVisibility();
+    }
+
+    // ---- Floating overflow ("...") auto-hide ----
+    private bool _pointerOverDevices;
+    private bool _overflowFocused;
+    private bool _overflowFlyoutOpen;
+
+    private void UpdateOverflowVisibility() =>
+        OverflowButton.Opacity = _pointerOverDevices || _overflowFocused || _overflowFlyoutOpen ? 1 : 0;
+
+    private void OnOverflowFocusChanged(object sender, RoutedEventArgs e)
+    {
+        _overflowFocused = OverflowButton.FocusState != FocusState.Unfocused;
+        UpdateOverflowVisibility();
+    }
+
+    private void OnOverflowFlyoutOpening(object? sender, object e)
+    {
+        _overflowFlyoutOpen = true;
+        UpdateOverflowVisibility();
+    }
+
+    private void OnOverflowFlyoutClosed(object? sender, object e)
+    {
+        _overflowFlyoutOpen = false;
+        UpdateOverflowVisibility();
     }
 
     public HomeViewModel ViewModel { get; }
@@ -98,6 +137,7 @@ public sealed partial class HomePage : Page
 
     private async void OnDeviceCardDragStarting(UIElement sender, DragStartingEventArgs args)
     {
+        if (ViewModel.LockLayout) { args.Cancel = true; return; }
         if (sender is not FrameworkElement { Tag: DeviceCard card } element) return;
 
         _draggedCard = card;
@@ -129,6 +169,7 @@ public sealed partial class HomePage : Page
 
     private async void OnGroupHeaderDragStarting(UIElement sender, DragStartingEventArgs args)
     {
+        if (ViewModel.LockLayout) { args.Cancel = true; return; }
         if (sender is not FrameworkElement { Tag: DeviceGroupCard group }) return;
 
         _draggedGroup = group;
@@ -234,94 +275,316 @@ public sealed partial class HomePage : Page
         });
     }
 
+    private const double CustomiseWidth = 280;
+
     private static ContentDialog BuildCustomiseDialog(DeviceCard card)
     {
-        var root = new StackPanel { Spacing = 12, MinWidth = 320 };
+        // Snapshot the saved state. The dialog edits a PENDING copy and only writes it back to the
+        // card on Save - the card and its tile are never touched mid-edit, so Cancel is a no-op and
+        // the live device tile doesn't flicker while you experiment. The preview mirrors the pending
+        // state using the card's auto-derived glyph/accent for the "Auto" fallbacks.
+        var origGlyph = card.CurrentGlyphOverride;
+        var origAccent = card.CurrentAccent;
+        var origNone = card.IsAccentNone;
+        var origVolumeHidden = card.IsVolumeControlsHiddenByUser;
 
-        root.Children.Add(new TextBlock
+        var pendingGlyph = origGlyph;
+        var pendingAccent = origAccent;
+        var pendingNone = origNone;
+        var pendingVolumeHidden = origVolumeHidden;
+
+        var accentBrushRes = (Brush)Application.Current.Resources["AccentFillColorDefaultBrush"];
+        var strokeBrushRes = (Brush)Application.Current.Resources["ControlStrokeColorDefaultBrush"];
+        var subtleBrushRes = (Brush)Application.Current.Resources["SubtleFillColorSecondaryBrush"];
+        var accentTextRes = (Brush)Application.Current.Resources["AccentTextFillColorPrimaryBrush"];
+
+        var root = new StackPanel { Spacing = 16, Width = CustomiseWidth };
+
+        // ---- Live preview header (mirrors the card: tile + name / subtitle / flow) ----
+        var previewTile = new Border { Width = 48, Height = 48, CornerRadius = new CornerRadius(8) };
+        var previewIcon = new FontIcon { FontSize = 24 };
+        previewTile.Child = previewIcon;
+
+        var info = new StackPanel { Spacing = 1, VerticalAlignment = VerticalAlignment.Center };
+        info.Children.Add(new TextBlock
         {
-            Text = "Glyph",
+            Text = card.DeviceNameOnly,
+            Style = (Style)Application.Current.Resources["BodyStrongTextBlockStyle"],
+            TextTrimming = TextTrimming.CharacterEllipsis,
+        });
+        if (card.HasDeviceIdSubtext)
+        {
+            info.Children.Add(new TextBlock
+            {
+                Text = card.DeviceIdSubtext,
+                Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
+                Foreground = (Brush)Application.Current.Resources["TextFillColorTertiaryBrush"],
+                TextTrimming = TextTrimming.CharacterEllipsis,
+            });
+        }
+        info.Children.Add(new TextBlock
+        {
+            Text = card.FlowLabel,
             Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
             Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
         });
 
-        // Glyph picker: a wrap of selectable buttons, single-select. The current selection (or
-        // Auto when no override) gets the accent outline. Built by hand so we can toggle the
-        // selected outline and apply live.
-        var glyphHost = new WrapPanel { HorizontalSpacing = 6, VerticalSpacing = 6 };
+        var header = new Grid { ColumnSpacing = 12 };
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        header.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        Grid.SetColumn(previewTile, 0);
+        Grid.SetColumn(info, 1);
+        header.Children.Add(previewTile);
+        header.Children.Add(info);
+        root.Children.Add(header);
+
+        root.Children.Add(new Border
+        {
+            Height = 1,
+            Background = (Brush)Application.Current.Resources["DividerStrokeColorDefaultBrush"],
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+        });
+
+        // ---- Glyph section ----
+        var glyphHost = new WrapPanel { HorizontalSpacing = 6, VerticalSpacing = 6, Width = CustomiseWidth };
         var glyphButtons = new List<Button>();
-        foreach (var choice in DeviceGlyphMapper.GlyphChoices)
+        Controls.ColourSwatchPicker colourPicker = null!;
+        ContentDialog dialog = null!;
+        Button saveBtn = null!;
+        Button resetBtn = null!;
+        var suppressColour = false;
+
+        bool IsDirty() =>
+            pendingGlyph != origGlyph
+            || pendingAccent != origAccent
+            || pendingNone != origNone
+            || pendingVolumeHidden != origVolumeHidden;
+
+        // "Reset to default" only does something when the pending state isn't already fully default.
+        bool PendingIsDefault() =>
+            pendingGlyph is null && pendingAccent is null && !pendingNone && !pendingVolumeHidden;
+
+        void RefreshAll()
+        {
+            // Preview mirrors the PENDING choice, falling back to the card's auto-derived glyph /
+            // accent for unset axes - without mutating the card.
+            var effGlyph = pendingGlyph ?? card.AutoGlyph;
+            var effAccent = pendingNone ? (Color?)null : pendingAccent ?? card.AutoAccent;
+            previewTile.Background = effAccent is { } c ? new SolidColorBrush(c) : subtleBrushRes;
+            previewIcon.Glyph = effGlyph;
+            previewIcon.Foreground = effAccent is { } ec ? DeviceCard.ContrastBrushFor(ec) : accentTextRes;
+
+            // Outline the curated glyph matching the effective (pending) glyph.
+            foreach (var btn in glyphButtons)
+            {
+                var selected = (string)btn.Tag == effGlyph;
+                btn.BorderThickness = new Thickness(selected ? 2 : 1);
+                btn.BorderBrush = selected ? accentBrushRes : strokeBrushRes;
+            }
+
+            // Save is a custom accent button: enabled (renders blue) only while the pending state
+            // differs from the saved one, disabled (renders grey) otherwise. Custom rather than the
+            // ContentDialog primary because that button's accent doesn't re-apply when toggled at
+            // runtime. Reset is disabled when there's nothing to reset, so it never reads as a no-op.
+            if (saveBtn is not null) saveBtn.IsEnabled = IsDirty();
+            if (resetBtn is not null) resetBtn.IsEnabled = !PendingIsDefault();
+        }
+
+        root.Children.Add(SectionCaption("Glyph"));
+        foreach (var (label, glyph) in DeviceGlyphMapper.CuratedGlyphs)
         {
             var btn = new Button
             {
                 Width = 40,
                 Height = 40,
                 Padding = new Thickness(0),
-                Tag = choice,
+                Tag = glyph,
+                Content = new FontIcon { Glyph = glyph, FontSize = 20 },
             };
-            if (choice.IsAuto)
-            {
-                btn.Content = new TextBlock
-                {
-                    Text = "Auto",
-                    FontSize = 11,
-                    HorizontalAlignment = HorizontalAlignment.Center,
-                };
-            }
-            else
-            {
-                btn.Content = new FontIcon { Glyph = choice.Glyph, FontSize = 20 };
-            }
-            ToolTipService.SetToolTip(btn, choice.Label);
+            ToolTipService.SetToolTip(btn, label);
+            btn.Click += (_, _) => { pendingGlyph = glyph; RefreshAll(); };
             glyphHost.Children.Add(btn);
             glyphButtons.Add(btn);
         }
-
-        void RefreshGlyphSelection()
+        // Trailing "more glyphs" tile opens the full Fluent browser in a flyout.
+        var moreGlyphTile = new Button
         {
-            var current = card.CurrentGlyphOverride;
-            foreach (var btn in glyphButtons)
-            {
-                var choice = (GlyphChoice)btn.Tag;
-                var selected = choice.IsAuto ? current is null : choice.Glyph == current;
-                btn.BorderThickness = new Thickness(selected ? 2 : 1);
-                btn.BorderBrush = selected
-                    ? (Brush)Application.Current.Resources["AccentFillColorDefaultBrush"]
-                    : (Brush)Application.Current.Resources["ControlStrokeColorDefaultBrush"];
-            }
-        }
-
-        foreach (var btn in glyphButtons)
-        {
-            btn.Click += (_, _) =>
-            {
-                var choice = (GlyphChoice)btn.Tag;
-                card.SetUserCustomisation(choice.Glyph, card.CurrentAccent);
-                RefreshGlyphSelection();
-            };
-        }
-        RefreshGlyphSelection();
+            Width = 40,
+            Height = 40,
+            Padding = new Thickness(0),
+            Content = new FontIcon { Glyph = "", FontSize = 18 }, // More (ellipsis)
+            Flyout = BuildGlyphBrowserFlyout(g => { pendingGlyph = g; RefreshAll(); }),
+        };
+        ToolTipService.SetToolTip(moreGlyphTile, "More glyphs…");
+        glyphHost.Children.Add(moreGlyphTile);
         root.Children.Add(glyphHost);
 
-        // Colour picker (shared control). Auto allowed so the user can clear the colour override.
-        var colourPicker = new Controls.ColourSwatchPicker
+        // ---- Accent colour section ----
+        root.Children.Add(SectionCaption("Accent colour"));
+        colourPicker = new Controls.ColourSwatchPicker { ShowNone = true };
+        void SeedColour()
         {
-            AllowAuto = true,
-            SelectedColour = card.CurrentAccent,
-        };
+            // Reflect the pending state. For an unset (Auto) colour, show the card's auto accent so
+            // its swatch reads as selected, without making it an explicit override.
+            suppressColour = true;
+            colourPicker.IsNoneSelected = pendingNone;
+            colourPicker.SelectedColour = pendingNone ? null : pendingAccent ?? card.AutoAccent;
+            suppressColour = false;
+        }
+        SeedColour();
         colourPicker.RegisterPropertyChangedCallback(
             Controls.ColourSwatchPicker.SelectedColourProperty,
-            (_, _) => card.SetUserCustomisation(card.CurrentGlyphOverride, colourPicker.SelectedColour));
+            (_, _) =>
+            {
+                if (suppressColour || colourPicker.SelectedColour is not Color c) return;
+                pendingNone = false;
+                pendingAccent = c;
+                RefreshAll();
+            });
+        colourPicker.NoneRequested += (_, _) =>
+        {
+            pendingNone = true;
+            pendingAccent = null;
+            RefreshAll();
+        };
         root.Children.Add(colourPicker);
 
-        return new ContentDialog
+        // ---- Volume controls toggle (moved off the context menu) ----
+        root.Children.Add(new Border
         {
-            Title = $"Customise {card.DeviceNameOnly}",
-            // Changes apply live behind the dialog; a single close button dismisses it.
-            Content = new ScrollViewer { Content = root, VerticalScrollBarVisibility = ScrollBarVisibility.Auto },
-            CloseButtonText = "Done",
-            DefaultButton = ContentDialogButton.Close,
+            Height = 1,
+            Background = (Brush)Application.Current.Resources["DividerStrokeColorDefaultBrush"],
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+        });
+        var volumeCheck = new CheckBox
+        {
+            // Just the slider - the icon tile stays a working mute toggle regardless of this.
+            Content = "Show volume slider",
+            IsChecked = !pendingVolumeHidden,
         };
+        ToolTipService.SetToolTip(volumeCheck,
+            "Hide the slider for devices whose volume Windows can set but that ignore it (e.g. a USB DAC/amp with its own knob). The icon stays a mute toggle.");
+        volumeCheck.Checked += (_, _) => { pendingVolumeHidden = false; RefreshAll(); };
+        volumeCheck.Unchecked += (_, _) => { pendingVolumeHidden = true; RefreshAll(); };
+        root.Children.Add(volumeCheck);
+
+        // ---- Custom button row (pinned below the scroll area) ----
+        // Save is a real AccentButton so its blue/grey state tracks IsEnabled reliably (the
+        // ContentDialog primary button's accent doesn't re-apply when enabled at runtime).
+        saveBtn = new Button
+        {
+            Content = "Save",
+            Style = (Style)Application.Current.Resources["AccentButtonStyle"],
+        };
+        resetBtn = new Button { Content = "Reset to default" };
+        var cancelBtn = new Button { Content = "Cancel" };
+
+        var rightButtons = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 8,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Children = { cancelBtn, saveBtn },
+        };
+        var buttonBar = new Grid { Padding = new Thickness(0, 16, 0, 0) };
+        buttonBar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        buttonBar.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        Grid.SetColumn(resetBtn, 0);
+        Grid.SetColumn(rightButtons, 1);
+        resetBtn.HorizontalAlignment = HorizontalAlignment.Left;
+        buttonBar.Children.Add(resetBtn);
+        buttonBar.Children.Add(rightButtons);
+
+        // Content: scrollable body (sized to content, capped so it scrolls only when too tall)
+        // above a pinned button row.
+        var outer = new Grid();
+        outer.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        outer.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        var scroller = new ScrollViewer
+        {
+            Content = root,
+            MaxHeight = 640, // high enough that normal content doesn't scroll; only short windows do
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+        };
+        Grid.SetRow(scroller, 0);
+        Grid.SetRow(buttonBar, 1);
+        outer.Children.Add(scroller);
+        outer.Children.Add(buttonBar);
+
+        dialog = new ContentDialog { Title = "Customise", Content = outer };
+        RefreshAll(); // sync the buttons' enabled state now that they exist
+
+        saveBtn.Click += (_, _) =>
+        {
+            // Commit every axis. Set the volume flag first so SetUserCustomisation's persist
+            // (UpdateDeviceConfig) writes it alongside the glyph / accent.
+            card.IsVolumeControlsHiddenByUser = pendingVolumeHidden;
+            card.SetUserCustomisation(pendingGlyph, pendingAccent, pendingNone);
+            dialog.Hide();
+        };
+        cancelBtn.Click += (_, _) => dialog.Hide(); // discard: the card was never mutated
+        resetBtn.Click += (_, _) =>
+        {
+            pendingGlyph = null;
+            pendingAccent = null;
+            pendingNone = false;
+            pendingVolumeHidden = false;
+            volumeCheck.IsChecked = true;
+            SeedColour();
+            RefreshAll();
+        };
+        return dialog;
+    }
+
+    private static TextBlock SectionCaption(string text) => new()
+    {
+        Text = text,
+        Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
+        Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
+    };
+
+    /// <summary>Flyout: a search box (filter by name or hex) over a scrollable grid of every Segoe
+    /// Fluent glyph, single-select. Calls <paramref name="onPick"/> with the chosen glyph. Each cell
+    /// tooltips its name.</summary>
+    private static Flyout BuildGlyphBrowserFlyout(Action<string> onPick)
+    {
+        var all = DeviceGlyphMapper.AllFluentGlyphs;
+        // The GridView's built-in ScrollViewer virtualizes the 1500+ items - do NOT wrap it in an
+        // outer ScrollViewer (that gives it infinite height and realizes every item, which lags).
+        var grid = new GridView
+        {
+            SelectionMode = ListViewSelectionMode.Single,
+            IsItemClickEnabled = false,
+            Width = 320,
+            Height = 320,
+            ItemsSource = new List<DeviceGlyphMapper.GlyphEntry>(all),
+            ItemTemplate = (DataTemplate)XamlReader.Load(
+                "<DataTemplate xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\">"
+                + "<FontIcon Glyph=\"{Binding Glyph}\" FontSize=\"20\" Width=\"32\" Height=\"32\" "
+                + "ToolTipService.ToolTip=\"{Binding Name}\" /></DataTemplate>"),
+        };
+        grid.SelectionChanged += (_, _) =>
+        {
+            if (grid.SelectedItem is DeviceGlyphMapper.GlyphEntry e)
+            {
+                onPick(e.Glyph);
+            }
+        };
+
+        var search = new TextBox { PlaceholderText = "Search name or hex (e.g. HardDrive)" };
+        search.TextChanged += (_, _) =>
+        {
+            var q = search.Text.Trim();
+            grid.ItemsSource = string.IsNullOrEmpty(q)
+                ? new List<DeviceGlyphMapper.GlyphEntry>(all)
+                : all.Where(g => g.Name.Contains(q, StringComparison.OrdinalIgnoreCase)
+                                 || g.Hex.Contains(q, StringComparison.OrdinalIgnoreCase)).ToList();
+        };
+
+        var panel = new StackPanel { Spacing = 8, Width = 320 };
+        panel.Children.Add(search);
+        panel.Children.Add(grid);
+        return new Flyout { Content = panel };
     }
 
     private void OnGroupTitleKeyDown(object sender, KeyRoutedEventArgs e)

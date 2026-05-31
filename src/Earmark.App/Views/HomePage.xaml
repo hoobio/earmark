@@ -69,17 +69,8 @@
                                 <FontIcon Glyph="{x:Bind HideToggleGlyph, Mode=OneWay}" />
                             </MenuFlyoutItem.Icon>
                         </MenuFlyoutItem>
-                        <!-- Hide the slider + mute for devices whose volume Windows can drive but
-                             that ignore it (e.g. a USB DAC/amp with an analog volume knob). -->
-                        <MenuFlyoutItem Text="{x:Bind VolumeControlsToggleLabel, Mode=OneWay}"
-                                        Command="{x:Bind ToggleVolumeControlsCommand}">
-                            <MenuFlyoutItem.Icon>
-                                <FontIcon Glyph="{x:Bind VolumeControlsToggleGlyph, Mode=OneWay}" />
-                            </MenuFlyoutItem.Icon>
-                        </MenuFlyoutItem>
-                        <!-- Customise the card glyph + accent colour. Opens a picker flyout anchored
-                             on the card; built in code-behind so the heavy ColorPicker isn't
-                             instantiated per card. -->
+                        <!-- Customise the card glyph + accent colour + volume-controls visibility.
+                             Opens a modal built in code-behind. -->
                         <MenuFlyoutItem Text="Customise…"
                                         Click="OnCustomiseClicked"
                                         Tag="{x:Bind}">
@@ -841,37 +832,19 @@
     <!-- No page-level horizontal padding: the scroll region runs full-width so its scrollbar sits on
          the window edge (matching Windows Settings). The header and the scroll *content* carry the
          28px side inset instead, so cards line up under the header while the scrollbar hugs the edge. -->
-    <Grid RowSpacing="{StaticResource SpacingLarge}">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
-        </Grid.RowDefinitions>
+    <Grid x:Name="DevicesRootGrid" Background="Transparent">
+        <!-- Right-click the page background (not a card) for page options; the floating "..." (top
+             right, auto-hides) holds the same items. Card right-clicks show the card's own menu. -->
+        <Grid.ContextFlyout>
+            <MenuFlyout>
+                <ToggleMenuFlyoutItem Text="Show title bar" IsChecked="{x:Bind ViewModel.ShowDevicesHeader, Mode=TwoWay}" />
+                <ToggleMenuFlyoutItem Text="Show hidden devices" IsChecked="{x:Bind ViewModel.ShowHiddenDevices, Mode=TwoWay}" />
+                <ToggleMenuFlyoutItem Text="Lock layout" IsChecked="{x:Bind ViewModel.LockLayout, Mode=TwoWay}" />
+            </MenuFlyout>
+        </Grid.ContextFlyout>
 
-        <!-- Page header. Top inset gives the title breathing room that matches the gap below it. -->
-        <Grid Grid.Row="0" ColumnSpacing="{StaticResource SpacingMedium}" Padding="{StaticResource DevicesHeaderPadding}">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
-
-            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="{StaticResource SpacingSmall}" VerticalAlignment="Center">
-                <TextBlock Text="Devices" Style="{StaticResource PageHeaderTextStyle}" />
-                <FontIcon Glyph="&#xE946;" FontSize="14"
-                          Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                          VerticalAlignment="Center"
-                          ToolTipService.ToolTip="Audio endpoints on this PC. Default devices appear first. Use the slider to set master volume; rule-controlled volumes are read-only. Devices without rules are hidden by default unless they're the system default." />
-            </StackPanel>
-
-            <ToggleSwitch Grid.Column="1"
-                          IsOn="{x:Bind ViewModel.ShowHiddenDevices, Mode=TwoWay}"
-                          OffContent="Show hidden"
-                          OnContent="Show hidden"
-                          MinWidth="0"
-                          VerticalAlignment="Center"
-                          ToolTipService.ToolTip="Reveal devices with no rules and devices you've hidden" />
-        </Grid>
-
-        <Grid Grid.Row="1">
+        <!-- Full-bleed content: cards scroll up to the window title bar; loading / empty overlay it. -->
+        <Grid>
             <!-- Loading: shown while the first device enumeration is in flight, so the empty
                  state below isn't mistaken for "no devices". -->
             <Border Style="{StaticResource SectionCardStyle}"
@@ -917,32 +890,72 @@
                           HorizontalScrollBarVisibility="Disabled"
                           Padding="{StaticResource DevicesScrollPadding}"
                           VerticalContentAlignment="Top">
-                <!-- Transparent drop surface around the repeater: block reorder is handled here (not
-                     per-card) so the insertion point is computed from the layout's frozen no-gap
-                     geometry. That keeps it stable while blocks slide to open the gap, and catches a
-                     drop over the empty gap or past the last block. App-chip drops stay per-card. -->
-                <Grid Background="Transparent"
-                      AllowDrop="True"
-                      DragOver="OnBlocksDragOver"
-                      Drop="OnBlocksDrop"
-                      Tapped="OnContentTapped">
-                    <ItemsRepeater x:Name="DevicesRepeater"
-                                   ItemsSource="{x:Bind ViewModel.Blocks}"
-                                   ElementPrepared="OnBlockElementPrepared"
-                                   Margin="{StaticResource DevicesListBottomMargin}"
-                                   VerticalAlignment="Top">
-                        <ItemsRepeater.Layout>
-                            <controls:BlockWrapLayout MinItemWidth="320"
-                                                      ColumnSpacing="{StaticResource SpacingMedium}"
-                                                      RowSpacing="{StaticResource SpacingMedium}" />
-                        </ItemsRepeater.Layout>
-                        <ItemsRepeater.ItemTemplate>
-                            <controls:BlockTemplateSelector CardTemplate="{StaticResource DeviceCardTemplate}"
-                                                            GroupTemplate="{StaticResource DeviceGroupCardTemplate}" />
-                        </ItemsRepeater.ItemTemplate>
-                    </ItemsRepeater>
-                </Grid>
+                <!-- Scroll content: an optional "Devices" title header (scrolls away) above the drop
+                     surface. The top inset (28) matches the side inset and is part of the scroll
+                     content, so cards rest below the title bar but scroll up flush to it. -->
+                <StackPanel Padding="0,28,0,0">
+                    <StackPanel Orientation="Horizontal" Spacing="{StaticResource SpacingSmall}" Margin="0,0,0,16"
+                                Visibility="{x:Bind ViewModel.ShowDevicesHeader, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <TextBlock Text="Devices" Style="{StaticResource PageHeaderTextStyle}" />
+                        <FontIcon Glyph="&#xE946;" FontSize="14"
+                                  Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                  VerticalAlignment="Center"
+                                  ToolTipService.ToolTip="Audio endpoints on this PC. Default devices appear first. Use the slider to set master volume; rule-controlled volumes are read-only. Devices without rules are hidden by default unless they're the system default." />
+                    </StackPanel>
+
+                    <!-- Transparent drop surface around the repeater: block reorder is handled here (not
+                         per-card) so the insertion point is computed from the layout's frozen no-gap
+                         geometry. That keeps it stable while blocks slide to open the gap, and catches a
+                         drop over the empty gap or past the last block. App-chip drops stay per-card. -->
+                    <Grid Background="Transparent"
+                          AllowDrop="True"
+                          DragOver="OnBlocksDragOver"
+                          Drop="OnBlocksDrop"
+                          Tapped="OnContentTapped">
+                        <ItemsRepeater x:Name="DevicesRepeater"
+                                       ItemsSource="{x:Bind ViewModel.Blocks}"
+                                       ElementPrepared="OnBlockElementPrepared"
+                                       Margin="{StaticResource DevicesListBottomMargin}"
+                                       VerticalAlignment="Top">
+                            <ItemsRepeater.Layout>
+                                <controls:BlockWrapLayout MinItemWidth="320"
+                                                          ColumnSpacing="{StaticResource SpacingMedium}"
+                                                          RowSpacing="{StaticResource SpacingMedium}" />
+                            </ItemsRepeater.Layout>
+                            <ItemsRepeater.ItemTemplate>
+                                <controls:BlockTemplateSelector CardTemplate="{StaticResource DeviceCardTemplate}"
+                                                                GroupTemplate="{StaticResource DeviceGroupCardTemplate}" />
+                            </ItemsRepeater.ItemTemplate>
+                        </ItemsRepeater>
+                    </Grid>
+                </StackPanel>
             </ScrollViewer>
         </Grid>
+
+        <!-- Floating overflow "...": top-most, top-right, with a symmetric inset. Auto-hides unless the
+             pointer is over the page, it's keyboard-focused, or its menu is open (wired in code-behind).
+             Cards may scroll under it - it sits above them and stays clickable. -->
+        <Button x:Name="OverflowButton"
+                HorizontalAlignment="Right"
+                VerticalAlignment="Top"
+                Margin="0,16,16,0"
+                Width="40"
+                Height="36"
+                Padding="0"
+                Opacity="0"
+                CornerRadius="{ThemeResource ControlCornerRadius}"
+                Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                ToolTipService.ToolTip="Page options"
+                GotFocus="OnOverflowFocusChanged"
+                LostFocus="OnOverflowFocusChanged">
+            <FontIcon Glyph="&#xE712;" FontSize="16" />
+            <Button.Flyout>
+                <MenuFlyout Opening="OnOverflowFlyoutOpening" Closed="OnOverflowFlyoutClosed">
+                    <ToggleMenuFlyoutItem Text="Show title bar" IsChecked="{x:Bind ViewModel.ShowDevicesHeader, Mode=TwoWay}" />
+                    <ToggleMenuFlyoutItem Text="Show hidden devices" IsChecked="{x:Bind ViewModel.ShowHiddenDevices, Mode=TwoWay}" />
+                    <ToggleMenuFlyoutItem Text="Lock layout" IsChecked="{x:Bind ViewModel.LockLayout, Mode=TwoWay}" />
+                </MenuFlyout>
+            </Button.Flyout>
+        </Button>
     </Grid>
 </Page>
