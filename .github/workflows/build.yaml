@@ -512,19 +512,18 @@ jobs:
           echo "Version: $VERSION"
 
       - name: Generate release notes
+        env:
+          # This job runs on the release-please PR, whose body is the cumulative changelog for the
+          # upcoming release (every change since the last stable). That's the right set of notes for
+          # a pre-release; the old git-log diff only covered the delta since the previous pre-release,
+          # so earlier changes in the same release dropped off. Fall back to a short log if absent.
+          PR_BODY: ${{ github.event.pull_request.body }}
         run: |
-          VERSION_PREFIX="v${{ steps.version.outputs.version }}-pre."
-          # Diff against the most recent pre-release for this version, else the last stable tag.
-          PREV_TAG=$(git tag --sort=-version:refname | grep -m1 "^${VERSION_PREFIX}" || true)
-          if [ -z "$PREV_TAG" ]; then
-            PREV_TAG=$(git tag --sort=-version:refname | grep -m1 '^v[0-9]' || true)
-          fi
-          if [ -n "$PREV_TAG" ]; then
-            NOTES=$(git log "${PREV_TAG}..HEAD" --pretty=format:"- %s" --no-merges)
+          if [ -n "$PR_BODY" ]; then
+            printf '%s\n' "$PR_BODY" > /tmp/release_notes.txt
           else
-            NOTES=$(git log --pretty=format:"- %s" --no-merges -20)
+            git log --pretty=format:"- %s" --no-merges -20 > /tmp/release_notes.txt
           fi
-          echo "$NOTES" > /tmp/release_notes.txt
 
       - name: Download MSIX (x64)
         uses: actions/download-artifact@v8
