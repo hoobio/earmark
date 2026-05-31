@@ -903,7 +903,6 @@
                           VerticalScrollBarVisibility="Auto"
                           HorizontalScrollBarVisibility="Disabled"
                           Padding="{StaticResource DevicesScrollPadding}"
-                          ViewChanging="OnDevicesViewChanging"
                           VerticalContentAlignment="Top">
                 <!-- Transparent drop surface around the repeater: block reorder is handled here (not
                      per-card) so the insertion point is computed from the layout's frozen no-gap
