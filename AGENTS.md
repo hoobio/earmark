@@ -63,9 +63,9 @@ Rules and settings live in `Documents` so OneDrive backs them up across machines
 
 The "per-app default endpoint" feature is undocumented Windows. Two distinct interfaces are involved:
 
-1. **Per-app routing** (Application* rule types) uses `IAudioPolicyConfigFactory` (WinRT, IID `ab3d4648-e242-459f-b02f-541c70306324` on Win11 22000+, `2a59116d-...` on older Win10). Activated via `RoGetActivationFactory` against the runtime class name `Windows.Media.Internal.AudioPolicyConfig`. Modern .NET no longer supports `[InterfaceType(InterfaceIsIInspectable)]` marshalling, so the interfaces are declared as `IUnknown`-based with three reserved `IInspectable` methods at the start of the vtable. HSTRING parameters are passed as `IntPtr` and built/freed via `combase!WindowsCreateString` / `WindowsDeleteString`. See `src/Earmark.Audio/Interop/IAudioPolicyConfigFactory.cs` and `HString.cs`.
+1. **Per-app routing** (`ApplicationDevice` actions) uses `IAudioPolicyConfigFactory` (WinRT, IID `ab3d4648-e242-459f-b02f-541c70306324` on Win11 22000+, `2a59116d-...` on older Win10). Activated via `RoGetActivationFactory` against the runtime class name `Windows.Media.Internal.AudioPolicyConfig`. Modern .NET no longer supports `[InterfaceType(InterfaceIsIInspectable)]` marshalling, so the interfaces are declared as `IUnknown`-based with three reserved `IInspectable` methods at the start of the vtable. HSTRING parameters are passed as `IntPtr` and built/freed via `combase!WindowsCreateString` / `WindowsDeleteString`. See `src/Earmark.Audio/Interop/IAudioPolicyConfigFactory.cs` and `HString.cs`.
 
-2. **System default device** (Default* rule types) uses the older `IPolicyConfigVista::SetDefaultEndpoint` (IID `568b9108-...`) on the `CPolicyConfigClient` COM class (CLSID `294935CE-...`). Plain LPWStr device IDs, classic COM. See `IPolicyConfigVista.cs`.
+2. **System default device** (`DefaultDevice` actions) uses the older `IPolicyConfigVista::SetDefaultEndpoint` (IID `568b9108-...`) on the `CPolicyConfigClient` COM class (CLSID `294935CE-...`). Plain LPWStr device IDs, classic COM. See `IPolicyConfigVista.cs`.
 
 The COM factory is **created once** and cached in `AudioPolicyService` - re-activating per call is slow enough to make the periodic timer freeze the UI thread. Per-app `Set` is preceded by `Get` and skipped if the persisted value already matches the target, which avoids the brief audio glitch from a redundant `SetPersistedDefaultAudioEndpoint`.
 
@@ -73,18 +73,32 @@ The COM factory is **created once** and cached in `AudioPolicyService` - re-acti
 
 ## Rule schema
 
-Four types, single `DevicePattern` field per rule:
+A `RoutingRule` has a name, an enabled bit, a list of **conditions** (AND-ed), and two action lists: **`Actions`** (the main branch) and **`ElseActions`** (the "otherwise" branch). `ConditionsMet` selects the live branch via `ActiveActions(met)` - the single branch-selection point shared by the matcher, resolver, applier, and evaluator. With no conditions a rule is always "met" so only the main branch fires.
 
-| Type | Required fields | Behaviour |
+**Conditions** - one `Kind` plus a `Negate` polarity flag (so present/missing and running/not-running are one row type with a toggle, not doubled enum values):
+
+| `ConditionKind` | `Negate=false` / `Negate=true` | Fields |
 |---|---|---|
-| `ApplicationOutput` | `AppPattern`, `DevicePattern` | Pin per-app render endpoint for matching processes |
-| `ApplicationInput` | `AppPattern`, `DevicePattern` | Pin per-app capture endpoint |
-| `DefaultOutput` | `DevicePattern`, at least one of `SetsDefault` / `SetsCommunications` | Set system default render endpoint. `SetsDefault` covers Console + Multimedia roles; `SetsCommunications` covers the Communications role. Both default to true. |
-| `DefaultInput` | `DevicePattern`, at least one of `SetsDefault` / `SetsCommunications` | Same as `DefaultOutput`, capture flow. |
+| `Device` | device present / missing | `DevicePattern`, `Flow` (Any/Render/Capture) |
+| `DefaultDevice` | is / is not the current system default | `DevicePattern`, `Flow` |
+| `Application` | running / not running | `AppPattern` |
+
+**Actions** - one `Kind` plus orthogonal mode fields. Binary variants that used to be separate enum values collapse into a mode field, so the editor shows one action with an inline toggle:
+
+| `ActionKind` | Mode field | Required fields | Behaviour |
+|---|---|---|---|
+| `ApplicationDevice` | `Flow` (Output=Render / Input=Capture) | `AppPattern`, `DevicePattern` | Pin matching processes' per-app endpoint |
+| `DefaultDevice` | `Flow`; `SetsDefault` (Console+Multimedia) / `SetsCommunications` | `DevicePattern`, ≥1 role | Set the system default endpoint |
+| `WaveLinkMix` | `Membership` (Include / Exclude / Exclusive) | `MixPattern`, `DevicePattern` | Add/remove the device to/from a Wave Link mix; Exclusive strips non-matching outputs |
+| `DeviceVolume` | - | `DevicePattern`, `Volume` 0-1 | Pin a device's volume |
+| `DeviceMute` | `Muted` (true=mute / false=unmute) | `DevicePattern` | Set a device's mute state |
+| `RenameDevice` | - | `DevicePattern`, `NewName` | Parked: needs an elevated registry write, hidden from the picker |
+
+Every action also carries **`Pinned`** (default true). A **pinned** action is continuously reconciled - external drift (volume flyout, default-device switch, Wave Link move) is reverted to the target. A **one-shot** action (`Pinned=false`) fires only on its rule's *activation edge* - the moment its branch becomes active (conditions flip, rule edit, or startup) - and is then left alone so the user can override it. `RoutingApplier.ComputeActivationEdges` compares each rule's current `ConditionsMet` against the previous cycle; an apply pass enacts an action when `Pinned || edge`. Reconcile passes (external-change / periodic) carry no edges, so they enforce pinned only. The Devices page lock + reconcile honour `Pinned` too (`DeviceRuleResolver` returns it), so a one-shot never locks a slider.
 
 `AppPattern` is tested against **both** the process name and the full executable path; either match counts. Path is resolved via `QueryFullProcessImageName` (`PROCESS_QUERY_LIMITED_INFORMATION`), which works for almost all processes including anti-cheat-protected games. `Process.MainModule.FileName` does **not** work for those - don't reintroduce it.
 
-Rules apply in **list order** - top of the list wins. There is no priority field; reorder the list to change precedence.
+Rules apply in **list order** - top of the list wins. There is no priority field; reorder the list to change precedence. On the Rules page, conditions and actions are also drag-reorderable (and draggable between the Actions/Otherwise branches and onto other rules); a drag drop commits immediately, unlike field edits which buffer until Save.
 
 ## UI architecture
 
