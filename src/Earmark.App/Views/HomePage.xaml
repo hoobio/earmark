@@ -509,12 +509,47 @@
                                              chip's menu is a superset of the card's. The device / group block
                                              mirrors the card's ContextFlyout above - keep the two in sync. -->
                                         <Border.ContextFlyout>
-                                            <MenuFlyout>
+                                            <MenuFlyout Opening="OnAppChipFlyoutOpening">
                                                 <MenuFlyoutItem Text="Hide this app"
                                                                 Command="{x:Bind HideCommand}"
                                                                 ToolTipService.ToolTip="Permanently hide this app's chip from every device. Unhide it from Settings &#x2192; App indicators.">
                                                     <MenuFlyoutItem.Icon>
                                                         <FontIcon Glyph="&#xED1A;" />
+                                                    </MenuFlyoutItem.Icon>
+                                                </MenuFlyoutItem>
+                                                <!-- Close = graceful WM_CLOSE (the app can save / prompt). Disabled and
+                                                     relabelled when the app is elevated (a disabled item can't show a
+                                                     tooltip, so the reason lives in the text). Hidden for System Sounds
+                                                     and closed chips via ShowProcessActions. -->
+                                                <MenuFlyoutItem Text="{x:Bind CloseActionLabel, Mode=OneWay}"
+                                                                Command="{x:Bind CloseCommand}"
+                                                                IsEnabled="{x:Bind CanControlProcess, Mode=OneWay}"
+                                                                Visibility="{x:Bind ShowProcessActions, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                                                ToolTipService.ToolTip="Ask this app to close, like clicking its X (it can save or prompt first).">
+                                                    <MenuFlyoutItem.Icon>
+                                                        <!-- Cancel (E711), not ChromeClose (E8BB): the chrome glyph is a
+                                                             heavy title-bar X that reads oversized next to the regular-weight
+                                                             menu icons. Terminate uses the red Blocked sign (E733). -->
+                                                        <FontIcon Glyph="&#xE711;" />
+                                                    </MenuFlyoutItem.Icon>
+                                                </MenuFlyoutItem>
+                                                <!-- Terminate = force kill (SIGKILL). Hidden until Shift is held when the
+                                                     menu opens (revealed in OnAppChipFlyoutOpening); Tag carries the chip
+                                                     so that handler can gate it. Critical-red; disabled / relabelled when
+                                                     elevated. No save, no prompt. -->
+                                                <MenuFlyoutItem Text="{x:Bind TerminateActionLabel, Mode=OneWay}"
+                                                                Command="{x:Bind TerminateCommand}"
+                                                                IsEnabled="{x:Bind CanControlProcess, Mode=OneWay}"
+                                                                Visibility="Collapsed"
+                                                                Tag="{x:Bind}"
+                                                                ToolTipService.ToolTip="Force this app to quit now. Unsaved work is lost.">
+                                                    <MenuFlyoutItem.Resources>
+                                                        <SolidColorBrush x:Key="MenuFlyoutItemForeground" Color="{ThemeResource SystemFillColorCritical}" />
+                                                        <SolidColorBrush x:Key="MenuFlyoutItemForegroundPointerOver" Color="{ThemeResource SystemFillColorCritical}" />
+                                                        <SolidColorBrush x:Key="MenuFlyoutItemForegroundPressed" Color="{ThemeResource SystemFillColorCritical}" />
+                                                    </MenuFlyoutItem.Resources>
+                                                    <MenuFlyoutItem.Icon>
+                                                        <FontIcon Glyph="&#xE733;" Foreground="{ThemeResource SystemFillColorCriticalBrush}" />
                                                     </MenuFlyoutItem.Icon>
                                                 </MenuFlyoutItem>
                                                 <MenuFlyoutSeparator />
@@ -780,7 +815,7 @@
         </Grid.RowDefinitions>
 
         <!-- Page header. Top inset gives the title breathing room that matches the gap below it. -->
-        <Grid Grid.Row="0" ColumnSpacing="{StaticResource SpacingMedium}" Padding="28,20,28,0">
+        <Grid Grid.Row="0" ColumnSpacing="{StaticResource SpacingMedium}" Padding="{StaticResource DevicesHeaderPadding}">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
@@ -808,7 +843,7 @@
                  state below isn't mistaken for "no devices". -->
             <Border Style="{StaticResource SectionCardStyle}"
                     Padding="32"
-                    Margin="28,0,28,20"
+                    Margin="{StaticResource DevicesPlaceholderMargin}"
                     Visibility="{x:Bind ViewModel.ShowLoadingState, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
                 <StackPanel Spacing="{StaticResource SpacingMedium}" HorizontalAlignment="Center" VerticalAlignment="Center">
                     <ProgressRing IsActive="{x:Bind ViewModel.ShowLoadingState, Mode=OneWay}"
@@ -822,7 +857,7 @@
             <!-- Empty -->
             <Border Style="{StaticResource SectionCardStyle}"
                     Padding="32"
-                    Margin="28,0,28,20"
+                    Margin="{StaticResource DevicesPlaceholderMargin}"
                     Visibility="{x:Bind ViewModel.ShowEmptyState, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
                 <StackPanel Spacing="{StaticResource SpacingMedium}" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="420">
                     <FontIcon Glyph="&#xE767;" FontSize="40"
@@ -839,13 +874,14 @@
             </Border>
 
             <!-- The scroll viewer fills the row edge-to-edge so its (overlay) scrollbar rides the
-                 window edge like Settings, and content scrolls right to the bottom edge (no bottom
-                 padding gap). Padding only insets the *content* sides (28, matching the header) while
-                 leaving the scrollbar out at the edge. -->
+                 window edge like Settings, and its padding is sides-only so content scrolls flush to
+                 the window's bottom edge (no dead band that clips cards short mid-scroll). The trailing
+                 breathing room lives on the list itself (DevicesRepeater.Margin) so only the last card
+                 clears the bottom edge when fully scrolled. -->
             <ScrollViewer Visibility="{x:Bind ViewModel.HasItems, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
                           VerticalScrollBarVisibility="Auto"
                           HorizontalScrollBarVisibility="Disabled"
-                          Padding="28,0,28,0"
+                          Padding="{StaticResource DevicesScrollPadding}"
                           VerticalContentAlignment="Top">
                 <!-- Transparent drop surface around the repeater: block reorder is handled here (not
                      per-card) so the insertion point is computed from the layout's frozen no-gap
@@ -859,6 +895,7 @@
                     <ItemsRepeater x:Name="DevicesRepeater"
                                    ItemsSource="{x:Bind ViewModel.Blocks}"
                                    ElementPrepared="OnBlockElementPrepared"
+                                   Margin="{StaticResource DevicesListBottomMargin}"
                                    VerticalAlignment="Top">
                         <ItemsRepeater.Layout>
                             <controls:BlockWrapLayout MinItemWidth="320"
