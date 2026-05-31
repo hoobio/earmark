@@ -79,10 +79,11 @@ public partial class AppChip : ObservableObject, IWrapOrdered
     }
 
     private readonly Action<AppChip>? _onHide;
+    private readonly Action<AppChip>? _onHideOnDevice;
     private readonly Action<AppChip>? _onClose;
     private readonly Action<AppChip>? _onTerminate;
 
-    public AppChip(AudioSession session, string placementEndpointId, ISessionIconService iconService, PeakMeterOptions meterOptions, RoutingRule? lockingRule, bool startsActive = true, DeviceCard? ownerCard = null, Action<AppChip>? onHide = null, Action<AppChip>? onClose = null, Action<AppChip>? onTerminate = null, bool canControlProcess = false, bool canCloseProcess = false, bool isElevated = false)
+    public AppChip(AudioSession session, string placementEndpointId, ISessionIconService iconService, PeakMeterOptions meterOptions, RoutingRule? lockingRule, bool startsActive = true, DeviceCard? ownerCard = null, Action<AppChip>? onHide = null, Action<AppChip>? onHideOnDevice = null, Action<AppChip>? onClose = null, Action<AppChip>? onTerminate = null, bool canControlProcess = false, bool canCloseProcess = false, bool isElevated = false)
     {
         Session = session ?? throw new ArgumentNullException(nameof(session));
         PlacementEndpointId = placementEndpointId ?? throw new ArgumentNullException(nameof(placementEndpointId));
@@ -91,6 +92,7 @@ public partial class AppChip : ObservableObject, IWrapOrdered
         LockingRule = lockingRule;
         OwnerCard = ownerCard;
         _onHide = onHide;
+        _onHideOnDevice = onHideOnDevice;
         _onClose = onClose;
         _onTerminate = onTerminate;
         CanControlProcess = canControlProcess;
@@ -195,6 +197,11 @@ public partial class AppChip : ObservableObject, IWrapOrdered
     /// only the chip is suppressed). Persisted via <c>HomeViewModel</c>; reversible from Settings.</summary>
     [RelayCommand]
     private void Hide() => _onHide?.Invoke(this);
+
+    /// <summary>Hides this app's chip on the owning card's device only (it still shows on other cards,
+    /// and still routes / plays). Persisted via <c>HomeViewModel</c>; reversible from Settings.</summary>
+    [RelayCommand]
+    private void HideOnDevice() => _onHideOnDevice?.Invoke(this);
 
     /// <summary>Politely closes the app (WM_CLOSE, the SIGTERM equivalent) so it can save / prompt.
     /// Routed through <c>HomeViewModel</c>, which reports any failure as a toast.</summary>

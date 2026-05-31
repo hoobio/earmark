@@ -1,5 +1,13 @@
 namespace Earmark.App.ViewModels;
 
+/// <summary>One selectable glyph in the customisation picker. <see cref="Glyph"/> null = the
+/// "Auto" choice (fall back to the derived glyph).</summary>
+public sealed record GlyphChoice(string Label, string? Glyph)
+{
+    public bool IsAuto => Glyph is null;
+    public bool HasGlyph => Glyph is not null;
+}
+
 /// <summary>
 /// Maps an audio device's user-facing name to a thematic Segoe Fluent glyph so the device
 /// card icon reads at a glance instead of every endpoint sharing the speaker. Covers the
@@ -31,6 +39,55 @@ internal static class DeviceGlyphMapper
     private const string Earbuds = "";    // Earbud (in-ear)
     private const string Speakers = "";   // Speakers (the device-picker icon)
     private const string Microphone = ""; // Microphone
+
+
+    // Extra device-type glyphs offered only in the customisation picker (not used by
+    // auto-resolution). Codepoints from the Segoe Fluent Icons set; verify each renders before
+    // relying on it. Declared as \u escapes so the literal is unambiguous regardless of editor.
+    private const string Headset = "";    // Headset (headphones + boom mic)
+    private const string Equalizer = "";  // Equalizer (mixer / EQ)
+    private const string Bluetooth = "";  // Bluetooth
+    private const string Wifi = "";       // Wifi (wireless / network audio)
+    private const string Cast = "";       // Connect (cast to device)
+    private const string Project = "";    // MiracastLogoSmall (project / cast)
+    private const string Usb = "";        // USB
+    private const string Phone = "";      // Phone
+    private const string Laptop = "";     // DeviceLaptopNoPic
+
+    /// <summary>
+    /// The curated glyph set the customisation picker offers, in display order. Includes the
+    /// themed glyphs plus the speaker / mic fallbacks so a user can pin any of them explicitly.
+    /// Kept as the single source of glyph codepoints so the picker and <see cref="TryResolve"/>
+    /// can't drift.
+    /// </summary>
+    public static IReadOnlyList<(string Label, string Glyph)> CuratedGlyphs { get; } = new[]
+    {
+        ("Speakers", Speakers),
+        ("Headphones", Headphones),
+        ("Headset", Headset),
+        ("Earbuds", Earbuds),
+        ("Microphone", Microphone),
+        ("Game", Game),
+        ("Chat", Chat),
+        ("Music", Music),
+        ("Monitor", Monitor),
+        ("Browser", Globe),
+        ("Streaming", Streaming),
+        ("Equalizer", Equalizer),
+        ("Bluetooth", Bluetooth),
+        ("WiFi", Wifi),
+        ("Cast", Cast),
+        ("Project", Project),
+        ("USB", Usb),
+        ("Phone", Phone),
+        ("Laptop", Laptop),
+    };
+
+    /// <summary>Picker model: an "Auto" choice followed by every curated glyph.</summary>
+    public static IReadOnlyList<GlyphChoice> GlyphChoices { get; } =
+        new[] { new GlyphChoice("Auto", null) }
+            .Concat(CuratedGlyphs.Select(g => new GlyphChoice(g.Label, g.Glyph)))
+            .ToList();
 
     // Ordered: more-specific prefixes first so they win over broader ones.
     private static readonly (string Prefix, string Glyph)[] _patterns =
