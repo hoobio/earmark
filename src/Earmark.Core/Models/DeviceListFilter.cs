@@ -9,10 +9,13 @@ namespace Earmark.Core.Models;
 public static class DeviceListFilter
 {
     /// <summary>
-    /// <c>listed = isGroupMember || ((showHidden || !isEffectivelyHidden) &amp;&amp; (showDisconnected || isConnected))</c>.
-    /// A group member is always listed (membership is a user-curated unit, so the group keeps even a
-    /// hidden or disconnected member). Otherwise the card shows when it isn't filtered out by either
-    /// the hidden filter or the disconnected filter.
+    /// <c>listed = (showDisconnected || isConnected) &amp;&amp; (isGroupMember || showHidden || !isEffectivelyHidden)</c>.
+    /// <para>
+    /// The <b>disconnected</b> filter applies to every card, group member or not: with "Show
+    /// disconnected" off, an absent device is hidden even inside a group. The <b>hidden</b> filter is
+    /// overridden by group membership (a group is a user-curated unit, so a connected member that has
+    /// no rules still shows), and otherwise by "Show hidden".
+    /// </para>
     /// </summary>
     public static bool IsListed(
         bool isGroupMember,
@@ -20,6 +23,6 @@ public static class DeviceListFilter
         bool isConnected,
         bool showHidden,
         bool showDisconnected)
-        => isGroupMember
-            || ((showHidden || !isEffectivelyHidden) && (showDisconnected || isConnected));
+        => (showDisconnected || isConnected)
+            && (isGroupMember || showHidden || !isEffectivelyHidden);
 }

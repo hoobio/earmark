@@ -1374,12 +1374,19 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         var desiredMembers = new Dictionary<DeviceGroupCard, List<DeviceCard>>();
         foreach (var group in _settings.Current.DeviceGroups)
         {
-            var members = group.MemberIds
+            var presentMembers = group.MemberIds
                 .Where(cardById.ContainsKey)
                 .Select(id => cardById[id])
                 .Distinct()
                 .ToList();
-            if (members.Count < 2) continue;   // a sub-two group isn't live this build
+            if (presentMembers.Count < 2) continue;   // a sub-two group isn't live this build
+
+            // The filter applies inside groups too: a disconnected member drops out when "Show
+            // disconnected" is off (the disconnected filter is universal), while a connected member
+            // stays even with no rules (membership overrides the hidden filter). A group with no
+            // member left to show after filtering doesn't render this build.
+            var members = presentMembers.Where(IsListed).ToList();
+            if (members.Count == 0) continue;
 
             if (!_groupCards.TryGetValue(group.Id, out var gc))
             {

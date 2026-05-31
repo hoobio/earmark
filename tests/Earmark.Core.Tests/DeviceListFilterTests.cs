@@ -11,11 +11,23 @@ public class DeviceListFilterTests
     // Signature: IsListed(isGroupMember, isEffectivelyHidden, isConnected, showHidden, showDisconnected)
 
     [Fact]
-    public void Group_member_is_always_listed_regardless_of_toggles_or_state()
+    public void Group_member_overrides_the_hidden_filter_while_connected()
     {
-        // Hidden AND disconnected, both toggles off - still listed because it's in a group.
-        DeviceListFilter.IsListed(isGroupMember: true, isEffectivelyHidden: true, isConnected: false,
+        // A connected, rules-less (effectively-hidden) group member shows with Show hidden off,
+        // because group membership overrides the hidden filter.
+        DeviceListFilter.IsListed(isGroupMember: true, isEffectivelyHidden: true, isConnected: true,
             showHidden: false, showDisconnected: false).Should().BeTrue();
+    }
+
+    [Fact]
+    public void Group_member_still_respects_the_disconnected_filter()
+    {
+        // A DISCONNECTED group member is hidden when Show disconnected is off (the disconnected
+        // filter applies to everyone), and reappears when it is on.
+        DeviceListFilter.IsListed(isGroupMember: true, isEffectivelyHidden: false, isConnected: false,
+            showHidden: false, showDisconnected: false).Should().BeFalse();
+        DeviceListFilter.IsListed(isGroupMember: true, isEffectivelyHidden: false, isConnected: false,
+            showHidden: false, showDisconnected: true).Should().BeTrue();
     }
 
     [Fact]
