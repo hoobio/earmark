@@ -1663,6 +1663,47 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         SyncBlocks();
     }
 
+    /// <summary>Moves an existing member out of its current group and into another group
+    /// <paramref name="targetGroupId"/>, inserted before <paramref name="anchorMemberId"/> (null =
+    /// appended). Disbands the source group (its remaining member takes the source's block slot) when
+    /// fewer than two remain; the page confirms first. One persist + resync.</summary>
+    public void MoveToGroup(string memberId, string targetGroupId, string? anchorMemberId = null)
+    {
+        if (string.IsNullOrEmpty(memberId) || string.IsNullOrEmpty(targetGroupId)) return;
+        var target = FindGroupRecord(targetGroupId);
+        if (target is null) return;
+
+        var source = _settings.Current.DeviceGroups.FirstOrDefault(g =>
+            g.MemberIds.Any(id => string.Equals(id, memberId, StringComparison.OrdinalIgnoreCase)));
+        if (source is null || ReferenceEquals(source, target)) return;
+        if (target.MemberIds.Any(id => string.Equals(id, memberId, StringComparison.OrdinalIgnoreCase))) return;
+
+        // Leave the source group; disband it (remaining member takes its block slot) if fewer than two remain.
+        source.MemberIds.RemoveAll(id => string.Equals(id, memberId, StringComparison.OrdinalIgnoreCase));
+        if (source.MemberIds.Count < 2)
+        {
+            var remaining = source.MemberIds.ToList();
+            _settings.Current.DeviceGroups.Remove(source);
+            var gi = _settings.Current.DeviceOrder.FindIndex(id => string.Equals(id, source.Id, StringComparison.OrdinalIgnoreCase));
+            if (gi >= 0)
+            {
+                _settings.Current.DeviceOrder.RemoveAt(gi);
+                _settings.Current.DeviceOrder.InsertRange(gi, remaining);
+            }
+        }
+
+        // Insert into the target group before the anchor (null = appended).
+        var insertAt = anchorMemberId is not null
+            ? target.MemberIds.FindIndex(id => string.Equals(id, anchorMemberId, StringComparison.OrdinalIgnoreCase))
+            : target.MemberIds.Count;
+        if (insertAt < 0) insertAt = target.MemberIds.Count;
+        target.MemberIds.Insert(insertAt, memberId);
+
+        _settings.Current.DeviceOrder = ComputeOrderedBlockIds(out _);
+        QueueSettingsSave();
+        SyncBlocks();
+    }
+
     /// <summary>Reorders a member within its own group to land before <paramref name="anchorMemberId"/>
     /// (null = at the end of the group). Re-derives the group's member order and persists it.</summary>
     public void ReorderWithinGroup(string memberId, string? anchorMemberId)

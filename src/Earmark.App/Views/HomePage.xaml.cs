@@ -312,7 +312,7 @@ public sealed partial class HomePage : Page
         if (_draggedCardGroup is not null)
         {
             // Member drag: inside its group box -> reorder within (members bump to show the gap);
-            // outside -> leave.
+            // over another group -> move into it; anywhere else -> leave (become a lone card).
             var box = Layout.GetContentRect(ViewModel.Blocks.IndexOf(_draggedCardGroup));
             ClearHighlights();
             Layout.ClearReorderState();   // member moves don't open a block-level gap
@@ -326,6 +326,18 @@ public sealed partial class HomePage : Page
                 innerLayout.SetReorderState(draggedIdx, raw > draggedIdx ? raw - 1 : raw);
                 SetActiveInnerGap(innerLayout);
                 SetDragCaption(e, "Move within group");
+            }
+            else if (TryResolveOtherGroupJoin(point, out var otherGroup, out _))
+            {
+                SetJoinTarget(otherGroup);
+                // Open a phantom slot in the target group so its members bump to preview the landing.
+                if (InnerRepeaterOf(otherGroup) is { Layout: WrapByRowLayout joinLayout } joinInner)
+                {
+                    EnsureInnerAnimations(joinInner);
+                    joinLayout.SetPhantomGap(InnerInsertionIndex(joinInner, joinLayout, point));
+                    SetActiveInnerGap(joinLayout);
+                }
+                SetDragCaption(e, "Move to group");
             }
             else
             {
@@ -424,6 +436,17 @@ public sealed partial class HomePage : Page
                 var anchor = MemberAnchorBefore(group, point, sourceId);
                 _logger?.LogInformation("Reorder within group {Group}: {Member}", group.Id, sourceId);
                 ViewModel.ReorderWithinGroup(sourceId, anchor);
+            }
+            else if (TryResolveOtherGroupJoin(point, out var otherGroup, out _))
+            {
+                // Resolve the landing anchor before any await (the confirm dialog tears down the gap).
+                var anchor = MemberAnchorBefore(otherGroup, point, draggedMemberId: null);
+                if (ViewModel.GroupMemberCount(group.Id) <= 2 && !await ConfirmDisbandAsync())
+                {
+                    return;   // cancelled - the member stays in its group
+                }
+                _logger?.LogInformation("Move {Member} from group {From} to {To}", sourceId, group.Id, otherGroup.Id);
+                ViewModel.MoveToGroup(sourceId, otherGroup.Id, anchor);
             }
             else
             {
@@ -608,6 +631,24 @@ public sealed partial class HomePage : Page
         var insetY = r.Height * 0.3;
         return p.X >= r.Left + insetX && p.X <= r.Right - insetX
             && p.Y >= r.Top + insetY && p.Y <= r.Bottom - insetY;
+    }
+
+    /// <summary>True when the pointer sits in the join zone of a group other than <see cref="_draggedCardGroup"/>
+    /// (used to move a member from one group into another). Out params give the target group + its block index.</summary>
+    private bool TryResolveOtherGroupJoin(Point point, out DeviceGroupCard group, out int index)
+    {
+        index = Layout!.GetBlockIndexAt(point);
+        if (index >= 0 && index < ViewModel.Blocks.Count
+            && ViewModel.Blocks[index] is DeviceGroupCard candidate
+            && !ReferenceEquals(candidate, _draggedCardGroup)
+            && ResolveGroupIntent(index, point) == GroupDropIntent.Join)
+        {
+            group = candidate;
+            return true;
+        }
+        group = null!;
+        index = -1;
+        return false;
     }
 
     private enum GroupDropIntent { Before, Join, After }
