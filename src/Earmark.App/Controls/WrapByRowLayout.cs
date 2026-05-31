@@ -92,6 +92,11 @@ public sealed class WrapByRowLayout : VirtualizingLayout
     /// for drag hit-testing so opening the gap doesn't move the answer.</summary>
     private Rect[] _identityRects = [];
 
+    /// <summary>Last non-custom (collapsed) height measured for each member, keyed by its view-model
+    /// item. A member that opts out of the baseline (its rules panel expands) keeps holding the
+    /// baseline at this height, so a shorter sibling member doesn't shrink when this one expands.</summary>
+    private readonly Dictionary<object, double> _baselineHeights = new();
+
     /// <summary>Lift <paramref name="draggedIndex"/> and re-insert it at <paramref name="gapIndex"/>
     /// (a position in the source-excluded / compacted sequence).</summary>
     public void SetReorderState(int draggedIndex, int gapIndex) =>
@@ -255,9 +260,18 @@ public sealed class WrapByRowLayout : VirtualizingLayout
                 var element = context.GetOrCreateElementAt(order[slot]);
                 var h = element.DesiredSize.Height;
                 if (h > rowTotal) rowTotal = h;
-                if (!GetIsCustomSized((DependencyObject)element) && h > baseline)
+                var item = context.GetItemAt(order[slot]);
+                if (!GetIsCustomSized((DependencyObject)element))
                 {
-                    baseline = h;
+                    if (item is not null) _baselineHeights[item] = h;   // remember the collapsed height
+                    if (h > baseline) baseline = h;
+                }
+                else if (item is not null && _baselineHeights.TryGetValue(item, out var collapsed) && collapsed > baseline)
+                {
+                    // A custom-sized member (rules panel expanded) keeps its own height but still holds
+                    // the baseline at its last collapsed height, so a shorter sibling member doesn't
+                    // shrink the moment this one expands.
+                    baseline = collapsed;
                 }
             }
             if (baseline == 0) baseline = rowTotal; // all custom-sized? fall back to true max

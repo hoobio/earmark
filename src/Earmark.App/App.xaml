@@ -62,6 +62,18 @@
             <Thickness x:Key="SectionPadding">16</Thickness>
             <Thickness x:Key="SubtleCardPadding">12,10</Thickness>
 
+            <!-- Devices page content insets. Padding/Margin need a Thickness, and the Spacing* tokens
+                 are x:Double (binding one to a Thickness throws at load), so these centralise the page's
+                 content margins as Thicknesses on the 4px Fluent grid: 28 = the page side margin (as in
+                 PagePadding), 20 = header top room. The scroll region keeps its scrollbar at the window
+                 edge, so its padding is sides-only and the bottom breathing room lives on the list
+                 itself (DevicesListBottomMargin, 28 to match the side margin) - that way cards scroll
+                 flush to the bottom edge and only the last one clears it. -->
+            <Thickness x:Key="DevicesHeaderPadding">28,20,28,0</Thickness>
+            <Thickness x:Key="DevicesScrollPadding">28,0,28,0</Thickness>
+            <Thickness x:Key="DevicesListBottomMargin">0,0,0,28</Thickness>
+            <Thickness x:Key="DevicesPlaceholderMargin">28,0,28,20</Thickness>
+
             <Style x:Key="PageHeaderTextStyle" TargetType="TextBlock" BasedOn="{StaticResource TitleTextBlockStyle}">
                 <Setter Property="FontWeight" Value="SemiBold" />
                 <Setter Property="Margin" Value="0,0,0,4" />

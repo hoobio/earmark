@@ -6,6 +6,7 @@ using Earmark.App.ViewModels;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.UI.Composition;
+using Microsoft.UI.Input;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Hosting;
@@ -18,6 +19,7 @@ using Windows.Foundation;
 using Windows.Graphics.Imaging;
 using Windows.System;
 using Windows.UI;
+using Windows.UI.Core;
 
 namespace Earmark.App.Views;
 
@@ -82,9 +84,6 @@ public sealed partial class HomePage : Page
     /// <summary>The group currently highlighted as a join target (accent outline).</summary>
     private DeviceGroupCard? _joinTarget;
 
-    /// <summary>True between a reorder drag start and its completion; gates whether newly realised
-    /// blocks get the implicit slide animation attached as they scroll into view.</summary>
-    private bool _reorderActive;
 
     /// <summary>The group's inner layout currently showing a member make-space gap (within-group
     /// reorder) or a phantom join slot, or null.</summary>
@@ -106,7 +105,6 @@ public sealed partial class HomePage : Page
         args.Data.SetText($"{DragPayloadCardPrefix}{card.Endpoint.Id}");
         args.Data.RequestedOperation = DataPackageOperation.Move;
 
-        EnableReorderAnimations(true);
         SetDragInProgress(true);
 
         // Opaque drag bitmap (the card fill is translucent, so lifted off the backdrop it reads as
@@ -137,7 +135,6 @@ public sealed partial class HomePage : Page
         args.Data.SetText($"{DragPayloadGroupPrefix}{group.Id}");
         args.Data.RequestedOperation = DataPackageOperation.Move;
 
-        EnableReorderAnimations(true);
         SetDragInProgress(true);   // reveals the dotted outline + drag padding on every group
 
         // Drag visual: a snapshot of the group BOX (cards + title + its dotted outline), bounded to
@@ -268,7 +265,8 @@ public sealed partial class HomePage : Page
     }
 
     /// <summary>Shared teardown for any reorder / reparent drag (committed or cancelled): drop the gap,
-    /// clear highlights + outlines, detach the slide animation, and reset the dragged state.</summary>
+    /// clear highlights + outlines, the inner-group slide animation, and reset the dragged state. The
+    /// block-level slide stays attached (it's always on), so blocks keep gliding after a drag.</summary>
     private void EndDrag()
     {
         _draggedCard = null;
@@ -279,7 +277,6 @@ public sealed partial class HomePage : Page
         ClearInnerAnimations();
         Layout?.ClearReorderState();
         SetDragInProgress(false);
-        EnableReorderAnimations(false);
     }
 
     private void OnBlocksDragOver(object sender, DragEventArgs e)
@@ -312,7 +309,7 @@ public sealed partial class HomePage : Page
         if (_draggedCardGroup is not null)
         {
             // Member drag: inside its group box -> reorder within (members bump to show the gap);
-            // outside -> leave.
+            // over another group -> move into it; anywhere else -> leave (become a lone card).
             var box = Layout.GetContentRect(ViewModel.Blocks.IndexOf(_draggedCardGroup));
             ClearHighlights();
             Layout.ClearReorderState();   // member moves don't open a block-level gap
@@ -326,6 +323,18 @@ public sealed partial class HomePage : Page
                 innerLayout.SetReorderState(draggedIdx, raw > draggedIdx ? raw - 1 : raw);
                 SetActiveInnerGap(innerLayout);
                 SetDragCaption(e, "Move within group");
+            }
+            else if (TryResolveOtherGroupJoin(point, out var otherGroup, out _))
+            {
+                SetJoinTarget(otherGroup);
+                // Open a phantom slot in the target group so its members bump to preview the landing.
+                if (InnerRepeaterOf(otherGroup) is { Layout: WrapByRowLayout joinLayout } joinInner)
+                {
+                    EnsureInnerAnimations(joinInner);
+                    joinLayout.SetPhantomGap(InnerInsertionIndex(joinInner, joinLayout, point));
+                    SetActiveInnerGap(joinLayout);
+                }
+                SetDragCaption(e, "Move to group");
             }
             else
             {
@@ -424,6 +433,17 @@ public sealed partial class HomePage : Page
                 var anchor = MemberAnchorBefore(group, point, sourceId);
                 _logger?.LogInformation("Reorder within group {Group}: {Member}", group.Id, sourceId);
                 ViewModel.ReorderWithinGroup(sourceId, anchor);
+            }
+            else if (TryResolveOtherGroupJoin(point, out var otherGroup, out _))
+            {
+                // Resolve the landing anchor before any await (the confirm dialog tears down the gap).
+                var anchor = MemberAnchorBefore(otherGroup, point, draggedMemberId: null);
+                if (ViewModel.GroupMemberCount(group.Id) <= 2 && !await ConfirmDisbandAsync())
+                {
+                    return;   // cancelled - the member stays in its group
+                }
+                _logger?.LogInformation("Move {Member} from group {From} to {To}", sourceId, group.Id, otherGroup.Id);
+                ViewModel.MoveToGroup(sourceId, otherGroup.Id, anchor);
             }
             else
             {
@@ -610,6 +630,24 @@ public sealed partial class HomePage : Page
             && p.Y >= r.Top + insetY && p.Y <= r.Bottom - insetY;
     }
 
+    /// <summary>True when the pointer sits in the join zone of a group other than <see cref="_draggedCardGroup"/>
+    /// (used to move a member from one group into another). Out params give the target group + its block index.</summary>
+    private bool TryResolveOtherGroupJoin(Point point, out DeviceGroupCard group, out int index)
+    {
+        index = Layout!.GetBlockIndexAt(point);
+        if (index >= 0 && index < ViewModel.Blocks.Count
+            && ViewModel.Blocks[index] is DeviceGroupCard candidate
+            && !ReferenceEquals(candidate, _draggedCardGroup)
+            && ResolveGroupIntent(index, point) == GroupDropIntent.Join)
+        {
+            group = candidate;
+            return true;
+        }
+        group = null!;
+        index = -1;
+        return false;
+    }
+
     private enum GroupDropIntent { Before, Join, After }
 
     /// <summary>For a lone card dragged over a group section: the thin top strip (its title band) =
@@ -693,20 +731,6 @@ public sealed partial class HomePage : Page
         e.DragUIOverride.IsGlyphVisible = true;
     }
 
-    /// <summary>Attaches (or removes) a Composition implicit Offset animation on each realised block so
-    /// any layout re-arrange slides smoothly. On only during a reorder drag.</summary>
-    private void EnableReorderAnimations(bool enable)
-    {
-        _reorderActive = enable;
-        for (var i = 0; i < ViewModel.Blocks.Count; i++)
-        {
-            if (DevicesRepeater.TryGetElement(i) is UIElement element)
-            {
-                ApplyReorderAnimation(element, enable);
-            }
-        }
-    }
-
     private static void ApplyReorderAnimation(UIElement element, bool enable)
     {
         var visual = ElementCompositionPreview.GetElementVisual(element);
@@ -727,9 +751,44 @@ public sealed partial class HomePage : Page
         visual.ImplicitAnimations = animations;
     }
 
+    /// <summary>Gives every realised block the implicit Offset slide so ANY layout re-arrange glides:
+    /// a reflow (a card's apps row appears and it grows), a device added / removed, a card shown /
+    /// hidden, a group forming / disbanding, or a drag reorder. The implicit is attached AFTER the
+    /// element's first (or recycle-reuse) arrange, never during it, so a freshly realised or recycled
+    /// card snaps into place instead of sliding in from the origin or its previous slot - while every
+    /// later move animates. Detaching on (re)prepare is also what keeps scrolling crisp: a card
+    /// recycled onto a new item is repositioned without the implicit, so it never lags the scroll.</summary>
     private void OnBlockElementPrepared(ItemsRepeater sender, ItemsRepeaterElementPreparedEventArgs args)
     {
-        if (_reorderActive) ApplyReorderAnimation(args.Element, true);
+        var element = args.Element;
+        ApplyReorderAnimation(element, false);   // off for the imminent placement arrange
+        DispatcherQueue.TryEnqueue(
+            Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
+            () => ApplyReorderAnimation(element, true));   // on once placed, for every later move
+    }
+
+    /// <summary>Attaches a Composition implicit Offset animation to an app chip's container the first
+    /// time it renders, so a re-sort (active/idle tiering) or a sibling appearing/leaving slides the
+    /// chips to their new spots instead of popping. Offset ONLY - no opacity, so a recycled container
+    /// can't come back stuck transparent (the bug an opacity hide animation caused). Attached after the
+    /// first arrange (Loaded), so a chip's first appearance is instant with no slide-from-origin. The
+    /// animation lives on the container the WrapPanel arranges, not the template root.</summary>
+    private void OnAppChipLoaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement border) return;
+        if (VisualTreeHelper.GetParent(border) is not UIElement container) return;
+
+        var visual = ElementCompositionPreview.GetElementVisual(container);
+        var compositor = visual.Compositor;
+
+        var offset = compositor.CreateVector3KeyFrameAnimation();
+        offset.Target = "Offset";
+        offset.InsertExpressionKeyFrame(1.0f, "this.FinalValue");
+        offset.Duration = TimeSpan.FromMilliseconds(220);
+
+        var implicits = compositor.CreateImplicitAnimationCollection();
+        implicits["Offset"] = offset;
+        visual.ImplicitAnimations = implicits;
     }
 
     private void OnUndoInvoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
@@ -878,6 +937,30 @@ public sealed partial class HomePage : Page
     {
         SetDragInProgress(false);
     }
+
+    /// <summary>Reveals the chip's "Terminate this app" item only while Shift is held as the context
+    /// menu opens - an Explorer-style hidden power action. The terminate item is the one carrying the
+    /// AppChip as its Tag; its base availability is gated by <see cref="AppChip.ShowProcessActions"/>
+    /// so a System Sounds or closed chip never exposes it even with Shift down. Shift state is read at
+    /// the current input message, which is the right-click that opened the menu.</summary>
+    // CA1822 suppressed: XAML event hookup requires an instance method even though the body is static.
+#pragma warning disable CA1822
+    private void OnAppChipFlyoutOpening(object sender, object e)
+    {
+        if (sender is not MenuFlyout flyout) return;
+        var shiftDown = InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift)
+            .HasFlag(CoreVirtualKeyStates.Down);
+        foreach (var item in flyout.Items)
+        {
+            if (item is MenuFlyoutItem { Tag: AppChip chip } terminate)
+            {
+                terminate.Visibility = shiftDown && chip.ShowProcessActions
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+            }
+        }
+    }
+#pragma warning restore CA1822
 
     /// <summary>Reveals every group container's dotted outline while a drag is in flight, so groups
     /// read as transparent at rest and show their bounds only while dragging.</summary>

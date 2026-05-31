@@ -69,11 +69,25 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     public partial bool FilterAudioForwarders { get; set; }
 
+    /// <summary>Whether a rule-pinned app always shows its chip (and the lock padlock badge), or only
+    /// while it's audible. Only meaningful when <see cref="ShowAppIndicators"/> is on.</summary>
+    [ObservableProperty]
+    public partial bool AlwaysShowPinnedApps { get; set; }
+
     /// <summary>Seconds a Devices-page app chip lingers (dimmed) after its app stops playing or
     /// closes, before it's removed. Bound to a NumberBox, so it's a double here; persisted as a
     /// clamped int.</summary>
     [ObservableProperty]
     public partial double AppChipLingerSeconds { get; set; }
+
+    /// <summary>Card-height ComboBox index. Maps 1:1 to <see cref="CardHeightMode"/>
+    /// (Balanced=0, MatchRow=1, Dynamic=2).</summary>
+    [ObservableProperty]
+    public partial int CardHeightModeIndex { get; set; }
+
+    /// <summary>Whether device cards draw hairline separators between their sections. Default on.</summary>
+    [ObservableProperty]
+    public partial bool ShowCardDividers { get; set; }
 
     /// <summary>Bound to the theme ComboBox SelectedIndex. Maps 1:1 to <see cref="AppTheme"/>
     /// (System=0, Light=1, Dark=2).</summary>
@@ -158,7 +172,10 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
             ShowAppIndicators = _settings.Current.ShowAppIndicators;
             ShowAppPeakMeters = _settings.Current.ShowAppPeakMeters;
             FilterAudioForwarders = _settings.Current.FilterAudioForwarders;
+            AlwaysShowPinnedApps = _settings.Current.AlwaysShowPinnedApps;
             AppChipLingerSeconds = _settings.Current.AppChipLingerSeconds;
+            CardHeightModeIndex = (int)_settings.Current.CardHeight;
+            ShowCardDividers = _settings.Current.ShowCardDividers;
             AppThemeIndex = (int)_settings.Current.Theme;
             BackdropIndex = (int)_settings.Current.Backdrop;
             EnableWaveLink = _settings.Current.EnableWaveLink;
@@ -195,6 +212,7 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     }
     partial void OnShowAppPeakMetersChanged(bool value) => Persist(s => s.ShowAppPeakMeters = value);
     partial void OnFilterAudioForwardersChanged(bool value) => Persist(s => s.FilterAudioForwarders = value);
+    partial void OnAlwaysShowPinnedAppsChanged(bool value) => Persist(s => s.AlwaysShowPinnedApps = value);
 
     /// <summary>Gates the app-indicator child settings - they only matter while the chips show.</summary>
     public bool AppIndicatorChildrenEnabled => ShowAppIndicators;
@@ -267,6 +285,8 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         var seconds = (int)Math.Clamp(Math.Round(value), 0, 600);
         Persist(s => s.AppChipLingerSeconds = seconds);
     }
+    partial void OnCardHeightModeIndexChanged(int value) => Persist(s => s.CardHeight = (CardHeightMode)value);
+    partial void OnShowCardDividersChanged(bool value) => Persist(s => s.ShowCardDividers = value);
     partial void OnAppThemeIndexChanged(int value) => Persist(s => s.Theme = (AppTheme)value);
     partial void OnBackdropIndexChanged(int value) => Persist(s => s.Backdrop = (BackdropMode)value);
     partial void OnEnableWaveLinkChanged(bool value) => Persist(s => s.EnableWaveLink = value);

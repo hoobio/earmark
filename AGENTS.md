@@ -47,6 +47,10 @@ dotnet build src/Earmark.App/Earmark.App.csproj -c Debug -p:Platform=x64 --no-re
 
 If you only edited `Earmark.Core` or `Earmark.Audio` you can build those individually for fast iteration without killing the app, but a final `Earmark.App` build still requires the kill.
 
+## Working alongside other agents
+
+This repo is sometimes edited by more than one agent at once, so a build can go red on changes you never touched. Don't patch around another agent's work-in-progress, and don't treat their error as your blocker. Rebuild first (their tree may already be fixed between attempts), and if a failure clearly isn't from your edits, assume the owning agent will resolve it: wait and re-poll the build rather than "fixing" their half-written code. Only commit or push once the build is green. When asked to commit changes that mix your work with another agent's in the same file, stage the whole file rather than trying to surgically separate the hunks.
+
 ## Where state lives
 
 - Rules: `%UserProfile%\Documents\Hoobi\Earmark\rules.json`
@@ -129,6 +133,7 @@ The UI follows current [Fluent 2](https://fluent2.microsoft.design) standards. B
 - **`Padding`/`Margin` want a `Thickness`, not a `double`.** The `Spacing*` resources are `x:Double` (sized for `StackPanel.Spacing` and `Grid.ColumnSpacing`/`RowSpacing`, which are doubles). Binding one to a `Thickness` property throws at page load (`Failed to assign to property ... Border.Padding`) - it is NOT caught at build time. For padding/margins use a `Thickness` resource (`PagePadding`, `SectionPadding`) or a literal (`Padding="16"`). Same trap with an `x:Double PagePadding` bound to `Grid.Padding`.
 - **Editor disposable analyzer rules**: `CA1001`, `CA1816`, `CA1848`, `CA1873` etc are silenced in `.editorconfig`. Don't add them back unless you also fix the call sites.
 - **`Microsoft.Win32.Registry`**: don't add as a separate package. Already provided by the windows TFM (`net10.0-windows10.0.26100.0`); adding the package triggers `NU1510`.
+- **App-notification layout workaround (WinAppSDK 2.x self-contained, [microsoft/WindowsAppSDK#6071](https://github.com/microsoft/WindowsAppSDK/issues/6071))**: an unpackaged self-contained 2.x build omits `Microsoft.WindowsAppRuntime.Insights.Resource.dll`, so `AppNotificationManager.Register` throws `0x8007007E` (MOD_NOT_FOUND) even though `IsSupported()` returns `true`. The `_EarmarkLayoutInsightsResource` target in [Earmark.App.csproj](src/Earmark.App/Earmark.App.csproj) extracts that one DLL from the runtime MSIX into build + publish output; the explicit `Microsoft.WindowsAppSDK.Runtime` PackageReference exists only to expose its package path (`GeneratePathProperty`), not as a fix in itself. **Recheck #6071 on every `Microsoft.WindowsAppSDK` bump**: delete `Microsoft.WindowsAppRuntime.Insights.Resource.dll` from a self-contained build output and relaunch - if `Register()` now succeeds (log shows `AppNotificationManager registered`, no `0x8007007E`), the SDK lays it out itself, so drop the target and the explicit Runtime reference (props + csproj).
 
 ## Version, About, and the update check
 

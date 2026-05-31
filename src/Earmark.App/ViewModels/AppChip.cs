@@ -1,6 +1,7 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
+using Earmark.App.Controls;
 using Earmark.App.Services;
 using Earmark.Core.Audio;
 using Earmark.Core.Models;
@@ -15,7 +16,7 @@ namespace Earmark.App.ViewModels;
 /// identity needed for drag/drop reroute, the rule-lock state that gates dragging, the
 /// pid-keyed peak level, and the lazily-loaded icon.
 /// </summary>
-public partial class AppChip : ObservableObject
+public partial class AppChip : ObservableObject, IWrapOrdered
 {
     private readonly ISessionIconService _iconService;
 
@@ -78,8 +79,10 @@ public partial class AppChip : ObservableObject
     }
 
     private readonly Action<AppChip>? _onHide;
+    private readonly Action<AppChip>? _onClose;
+    private readonly Action<AppChip>? _onTerminate;
 
-    public AppChip(AudioSession session, string placementEndpointId, ISessionIconService iconService, PeakMeterOptions meterOptions, RoutingRule? lockingRule, bool startsActive = true, DeviceCard? ownerCard = null, Action<AppChip>? onHide = null)
+    public AppChip(AudioSession session, string placementEndpointId, ISessionIconService iconService, PeakMeterOptions meterOptions, RoutingRule? lockingRule, bool startsActive = true, DeviceCard? ownerCard = null, Action<AppChip>? onHide = null, Action<AppChip>? onClose = null, Action<AppChip>? onTerminate = null, bool canControlProcess = false, bool canCloseProcess = false, bool isElevated = false)
     {
         Session = session ?? throw new ArgumentNullException(nameof(session));
         PlacementEndpointId = placementEndpointId ?? throw new ArgumentNullException(nameof(placementEndpointId));
@@ -88,6 +91,11 @@ public partial class AppChip : ObservableObject
         LockingRule = lockingRule;
         OwnerCard = ownerCard;
         _onHide = onHide;
+        _onClose = onClose;
+        _onTerminate = onTerminate;
+        CanControlProcess = canControlProcess;
+        CanCloseProcess = canCloseProcess;
+        IsElevated = isElevated;
         // An audible chip is treated as having started its run the moment we first see it (we can't
         // know when it truly started before observing). A silent rule-pinned chip starts with both
         // timestamps null - "never produced audio" - so it sits in the back tier, dimmed, until it
@@ -157,6 +165,14 @@ public partial class AppChip : ObservableObject
     public AudioSession Session { get; private set; }
     public RoutingRule? LockingRule { get; private set; }
     public bool IsRuleLocked => LockingRule is not null;
+
+    /// <summary>Visibility of the rule-lock padlock badge: shown when the chip is rule-locked AND
+    /// the "always show pinned apps" indicator setting is on. Bound via an x:Bind function (returning
+    /// <see cref="Visibility"/> directly, since function bindings don't take a converter) so it
+    /// re-evaluates live when the shared <see cref="PeakMeterOptions.AlwaysShowPinnedApps"/> flips -
+    /// that observable path argument is what drives the re-evaluation.</summary>
+    public Visibility LockBadgeVisibility(bool alwaysShowPinned) =>
+        IsRuleLocked && alwaysShowPinned ? Visibility.Visible : Visibility.Collapsed;
     // Closed apps can't be rerouted (the process is gone), so the chip stops being a drag source.
     public bool CanDrag => !IsRuleLocked && !IsClosed && !Session.IsSystemSounds;
     public uint ProcessId => Session.ProcessId;
@@ -179,6 +195,58 @@ public partial class AppChip : ObservableObject
     /// only the chip is suppressed). Persisted via <c>HomeViewModel</c>; reversible from Settings.</summary>
     [RelayCommand]
     private void Hide() => _onHide?.Invoke(this);
+
+    /// <summary>Politely closes the app (WM_CLOSE, the SIGTERM equivalent) so it can save / prompt.
+    /// Routed through <c>HomeViewModel</c>, which reports any failure as a toast.</summary>
+    [RelayCommand]
+    private void Close() => _onClose?.Invoke(this);
+
+    /// <summary>Force-terminates the app (TerminateProcess, the SIGKILL equivalent). The shift-revealed,
+    /// red menu action - no save, no prompt. Routed through <c>HomeViewModel</c>.</summary>
+    [RelayCommand]
+    private void Terminate() => _onTerminate?.Invoke(this);
+
+    /// <summary>True when Earmark can force-terminate this process (it holds PROCESS_TERMINATE access).
+    /// Drives the Terminate item. Separate from <see cref="CanCloseProcess"/>: terminate access and a
+    /// graceful WM_CLOSE are gated differently, so an elevated app can be terminable but not closeable.
+    /// Probed when the chip is built (elevation can't change for a live process), refreshed on
+    /// <see cref="Revive"/>.</summary>
+    [ObservableProperty]
+    public partial bool CanControlProcess { get; set; }
+
+    partial void OnCanControlProcessChanged(bool value) => OnPropertyChanged(nameof(TerminateActionLabel));
+
+    /// <summary>True when a graceful close would reach this app (its integrity level is at or below
+    /// Earmark's, so a WM_CLOSE isn't UIPI-blocked). Drives the Close item. False for an elevated
+    /// target from a medium Earmark - even when <see cref="CanControlProcess"/> (terminate) is true.</summary>
+    [ObservableProperty]
+    public partial bool CanCloseProcess { get; set; }
+
+    partial void OnCanCloseProcessChanged(bool value) => OnPropertyChanged(nameof(CloseActionLabel));
+
+    /// <summary>True when the app runs elevated (High integrity or above, i.e. as administrator). Drives
+    /// the chip's shield badge. Absolute (independent of Earmark's own elevation), matching the UAC
+    /// shield convention; it also explains at a glance why an elevated app's Close item is disabled.</summary>
+    [ObservableProperty]
+    public partial bool IsElevated { get; set; }
+
+    /// <summary>The close / terminate items only make sense for a live, real process: hidden for
+    /// System Sounds (no owning process) and for a closed chip (the process is gone and its pid may
+    /// have been reused, so acting on it could hit the wrong process).</summary>
+    public bool ShowProcessActions => !Session.IsSystemSounds && !IsClosed;
+
+    /// <summary>Menu label for the graceful close, doubling as the disabled-state explanation when the
+    /// app is elevated (a disabled MenuFlyoutItem can't show a tooltip, so the reason lives in the text).</summary>
+    public string CloseActionLabel => CanCloseProcess ? "Close this app" : "Cannot close elevated app";
+
+    /// <summary>Menu label for the force-terminate, with the same elevated-state relabel as
+    /// <see cref="CloseActionLabel"/>.</summary>
+    public string TerminateActionLabel => CanControlProcess ? "Terminate this app" : "Cannot terminate elevated app";
+
+    /// <summary>Set when the user deliberately closed / terminated this app from its chip menu and the
+    /// request succeeded. Tells the prune to drop the chip after a short window instead of the full
+    /// configurable linger - the user asked it to go, so a stale dimmed chip shouldn't outstay it.</summary>
+    public bool UserClosed { get; set; }
 
     public string LockTooltip
     {
@@ -264,6 +332,7 @@ public partial class AppChip : ObservableObject
                 OnPropertyChanged(nameof(ShowClosedBadge));
                 OnPropertyChanged(nameof(CanDrag));
                 OnPropertyChanged(nameof(ChipOpacity));
+                OnPropertyChanged(nameof(ShowProcessActions));
             }
             if (PlayingSince is null)
             {
@@ -320,16 +389,23 @@ public partial class AppChip : ObservableObject
         OnPropertyChanged(nameof(ShowClosedBadge));
         OnPropertyChanged(nameof(ChipOpacity));
         OnPropertyChanged(nameof(CanDrag));
+        OnPropertyChanged(nameof(ShowProcessActions));
     }
 
     /// <summary>Reverses <see cref="MarkClosed"/> when the app comes back within the linger window.
     /// Adopts the live session and rule match so metering and drag target the current process. The
     /// run stays stopped until the revived app's next audible tick starts a fresh run.</summary>
-    public void Revive(AudioSession session, RoutingRule? lockingRule)
+    public void Revive(AudioSession session, RoutingRule? lockingRule, bool canControlProcess, bool canCloseProcess, bool isElevated)
     {
         Session = session ?? throw new ArgumentNullException(nameof(session));
         LockingRule = lockingRule;
         ClosedAt = null;
+        // The revived chip adopts a fresh process, so re-probe its reachability and clear any
+        // user-close intent carried over from the previous run.
+        CanControlProcess = canControlProcess;
+        CanCloseProcess = canCloseProcess;
+        IsElevated = isElevated;
+        UserClosed = false;
         if (Icon is null && !string.IsNullOrEmpty(session.ExecutablePath))
         {
             Icon = _iconService.TryGetIcon(session.ProcessId, session.ExecutablePath);
@@ -342,6 +418,7 @@ public partial class AppChip : ObservableObject
         OnPropertyChanged(nameof(LockTooltip));
         OnPropertyChanged(nameof(Tooltip));
         OnPropertyChanged(nameof(DisplayLabel));
+        OnPropertyChanged(nameof(ShowProcessActions));
     }
 
     /// <summary>Peak as a double for the chip's <see cref="Controls.ChannelPeakMeter"/> underbar:
@@ -352,4 +429,13 @@ public partial class AppChip : ObservableObject
     {
         OnPropertyChanged(nameof(PeakLevelScalar));
     }
+
+    /// <summary>Visual sort rank within the card's apps row, assigned by
+    /// <c>HomeViewModel.SortCardApps</c>. The apps-row <see cref="Controls.WrapPanel"/> arranges chips
+    /// by this rather than by collection order, so a re-sort re-positions the SAME containers and each
+    /// chip's implicit Offset animation glides it to its new slot. Reordering the collection instead
+    /// (an <c>ObservableCollection.Move</c>) makes the ItemsControl recreate the moved chip's container,
+    /// which lands fresh at its destination with no slide.</summary>
+    [ObservableProperty]
+    public partial int WrapOrder { get; set; }
 }

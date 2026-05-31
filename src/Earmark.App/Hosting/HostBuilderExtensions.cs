@@ -44,6 +44,8 @@ internal static class HostBuilderExtensions
         builder.Services.AddSingleton<INavigationService, NavigationService>();
         builder.Services.AddSingleton<IWindowChromeManager, WindowChromeManager>();
         builder.Services.AddSingleton<INotificationService, NotificationService>();
+        builder.Services.AddSingleton<IInAppNotificationService, InAppNotificationService>();
+        builder.Services.AddSingleton<IProcessControlService, ProcessControlService>();
         builder.Services.AddSingleton<IUpdateService, UpdateService>();
         builder.Services.AddSingleton<IEndpointWriter, EndpointWriter>();
         builder.Services.AddSingleton<ISessionIconService, SessionIconService>();

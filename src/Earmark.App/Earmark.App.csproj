@@ -51,6 +51,10 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" />
     <PackageReference Include="Microsoft.WindowsAppSDK" />
+    <!-- Workaround for microsoft/WindowsAppSDK#6071; see Directory.Packages.props and the
+         _EarmarkLayoutInsightsResource target below. GeneratePathProperty exposes
+         $(PkgMicrosoft_WindowsAppSDK_Runtime) so the target can read the runtime MSIX. -->
+    <PackageReference Include="Microsoft.WindowsAppSDK.Runtime" GeneratePathProperty="true" />
     <PackageReference Include="CommunityToolkit.Mvvm" />
     <PackageReference Include="CommunityToolkit.WinUI.Controls.SettingsControls" />
     <PackageReference Include="CommunityToolkit.WinUI.Behaviors" />
@@ -121,6 +125,38 @@
           Condition="$([System.Text.RegularExpressions.Regex]::IsMatch('%(FileName)%(Extension)', '$(_EarmarkMLFilenameRegex)'))" />
     </ItemGroup>
     <Message Importance="high" Text="EarmarkPruneML: ResolvedFileToPublish count after prune = @(ResolvedFileToPublish-&gt;Count())" />
+  </Target>
+
+  <!--
+    Workaround for microsoft/WindowsAppSDK#6071: a 2.x unpackaged self-contained build does
+    NOT lay out Microsoft.WindowsAppRuntime.Insights.Resource.dll, so AppNotificationManager
+    .Register throws 0x8007007E (MOD_NOT_FOUND) and toast notifications break. The explicit
+    Microsoft.WindowsAppSDK.Runtime reference alone does not fix it (its targets only do a
+    version-consistency check). The DLL ships inside that package's WindowsAppRuntime MSIX,
+    so extract just that one entry into the build and publish output. Drop once #6071 is fixed.
+  -->
+  <PropertyGroup>
+    <_EarmarkRuntimeMsixArch Condition="'$(Platform)' == 'x64'">win10-x64</_EarmarkRuntimeMsixArch>
+    <_EarmarkRuntimeMsixArch Condition="'$(Platform)' == 'ARM64'">win10-arm64</_EarmarkRuntimeMsixArch>
+  </PropertyGroup>
+
+  <Target Name="_EarmarkLayoutInsightsResource"
+          AfterTargets="Build;Publish"
+          Condition="'$(WindowsAppSDKSelfContained)' == 'true' and '$(_EarmarkRuntimeMsixArch)' != '' and '$(PkgMicrosoft_WindowsAppSDK_Runtime)' != ''">
+    <ItemGroup>
+      <_EarmarkRuntimeMsix Include="$(PkgMicrosoft_WindowsAppSDK_Runtime)\tools\MSIX\$(_EarmarkRuntimeMsixArch)\Microsoft.WindowsAppRuntime.*.msix"
+                           Exclude="$(PkgMicrosoft_WindowsAppSDK_Runtime)\tools\MSIX\$(_EarmarkRuntimeMsixArch)\*.DDLM.*.msix;$(PkgMicrosoft_WindowsAppSDK_Runtime)\tools\MSIX\$(_EarmarkRuntimeMsixArch)\*.Main.*.msix;$(PkgMicrosoft_WindowsAppSDK_Runtime)\tools\MSIX\$(_EarmarkRuntimeMsixArch)\*.Singleton.*.msix" />
+    </ItemGroup>
+    <Unzip SourceFiles="@(_EarmarkRuntimeMsix)"
+           DestinationFolder="$(OutDir)"
+           Include="Microsoft.WindowsAppRuntime.Insights.Resource.dll"
+           OverwriteReadOnlyFiles="true"
+           Condition="'@(_EarmarkRuntimeMsix)' != ''" />
+    <Unzip SourceFiles="@(_EarmarkRuntimeMsix)"
+           DestinationFolder="$(PublishDir)"
+           Include="Microsoft.WindowsAppRuntime.Insights.Resource.dll"
+           OverwriteReadOnlyFiles="true"
+           Condition="'@(_EarmarkRuntimeMsix)' != '' and '$(PublishDir)' != '' and Exists('$(PublishDir)')" />
   </Target>
 
 </Project>

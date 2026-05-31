@@ -31,6 +31,10 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     // Bounds for the user-configurable linger window (AppSettings.AppChipLingerSeconds).
     private const int MaxLingerSeconds = 600;
 
+    // Short linger for a chip the user deliberately closed / terminated: the request succeeded, so
+    // the dimmed chip shouldn't outstay the configurable window the user set for incidental exits.
+    private static readonly TimeSpan UserClosedLinger = TimeSpan.FromSeconds(3);
+
     private readonly IRulesService _rules;
     private readonly IAudioEndpointService _endpoints;
     private readonly IEndpointWriter _writer;
@@ -50,11 +54,14 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     private WaveLinkChannelStyle? _lastAppliedStyle;
     private bool? _lastFilterForwarders;
     private bool? _lastShowAppIndicators;
+    private bool? _lastAlwaysShowPinned;
     private int? _lastHiddenAppsCount;
     /// <summary>Identity keys of apps the user has permanently hidden from the chip rows, mirrored
     /// from <see cref="AppSettings.HiddenApps"/> for O(1) lookups on the 20Hz tick.</summary>
     private readonly HashSet<string> _hiddenAppKeys = new(StringComparer.OrdinalIgnoreCase);
     private readonly INotificationService _notifications;
+    private readonly IInAppNotificationService _inAppNotifications;
+    private readonly IProcessControlService _processControl;
     private readonly ILogger<HomeViewModel> _logger;
     private readonly Dictionary<string, DateTime> _lastReconcileToast = new(StringComparer.OrdinalIgnoreCase);
     private static readonly TimeSpan ToastRateLimit = TimeSpan.FromSeconds(15);
@@ -84,6 +91,8 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         IWaveLinkService waveLink,
         IWaveLinkVisualService waveLinkVisuals,
         INotificationService notifications,
+        IInAppNotificationService inAppNotifications,
+        IProcessControlService processControl,
         IDispatcherQueueProvider dispatcher,
         IDeviceDefaultsService deviceDefaults,
         ILogger<HomeViewModel> logger)
@@ -103,6 +112,8 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         _waveLink = waveLink ?? throw new ArgumentNullException(nameof(waveLink));
         _waveLinkVisuals = waveLinkVisuals ?? throw new ArgumentNullException(nameof(waveLinkVisuals));
         _notifications = notifications ?? throw new ArgumentNullException(nameof(notifications));
+        _inAppNotifications = inAppNotifications ?? throw new ArgumentNullException(nameof(inAppNotifications));
+        _processControl = processControl ?? throw new ArgumentNullException(nameof(processControl));
         _dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
         _deviceDefaults = deviceDefaults ?? throw new ArgumentNullException(nameof(deviceDefaults));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -170,6 +181,15 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     private readonly List<DeviceCard> _visibleCards = new();
 
     public IReadOnlyList<DeviceCard> VisibleCards => _visibleCards;
+
+    /// <summary>Single chokepoint for "this card's apps changed": refreshes the card's HasApps-derived
+    /// bindings (section visibility, layout opt-out, dividers). Called wherever a chip is added /
+    /// removed. The resulting reflow is animated by the page's always-on block slide, so there's no
+    /// signal to raise here.</summary>
+    private static void NotifyCardApps(DeviceCard card)
+    {
+        card.NotifyAppsChanged();
+    }
 
     /// <summary>Group container VMs by id, reused across rebuilds so an in-progress title edit and
     /// the member card instances survive.</summary>
@@ -275,14 +295,19 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         TimeSpan.FromSeconds(Math.Clamp(_settings.Current.AppChipLingerSeconds, 0, MaxLingerSeconds));
 
     /// <summary>True when an unpinned chip has lingered past <see cref="LingerWindow"/> and should
-    /// be removed. Rule-pinned chips stay while their app runs; once closed, even they age out.</summary>
-    private static bool ShouldPrune(AppChip chip, DateTime now, TimeSpan linger)
+    /// be removed. Rule-pinned chips stay while their app runs (and skip the prune) only while
+    /// <paramref name="alwaysShowPinned"/> is on; with it off a pinned chip ages out like any other,
+    /// and a forced-show pinned chip that has never made a sound is dropped outright. Once closed,
+    /// even a pinned chip ages out.</summary>
+    private static bool ShouldPrune(AppChip chip, DateTime now, TimeSpan linger, bool alwaysShowPinned)
     {
-        if (chip.IsClosed) return now - chip.ClosedAt!.Value > linger;
-        if (chip.RulePinnedHere) return false;
+        if (chip.IsClosed) return now - chip.ClosedAt!.Value > (chip.UserClosed ? UserClosedLinger : linger);
+        if (chip.RulePinnedHere && alwaysShowPinned) return false;
         if (chip.PlayingSince is not null) return false;            // still producing audio
         if (chip.LastStoppedAt is { } stopped) return now - stopped > linger;
-        return false;   // never played and not pinned - nothing to age out from
+        // Never produced audio. A normal chip never reaches this state (additions need audible or
+        // pinned); the only one here is a silent pinned chip the setting has just un-stuck - drop it.
+        return chip.RulePinnedHere && !alwaysShowPinned;
     }
 
     /// <summary>Whether a session earns an app chip, honouring the live "filter audio forwarders"
@@ -302,6 +327,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     {
         var now = DateTime.UtcNow;
         var linger = LingerWindow;
+        var alwaysShowPinned = _settings.Current.AlwaysShowPinnedApps;
         var sessionsSnapshot = _sessions.GetSessions();
         var rulesSnapshot = _rules.Rules;
         List<AudioEndpoint>? combinedEndpointsCache = null;
@@ -363,13 +389,14 @@ public partial class HomeViewModel : ObservableObject, IDisposable
                         .Concat(_endpoints.GetEndpoints(EndpointFlow.Capture))
                         .ToList();
                     var match = _matcher.FindAppRoute(session, EndpointFlow.Render, rulesSnapshot, combinedEndpointsCache, sessionsSnapshot);
-                    var revivedChip = new AppChip(session, card.Endpoint.Id, _iconService, _meterOptions, match?.Rule, ownerCard: card, onHide: HideApp)
+                    var revivedChip = new AppChip(session, card.Endpoint.Id, _iconService, _meterOptions, match?.Rule, ownerCard: card, onHide: HideApp, onClose: CloseApp, onTerminate: TerminateApp, canControlProcess: _processControl.CanControl(session.ProcessId), canCloseProcess: _processControl.CanClose(session.ProcessId), isElevated: _processControl.IsElevated(session.ProcessId))
                     {
                         RulePinnedHere = match is not null &&
                             string.Equals(match.Endpoint.Id, card.Endpoint.Id, StringComparison.OrdinalIgnoreCase),
                     };
                     InsertChipSorted(card.Apps, revivedChip);
-                    card.NotifyAppsChanged();
+                    SortCardApps(card);
+                    NotifyCardApps(card);
                     seenAppsOnThisCard.Add(session.IdentityKey);
                     var sessionEndpointMatchesCard = string.Equals(session.CurrentEndpointId, card.Endpoint.Id, StringComparison.OrdinalIgnoreCase);
                     _logger.LogInformation(
@@ -397,7 +424,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
                             if (otherPeak < AppChip.AudibleAmplitudeThreshold)
                             {
                                 otherCard.Apps.RemoveAt(oi);
-                                otherCard.NotifyAppsChanged();
+                                NotifyCardApps(otherCard);
                             }
                         }
                     }
@@ -411,12 +438,12 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             // so it never touches the running-process list on the UI thread.
             for (var i = card.Apps.Count - 1; i >= 0; i--)
             {
-                if (ShouldPrune(card.Apps[i], now, linger))
+                if (ShouldPrune(card.Apps[i], now, linger, alwaysShowPinned))
                 {
                     _logger.LogInformation("Chip prune: pid={Pid} closed={Closed} past linger",
                         card.Apps[i].ProcessId, card.Apps[i].IsClosed);
                     card.Apps.RemoveAt(i);
-                    card.NotifyAppsChanged();
+                    NotifyCardApps(card);
                 }
             }
         }
@@ -615,12 +642,18 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             // it doesn't re-trigger; the chip's own Hide path already updated it before saving.
             var hiddenAppsChanged = _settings.Current.HiddenApps.Count != _lastHiddenAppsCount;
             if (hiddenAppsChanged) RefreshHiddenApps();
+            // The always-show-pinned toggle changes which chips exist (silent pinned apps gain or
+            // lose their forced chip), so a change re-runs the in-place reconcile alongside the
+            // forwarder filter and master toggle. The padlock badge updates live via the
+            // _meterOptions push in SyncMeterOptions above - no rebuild needed for that part.
             if (hiddenAppsChanged ||
                 _settings.Current.FilterAudioForwarders != _lastFilterForwarders ||
-                _settings.Current.ShowAppIndicators != _lastShowAppIndicators)
+                _settings.Current.ShowAppIndicators != _lastShowAppIndicators ||
+                _settings.Current.AlwaysShowPinnedApps != _lastAlwaysShowPinned)
             {
                 _lastFilterForwarders = _settings.Current.FilterAudioForwarders;
                 _lastShowAppIndicators = _settings.Current.ShowAppIndicators;
+                _lastAlwaysShowPinned = _settings.Current.AlwaysShowPinnedApps;
                 QueueAppsReconcile();
             }
             if (_settings.Current.WaveLinkChannelStyle == _lastAppliedStyle) return;
@@ -639,6 +672,9 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         _meterOptions.SingleColour = PeakMeterOptions.ColourFromHex(s.PeakMeterSingleColour);
         _meterOptions.ShowAppIndicators = s.ShowAppIndicators;
         _meterOptions.ShowAppMeters = s.ShowAppPeakMeters;
+        _meterOptions.AlwaysShowPinnedApps = s.AlwaysShowPinnedApps;
+        _meterOptions.CardHeight = s.CardHeight;
+        _meterOptions.ShowCardDividers = s.ShowCardDividers;
         foreach (var card in _allCards) card.NotifyMeterStyleChanged();
     }
 
@@ -706,7 +742,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         {
             if (card.Apps.Count == 0) continue;
             card.Apps.Clear();
-            card.NotifyAppsChanged();
+            NotifyCardApps(card);
         }
     }
 
@@ -762,8 +798,14 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         }
 
         // Fold in matched-but-silent running apps (no audio session, so absent from the snapshot).
+        // Only when "always show pinned apps" is on: a synthetic session exists purely to give a
+        // silent rule-pinned app a chip before it makes a sound, which is exactly what the setting
+        // governs. Off, we skip it so a pinned app's chip appears only once it's audible.
+        var alwaysShowPinned = _settings.Current.AlwaysShowPinnedApps;
         var runningIdentities = new HashSet<string>(StringComparer.Ordinal);
-        var synthetic = BuildSyntheticSessions(rules, combined, sessions, realIdentities, routeByPid, runningIdentities);
+        var synthetic = alwaysShowPinned
+            ? BuildSyntheticSessions(rules, combined, sessions, realIdentities, routeByPid, runningIdentities)
+            : new List<AudioSession>();
         IReadOnlyList<AudioSession> effectiveSessions = sessions;
         if (synthetic.Count > 0)
         {
@@ -781,7 +823,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
 
         foreach (var card in _allCards)
         {
-            SyncCardApps(card, effectiveSessions, routeByPid, existsIdentities, liveSessionByIdentity);
+            SyncCardApps(card, effectiveSessions, routeByPid, existsIdentities, liveSessionByIdentity, alwaysShowPinned);
         }
     }
 
@@ -957,14 +999,15 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         IReadOnlyList<AudioSession> sessions,
         Dictionary<uint, AppRouteMatch?> routeByPid,
         HashSet<string> existsIdentities,
-        Dictionary<string, AudioSession> liveSessionByIdentity)
+        Dictionary<string, AudioSession> liveSessionByIdentity,
+        bool alwaysShowPinned)
     {
         if (card.Endpoint.Flow != EndpointFlow.Render)
         {
             if (card.Apps.Count > 0)
             {
                 card.Apps.Clear();
-                card.NotifyAppsChanged();
+                NotifyCardApps(card);
             }
             return;
         }
@@ -982,7 +1025,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
                     removedHidden = true;
                 }
             }
-            if (removedHidden) card.NotifyAppsChanged();
+            if (removedHidden) NotifyCardApps(card);
         }
 
         // Classify + age out existing chips. An app whose identity is on no live source (no audio
@@ -1008,18 +1051,18 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             {
                 // App reopened with a live audio session - re-adopt it (and its rule match).
                 routeByPid.TryGetValue(live.ProcessId, out var liveMatch);
-                chip.Revive(live, liveMatch?.Rule);
+                chip.Revive(live, liveMatch?.Rule, _processControl.CanControl(live.ProcessId), _processControl.CanClose(live.ProcessId), _processControl.IsElevated(live.ProcessId));
             }
 
             // Never prune a chip that's audible right now: the run state can be stale here (the
             // 20Hz tick that advances it is paused while the Home page is off-screen). The visible
             // path's Phase 3 prune ages idle/closed chips out with a fresh clock.
-            if (!audibleHere && ShouldPrune(chip, now, linger))
+            if (!audibleHere && ShouldPrune(chip, now, linger, alwaysShowPinned))
             {
                 _logger.LogInformation("Chip removed: pid={Pid} key='{Key}' card={Card} closed={Closed}",
                     chip.ProcessId, key, card.Endpoint.DisplayName, chip.IsClosed);
                 card.Apps.RemoveAt(i);
-                card.NotifyAppsChanged();
+                NotifyCardApps(card);
             }
         }
 
@@ -1075,7 +1118,9 @@ public partial class HomeViewModel : ObservableObject, IDisposable
 
             var livePeak = _sessionMeters.GetPeak(session.ProcessId, card.Endpoint.Id) ?? 0f;
             var audible = livePeak >= AppChip.AudibleAmplitudeThreshold;
-            if (!audible && !pinnedHere) continue;
+            // A silent app earns a chip only when a rule pins it here AND the always-show setting is
+            // on. Off, a pinned-but-silent app is treated like any other silent app (no chip).
+            if (!audible && !(pinnedHere && alwaysShowPinned)) continue;
 
             // One addition per app, preferring an audible representative (so its meter shows real
             // audio) and carrying any rule match for the lock badge.
@@ -1097,7 +1142,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         foreach (var add in additions.Values
             .OrderBy(a => a.Session.IsSystemSounds ? "System Sounds" : a.Session.DisplayName, StringComparer.OrdinalIgnoreCase))
         {
-            var chip = new AppChip(add.Session, card.Endpoint.Id, _iconService, _meterOptions, add.Rule, startsActive: add.Audible, ownerCard: card, onHide: HideApp)
+            var chip = new AppChip(add.Session, card.Endpoint.Id, _iconService, _meterOptions, add.Rule, startsActive: add.Audible, ownerCard: card, onHide: HideApp, onClose: CloseApp, onTerminate: TerminateApp, canControlProcess: _processControl.CanControl(add.Session.ProcessId), canCloseProcess: _processControl.CanClose(add.Session.ProcessId), isElevated: _processControl.IsElevated(add.Session.ProcessId))
             {
                 RulePinnedHere = add.PinnedHere,
             };
@@ -1124,7 +1169,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         // Pin / close state just changed for some chips - re-sort so the audio-activity order holds.
         SortCardApps(card);
 
-        card.NotifyAppsChanged();
+        NotifyCardApps(card);
     }
 
     /// <summary>Peak for the chip's app on an endpoint: the max live peak across every process of
@@ -1198,38 +1243,37 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// Reorders a card's chips to <see cref="CompareChips"/> order using
-    /// <see cref="ObservableCollection{T}.Move"/>, so the apps row's <c>ReorderThemeTransition</c>
-    /// slides each chip to its new slot (the "swap" animation). Move is safe here because the apps
-    /// row is a plain ItemsControl + WrapPanel, not the ItemsRepeater + virtualizing layout that
-    /// ignored Move. Only positions actually out of place are touched (stable order is a no-op), and
-    /// chip instance identity is preserved so icons / bindings survive the reorder.
+    /// Assigns each chip its <see cref="AppChip.WrapOrder"/> rank in <see cref="CompareChips"/> order.
+    /// The apps-row <see cref="Controls.WrapPanel"/> arranges chips by that rank, NOT by collection
+    /// order, so a re-sort re-positions the SAME containers and each moved chip's implicit Offset
+    /// animation glides it to its new slot. We deliberately do NOT <see cref="ObservableCollection{T}.Move"/>
+    /// the collection: a Move makes the ItemsControl recreate the moved chip's container, which lands
+    /// fresh at its destination with no slide (only the chips that stayed would animate). The
+    /// collection keeps its arrival order; chip instance identity is preserved so icons / bindings survive.
     /// </summary>
     private void SortCardApps(DeviceCard card)
     {
         var chips = card.Apps;
-        if (chips.Count < 2) return;
+        if (chips.Count == 0) return;
 
         var desired = new List<AppChip>(chips);
         desired.Sort(CompareChips);
 
-        var moved = false;
+        var changed = false;
         for (var i = 0; i < desired.Count; i++)
         {
-            var target = desired[i];
-            var currentIndex = chips.IndexOf(target);
-            if (currentIndex != i)
+            if (desired[i].WrapOrder != i)
             {
-                chips.Move(currentIndex, i);
-                moved = true;
+                desired[i].WrapOrder = i;
+                changed = true;
             }
         }
 
-        if (moved)
+        if (changed)
         {
             _logger.LogInformation("Apps re-sorted on '{Card}': {Order}",
                 card.Endpoint.DisplayName,
-                string.Join(" > ", chips.Select(c => $"{c.DisplayLabel}[t{ChipTier(c)}]")));
+                string.Join(" > ", desired.Select(c => $"{c.DisplayLabel}[t{ChipTier(c)}]")));
         }
     }
 
@@ -1285,6 +1329,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         var key = chip.Session.IdentityKey;
         if (string.IsNullOrEmpty(key)) return;
 
+        PushLayoutUndo();   // Ctrl+Z un-hides the app
         if (!_settings.Current.HiddenApps.Any(h => string.Equals(h.Key, key, StringComparison.OrdinalIgnoreCase)))
         {
             _settings.Current.HiddenApps.Add(new HiddenApp { Key = key, Name = chip.DisplayLabel });
@@ -1306,11 +1351,109 @@ public partial class HomeViewModel : ObservableObject, IDisposable
                     removed = true;
                 }
             }
-            if (removed) card.NotifyAppsChanged();
+            if (removed) NotifyCardApps(card);
         }
 
         _logger.LogInformation("App hidden from chip rows: key='{Key}'", key);
         QueueSettingsSave();
+    }
+
+    /// <summary>Gracefully closes an app from its chip's context menu (WM_CLOSE, the SIGTERM
+    /// equivalent - the app can save / prompt). On success the chip is flagged user-closed so it
+    /// prunes on the short window instead of the full linger; failures the disabled state couldn't
+    /// pre-empt (a controllable app with no window, or a race) surface as a toast.</summary>
+    public void CloseApp(AppChip chip)
+    {
+        ArgumentNullException.ThrowIfNull(chip);
+        var pids = AppProcessIds(chip);
+        var result = _processControl.Close(pids);
+        _logger.LogInformation("Close requested: pids=[{Pids}] name='{Name}' result={Result}",
+            string.Join(",", pids), chip.DisplayLabel, result);
+
+        switch (result)
+        {
+            case ProcessActionResult.Success:
+                MarkUserClosed(chip);
+                break;
+            case ProcessActionResult.NoWindow:
+                _inAppNotifications.Show($"{chip.DisplayLabel} has no window to close. Shift + right-click it to Terminate.");
+                break;
+            case ProcessActionResult.AccessDenied:
+                // We could terminate it (or the item would be disabled), but Windows refused the
+                // graceful WM_CLOSE - it runs at a higher privilege. Point at the action that works.
+                _inAppNotifications.Show($"Windows blocked closing {chip.DisplayLabel}. Shift + right-click it to Terminate.");
+                break;
+            case ProcessActionResult.NotFound:
+                break;   // already gone - the chip's close-detection catches up on its own
+            default:
+                _inAppNotifications.Show($"Couldn't close {chip.DisplayLabel}. See the log for details.");
+                break;
+        }
+    }
+
+    /// <summary>Force-terminates an app from its chip's shift-revealed context menu (TerminateProcess,
+    /// the SIGKILL equivalent - no save, no prompt). Same user-closed / toast handling as
+    /// <see cref="CloseApp"/>.</summary>
+    public void TerminateApp(AppChip chip)
+    {
+        ArgumentNullException.ThrowIfNull(chip);
+        var pids = AppProcessIds(chip);
+        var result = _processControl.Kill(pids);
+        _logger.LogInformation("Terminate requested: pids=[{Pids}] name='{Name}' result={Result}",
+            string.Join(",", pids), chip.DisplayLabel, result);
+
+        switch (result)
+        {
+            case ProcessActionResult.Success:
+                MarkUserClosed(chip);
+                break;
+            case ProcessActionResult.AccessDenied:
+                _inAppNotifications.Show($"Couldn't terminate {chip.DisplayLabel} - access denied.");
+                break;
+            case ProcessActionResult.NotFound:
+                break;
+            default:
+                _inAppNotifications.Show($"Couldn't terminate {chip.DisplayLabel}. See the log for details.");
+                break;
+        }
+    }
+
+    /// <summary>Every running pid that shares the chip's app identity (its lowercase executable path),
+    /// so close / terminate act on the whole app, not just the one process holding the audio session.
+    /// A browser fans out into GPU / renderer / audio children all running the same exe; the chip's
+    /// pid is usually a child, so closing it alone does nothing visible. Unions the running-process
+    /// snapshot and the live session list (either may know a pid the other hasn't caught yet), always
+    /// including the chip's own pid.</summary>
+    private HashSet<uint> AppProcessIds(AppChip chip)
+    {
+        var key = chip.Session.IdentityKey;
+        var pids = new HashSet<uint> { chip.ProcessId };
+        foreach (var process in _processes.GetRunningProcesses())
+        {
+            if (string.Equals(process.IdentityKey, key, StringComparison.OrdinalIgnoreCase)) pids.Add(process.ProcessId);
+        }
+        foreach (var session in _sessions.GetSessions())
+        {
+            if (string.Equals(session.IdentityKey, key, StringComparison.OrdinalIgnoreCase)) pids.Add(session.ProcessId);
+        }
+        return pids;
+    }
+
+    /// <summary>Flags every chip of the just-closed app (it can sit on more than one card) so the
+    /// prune drops them on the short user-closed window once the process exits.</summary>
+    private void MarkUserClosed(AppChip chip)
+    {
+        var key = chip.Session.IdentityKey;
+        foreach (var card in _allCards)
+        {
+            foreach (var c in card.Apps)
+            {
+                if (string.Equals(c.Session.IdentityKey, key, StringComparison.OrdinalIgnoreCase))
+                {
+                    c.UserClosed = true;
+                }
+            }
+        }
     }
 
     private DeviceCard? FindCard(string endpointId) =>
@@ -1551,6 +1694,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         var visibleIds = Blocks.Select(BlockIdOf).ToList();
         if (!visibleIds.Any(id => string.Equals(id, blockId, StringComparison.OrdinalIgnoreCase))) return;
 
+        PushLayoutUndo();   // Ctrl+Z restores the prior block order
         var others = visibleIds.Where(id => !string.Equals(id, blockId, StringComparison.OrdinalIgnoreCase)).ToList();
         compactIndex = Math.Clamp(compactIndex, 0, others.Count);
         var anchorId = compactIndex < others.Count ? others[compactIndex] : null;
@@ -1586,6 +1730,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         if (FindCard(sourceId) is null || FindCard(targetId) is null) return;
         if (IsMember(sourceId) || IsMember(targetId)) return;
 
+        PushLayoutUndo();   // Ctrl+Z disbands the new group
         var full = ComputeOrderedBlockIds(out _);   // source + target are lone blocks here
         var group = new DeviceGroup
         {
@@ -1615,6 +1760,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         if (group is null) return;
         if (group.MemberIds.Any(id => string.Equals(id, sourceId, StringComparison.OrdinalIgnoreCase))) return;
 
+        PushLayoutUndo();   // Ctrl+Z removes the device from the group again
         var insertAt = anchorMemberId is not null
             ? group.MemberIds.FindIndex(id => string.Equals(id, anchorMemberId, StringComparison.OrdinalIgnoreCase))
             : group.MemberIds.Count;
@@ -1635,6 +1781,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             g.MemberIds.Any(id => string.Equals(id, memberId, StringComparison.OrdinalIgnoreCase)));
         if (group is null) return;
 
+        PushLayoutUndo();   // Ctrl+Z puts the device back in its group
         group.MemberIds.RemoveAll(id => string.Equals(id, memberId, StringComparison.OrdinalIgnoreCase));
         if (group.MemberIds.Count < 2)
         {
@@ -1663,6 +1810,48 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         SyncBlocks();
     }
 
+    /// <summary>Moves an existing member out of its current group and into another group
+    /// <paramref name="targetGroupId"/>, inserted before <paramref name="anchorMemberId"/> (null =
+    /// appended). Disbands the source group (its remaining member takes the source's block slot) when
+    /// fewer than two remain; the page confirms first. One persist + resync.</summary>
+    public void MoveToGroup(string memberId, string targetGroupId, string? anchorMemberId = null)
+    {
+        if (string.IsNullOrEmpty(memberId) || string.IsNullOrEmpty(targetGroupId)) return;
+        var target = FindGroupRecord(targetGroupId);
+        if (target is null) return;
+
+        var source = _settings.Current.DeviceGroups.FirstOrDefault(g =>
+            g.MemberIds.Any(id => string.Equals(id, memberId, StringComparison.OrdinalIgnoreCase)));
+        if (source is null || ReferenceEquals(source, target)) return;
+        if (target.MemberIds.Any(id => string.Equals(id, memberId, StringComparison.OrdinalIgnoreCase))) return;
+
+        PushLayoutUndo();   // Ctrl+Z moves the device back to its original group
+        // Leave the source group; disband it (remaining member takes its block slot) if fewer than two remain.
+        source.MemberIds.RemoveAll(id => string.Equals(id, memberId, StringComparison.OrdinalIgnoreCase));
+        if (source.MemberIds.Count < 2)
+        {
+            var remaining = source.MemberIds.ToList();
+            _settings.Current.DeviceGroups.Remove(source);
+            var gi = _settings.Current.DeviceOrder.FindIndex(id => string.Equals(id, source.Id, StringComparison.OrdinalIgnoreCase));
+            if (gi >= 0)
+            {
+                _settings.Current.DeviceOrder.RemoveAt(gi);
+                _settings.Current.DeviceOrder.InsertRange(gi, remaining);
+            }
+        }
+
+        // Insert into the target group before the anchor (null = appended).
+        var insertAt = anchorMemberId is not null
+            ? target.MemberIds.FindIndex(id => string.Equals(id, anchorMemberId, StringComparison.OrdinalIgnoreCase))
+            : target.MemberIds.Count;
+        if (insertAt < 0) insertAt = target.MemberIds.Count;
+        target.MemberIds.Insert(insertAt, memberId);
+
+        _settings.Current.DeviceOrder = ComputeOrderedBlockIds(out _);
+        QueueSettingsSave();
+        SyncBlocks();
+    }
+
     /// <summary>Reorders a member within its own group to land before <paramref name="anchorMemberId"/>
     /// (null = at the end of the group). Re-derives the group's member order and persists it.</summary>
     public void ReorderWithinGroup(string memberId, string? anchorMemberId)
@@ -1671,6 +1860,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             g.MemberIds.Any(id => string.Equals(id, memberId, StringComparison.OrdinalIgnoreCase)));
         if (group is null) return;
 
+        PushLayoutUndo();   // Ctrl+Z restores the prior member order
         group.MemberIds.RemoveAll(id => string.Equals(id, memberId, StringComparison.OrdinalIgnoreCase));
         var insertAt = anchorMemberId is not null
             ? group.MemberIds.FindIndex(id => string.Equals(id, anchorMemberId, StringComparison.OrdinalIgnoreCase))
@@ -1682,13 +1872,14 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         SyncBlocks();
     }
 
-    /// <summary>Disbands a group (context-menu "Ungroup all"): drops the group record and replaces
+    /// <summary>Disbands a group (context-menu "Delete group"): drops the group record and replaces
     /// its slot in the block order with its members, so they become lone blocks in place.</summary>
     public void UngroupAll(string groupId)
     {
         var group = FindGroupRecord(groupId);
         if (group is null) return;
 
+        PushLayoutUndo();   // Ctrl+Z recreates the deleted group
         var members = group.MemberIds.ToList();
         _settings.Current.DeviceGroups.Remove(group);
         var gi = _settings.Current.DeviceOrder.FindIndex(id => string.Equals(id, groupId, StringComparison.OrdinalIgnoreCase));
@@ -1715,6 +1906,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             g.MemberIds.Any(id => string.Equals(id, endpointId, StringComparison.OrdinalIgnoreCase)));
         if (group is null) return;
 
+        PushLayoutUndo();   // Ctrl+Z puts the device back in its group
         var groupId = group.Id;
         group.MemberIds.RemoveAll(id => string.Equals(id, endpointId, StringComparison.OrdinalIgnoreCase));
 
@@ -1794,12 +1986,54 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         _undoStack.PushVolumeMute(card.Endpoint.Id, prevVolume, prevMuted);
     }
 
-    /// <summary>Reverts the most recent reversible action (hide/show, volume drag, mute toggle).
-    /// Bound to Ctrl+Z on the page.</summary>
+    /// <summary>Snapshots the current Devices layout (block order, groups, hidden apps) onto the undo
+    /// stack right before a structural change, so Ctrl+Z restores it. Deep-copies the lists so later
+    /// mutations can't corrupt the captured state. Call after a method's no-op guards (so a guarded
+    /// no-op doesn't leave a dead undo entry) and before the first mutation.</summary>
+    private void PushLayoutUndo()
+    {
+        var order = new List<string>(_settings.Current.DeviceOrder);
+        var groups = _settings.Current.DeviceGroups
+            .Select(g => new DeviceUndoStack.GroupSnapshot(g.Id, g.Title, new List<string>(g.MemberIds)))
+            .ToList();
+        var hidden = _settings.Current.HiddenApps
+            .Select(h => new DeviceUndoStack.HiddenAppSnapshot(h.Key, h.Name))
+            .ToList();
+        _undoStack.PushLayout(order, groups, hidden);
+    }
+
+    /// <summary>Restores a layout snapshot: swaps the three persisted lists back wholesale, refreshes
+    /// the live hidden-app set, persists, and resyncs (which rebuilds the blocks / groups from the
+    /// restored settings). A restored hidden-apps set re-shows or re-hides chips on the next reconcile
+    /// tick; no explicit chip rebuild is needed here.</summary>
+    private void RestoreLayout(DeviceUndoStack.LayoutUndo layout)
+    {
+        _settings.Current.DeviceOrder = new List<string>(layout.Order);
+        _settings.Current.DeviceGroups = layout.Groups
+            .Select(g => new DeviceGroup { Id = g.Id, Title = g.Title, MemberIds = new List<string>(g.MemberIds) })
+            .ToList();
+        _settings.Current.HiddenApps = layout.HiddenApps
+            .Select(h => new HiddenApp { Key = h.Key, Name = h.Name })
+            .ToList();
+        RefreshHiddenApps();
+        QueueSettingsSave();
+        SyncBlocks();
+    }
+
+    /// <summary>Reverts the most recent reversible action: a layout change (chip hide, reorder, group
+    /// create / join / leave / disband), a card hide/show, or a volume / mute change. Bound to Ctrl+Z
+    /// on the page.</summary>
     [RelayCommand]
     public void UndoVisibilityChange()
     {
         if (!_undoStack.TryPop(out var action)) return;
+
+        // A layout snapshot isn't tied to one card; restore it and skip the per-card lookup below.
+        if (action is DeviceUndoStack.LayoutUndo layout)
+        {
+            RestoreLayout(layout);
+            return;
+        }
 
         var card = _allCards.FirstOrDefault(c =>
             string.Equals(c.Endpoint.Id, action.DeviceId, StringComparison.OrdinalIgnoreCase));

@@ -27,6 +27,19 @@ internal sealed class NotificationService : INotificationService, IDisposable
     public void Register()
     {
         if (_registered) return;
+
+        // App notifications depend on the WindowsAppRuntime Singleton package, which a
+        // self-contained deployment doesn't carry. The self-contained deployment guide says
+        // to treat them as a light-up feature: probe IsSupported and skip quietly when the
+        // platform isn't available rather than letting Register throw.
+        var supported = AppNotificationManager.IsSupported();
+        _logger.LogInformation("AppNotificationManager.IsSupported = {Supported}", supported);
+        if (!supported)
+        {
+            _logger.LogInformation("App notifications unsupported on this deployment; skipping registration");
+            return;
+        }
+
         try
         {
             AppNotificationManager.Default.Register();

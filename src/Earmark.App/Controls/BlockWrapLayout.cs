@@ -87,6 +87,11 @@ public sealed class BlockWrapLayout : VirtualizingLayout
     /// left-aligned member-extent box for a group section. Used for join / create / leave intent.</summary>
     private Rect[] _contentRects = [];
 
+    /// <summary>Last stretch-eligible (collapsed) height measured for each block, keyed by the block's
+    /// view-model item. When a card opts out of the row baseline (its rules panel expands) it keeps
+    /// holding the baseline at this remembered height, so a shorter sibling doesn't shrink on expand.</summary>
+    private readonly Dictionary<object, double> _baselineHeights = new();
+
     /// <summary>Lift block <paramref name="draggedIndex"/> and re-insert it at <paramref name="gapIndex"/>
     /// (a position in the block-excluded / compacted sequence).</summary>
     public void SetReorderState(int draggedIndex, int gapIndex)
@@ -241,7 +246,22 @@ public sealed class BlockWrapLayout : VirtualizingLayout
                 element.Measure(new Size(rects[slot].Width, double.PositiveInfinity));
                 var h = element.DesiredSize.Height;
                 if (h > rowTotal) rowTotal = h;
-                if ((Info(context, order[slot])?.StretchToRowHeight ?? true) && h > baseline) baseline = h;
+                var item = context.GetItemAt(order[slot]);
+                if (Info(context, order[slot])?.StretchToRowHeight ?? true)
+                {
+                    // A stretch-eligible block (a plain lone card) sets the baseline at its real height,
+                    // and we remember that height keyed by the block so it can keep holding the baseline
+                    // after it opts out (below).
+                    if (item is not null) _baselineHeights[item] = h;
+                    if (h > baseline) baseline = h;
+                }
+                else if (item is not null && _baselineHeights.TryGetValue(item, out var collapsed) && collapsed > baseline)
+                {
+                    // A custom-sized block (e.g. a card with its rules panel expanded) keeps its own
+                    // taller height but still contributes its LAST stretch height to the baseline, so a
+                    // shorter sibling in the row doesn't shrink the moment this one expands.
+                    baseline = collapsed;
+                }
             }
             if (baseline == 0) baseline = rowTotal;
 

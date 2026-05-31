@@ -120,6 +120,9 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         // ShowAppIndicators feeds the apps-row visibility and the layout opt-out.
         OnPropertyChanged(nameof(ShowAppsSection));
         OnPropertyChanged(nameof(IsLayoutCustomSized));
+        // Section-divider toggle (and the rows they bracket) may have changed.
+        OnPropertyChanged(nameof(ShowVolumeDivider));
+        OnPropertyChanged(nameof(ShowAppsDivider));
     }
 
     /// <summary>
@@ -136,13 +139,36 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     public bool ShowAppsSection => HasApps && MeterOptions.ShowAppIndicators;
 
     /// <summary>
-    /// Combined opt-out from <see cref="Controls.WrapByRowLayout"/>'s row-baseline sizing.
-    /// True when the card has any "extra" content other cards in the row might lack: an
-    /// expanded rules panel OR a (shown) apps row. Each adds real content height that shouldn't
-    /// force every other card to pad up to match. A hidden apps row reserves no height, so it
-    /// doesn't count.
+    /// Opt-out from the wrap layouts' row-baseline sizing (consumed by both
+    /// <see cref="Controls.WrapByRowLayout"/> via the attached property and
+    /// <see cref="Controls.IBlockLayoutInfo.StretchToRowHeight"/>). True means "keep my own height";
+    /// false means "stretch to the row baseline so siblings stay aligned". The
+    /// <see cref="PeakMeterOptions.CardHeight"/> mode decides:
+    /// <list type="bullet">
+    /// <item><see cref="CardHeightMode.MatchRow"/>: no card ever opts out, so the whole row matches its
+    /// tallest card (apps / expanded rules included).</item>
+    /// <item><see cref="CardHeightMode.Dynamic"/>: every card opts out, so each is sized to its own
+    /// content and a row's cards can differ in height.</item>
+    /// <item><see cref="CardHeightMode.Balanced"/> (default): a card opts out only while its rules
+    /// panel is expanded - something the user opened deliberately, so it keeps its own height rather
+    /// than reflowing the whole row. An apps row does <b>not</b> opt out, so a card playing apps is
+    /// matched into the row baseline along with its neighbours.</item>
+    /// </list>
     /// </summary>
-    public bool IsLayoutCustomSized => IsRulesExpanded || ShowAppsSection;
+    public bool IsLayoutCustomSized => MeterOptions.CardHeight switch
+    {
+        CardHeightMode.MatchRow => false,
+        CardHeightMode.Dynamic => true,
+        _ => IsRulesExpanded,
+    };
+
+    /// <summary>Whether the hairline between the volume row and the rules block shows: only when the
+    /// user has opted into section dividers AND the volume row above it is present.</summary>
+    public bool ShowVolumeDivider => MeterOptions.ShowCardDividers && ShowVolumeRow;
+
+    /// <summary>Whether the hairline between the rules block and the apps row shows: only when the
+    /// user has opted into section dividers AND the apps row below it is present.</summary>
+    public bool ShowAppsDivider => MeterOptions.ShowCardDividers && ShowAppsSection;
 
     /// <summary>Tells the page that <see cref="HasApps"/> may have flipped. Raised from
     /// <c>HomeViewModel</c> after it adds/removes chips so the section visibility binding
@@ -152,6 +178,7 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         OnPropertyChanged(nameof(HasApps));
         OnPropertyChanged(nameof(ShowAppsSection));
         OnPropertyChanged(nameof(IsLayoutCustomSized));
+        OnPropertyChanged(nameof(ShowAppsDivider));
     }
 
     public string DisplayName => Endpoint.FriendlyName;
@@ -925,6 +952,7 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     {
         OnPropertyChanged(nameof(ShowVolumeControls));
         OnPropertyChanged(nameof(ShowVolumeRow));
+        OnPropertyChanged(nameof(ShowVolumeDivider));
         OnPropertyChanged(nameof(ShowPlainSlider));
         OnPropertyChanged(nameof(ShowVolumeLockIcon));
         OnPropertyChanged(nameof(ShowVolumeLockOverlay));

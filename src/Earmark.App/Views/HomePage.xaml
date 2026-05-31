@@ -77,8 +77,18 @@
                                 <FontIcon Glyph="{x:Bind VolumeControlsToggleGlyph, Mode=OneWay}" />
                             </MenuFlyoutItem.Icon>
                         </MenuFlyoutItem>
-                        <!-- Group-level actions, shown only for a grouped device, separated from the
-                             device-level options above. -->
+                        <!-- Ungroup device (pull just this device out of its group) sits in its own
+                             section between the device options above and the group-wide actions below,
+                             all shown only for a grouped device. -->
+                        <MenuFlyoutSeparator Visibility="{x:Bind IsGroupMember, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                        <MenuFlyoutItem Text="Ungroup device"
+                                        Click="OnUngroupDeviceClicked"
+                                        Tag="{x:Bind}"
+                                        Visibility="{x:Bind IsGroupMember, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <MenuFlyoutItem.Icon>
+                                <FontIcon Glyph="&#xF0B4;" />
+                            </MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
                         <MenuFlyoutSeparator Visibility="{x:Bind IsGroupMember, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
                         <MenuFlyoutItem Text="Rename group"
                                         Click="OnRenameGroupClicked"
@@ -88,20 +98,20 @@
                                 <FontIcon Glyph="&#xE8AC;" />
                             </MenuFlyoutItem.Icon>
                         </MenuFlyoutItem>
-                        <MenuFlyoutItem Text="Ungroup device"
-                                        Click="OnUngroupDeviceClicked"
-                                        Tag="{x:Bind}"
-                                        Visibility="{x:Bind IsGroupMember, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
-                            <MenuFlyoutItem.Icon>
-                                <FontIcon Glyph="&#xF0B4;" />
-                            </MenuFlyoutItem.Icon>
-                        </MenuFlyoutItem>
-                        <MenuFlyoutItem Text="Ungroup all"
+                        <MenuFlyoutItem Text="Delete group"
                                         Click="OnUngroupAllClicked"
                                         Tag="{x:Bind}"
                                         Visibility="{x:Bind IsGroupMember, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <!-- Critical red across rest/hover/press so the destructive action
+                                 reads as destructive; the default template would otherwise swap
+                                 the foreground to the neutral theme brush on pointer-over. -->
+                            <MenuFlyoutItem.Resources>
+                                <SolidColorBrush x:Key="MenuFlyoutItemForeground" Color="{ThemeResource SystemFillColorCritical}" />
+                                <SolidColorBrush x:Key="MenuFlyoutItemForegroundPointerOver" Color="{ThemeResource SystemFillColorCritical}" />
+                                <SolidColorBrush x:Key="MenuFlyoutItemForegroundPressed" Color="{ThemeResource SystemFillColorCritical}" />
+                            </MenuFlyoutItem.Resources>
                             <MenuFlyoutItem.Icon>
-                                <FontIcon Glyph="&#xF0B4;" />
+                                <FontIcon Glyph="&#xE74D;" Foreground="{ThemeResource SystemFillColorCriticalBrush}" />
                             </MenuFlyoutItem.Icon>
                         </MenuFlyoutItem>
                     </MenuFlyout>
@@ -363,6 +373,17 @@
                                   Visibility="{x:Bind ShowVolumeLockIcon, Mode=OneWay}" />
                     </Grid>
 
+                    <!-- Hairline separators stack the card's sections like a Settings card; opt-in via
+                         the "Card dividers" setting. The negative horizontal margin cancels the content
+                         inset so the line spans the card edge to edge; CardStrokeColor is the dark, low-
+                         opacity stroke that reads as the background bleeding through (vs the lighter
+                         DividerStroke). The -6 bottom trims the gap to the "Rules" caption so that
+                         caption sits evenly between this line and its own chip. Shows only with the
+                         volume row above it present. -->
+                    <Border Height="1" Margin="-16,0,-16,-6"
+                            Background="{ThemeResource CardStrokeColorDefaultBrush}"
+                            Visibility="{x:Bind ShowVolumeDivider, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
+
                     <!-- Rules section. First rule chip is always visible; for cards with
                          multiple rules the chip has an inline chevron on the right that
                          toggles a panel beneath with the additional rules. Saves the
@@ -438,6 +459,12 @@
                                Style="{StaticResource MutedCaptionTextStyle}"
                                Visibility="{x:Bind HasNoRules}" />
 
+                    <!-- Divider between the rules block and the apps row; opt-in, shows only when the
+                         apps row below it is present. -->
+                    <Border Height="1" Margin="-16,0"
+                            Background="{ThemeResource CardStrokeColorDefaultBrush}"
+                            Visibility="{x:Bind ShowAppsDivider, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
+
                     <!-- Apps row sits BELOW the rules section so chevron-style expanders on
                          rules don't have to fight an apps-section overlay above them. Visible
                          on render cards only (HasApps stays false on capture). Each chip is the
@@ -449,25 +476,20 @@
                          rule-locked) and carries PID + source endpoint id in the DataPackage
                          Text payload. -->
                     <StackPanel x:Name="AppsSection" Spacing="{StaticResource SpacingXSmall}" Visibility="{x:Bind ShowAppsSection, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
-                        <!-- Plain ItemsControl over a non-virtualizing WrapPanel (not ItemsRepeater).
-                             ItemsRepeater + a virtualizing layout can't run WinUI's built-in theme
-                             transitions and mis-targets recycled tiles on removal; a plain Panel lets
-                             ChildrenTransitions do the Fluent work: AddDelete fades chips in/out on the
-                             CORRECT element, Reorder/Reposition slide them when the weighted sort moves a
-                             chip (the "swap" animation). Chip counts per card are tiny, so no virtualization
-                             is needed. -->
+                        <!-- Plain ItemsControl over a non-virtualizing WrapPanel (not ItemsRepeater) so
+                             each chip is a real element we drive with a Composition implicit Offset
+                             animation (attached per chip in OnAppChipLoaded): when the weighted sort
+                             Moves a chip or a sibling appears/leaves, the chips slide to their new
+                             spots. We animate Offset ONLY - no opacity. The earlier opacity hide
+                             animation got stuck at 0 on recycled card containers and rendered chips
+                             invisible; Offset can't do that. A new chip appears instantly (the animation
+                             is attached after its first arrange, so there's no slide-from-origin and no
+                             blank-gap stagger), and a pruned chip drops out cleanly. Chip counts per
+                             card are tiny, so no virtualization is needed. -->
                         <ItemsControl ItemsSource="{x:Bind Apps}">
                             <ItemsControl.ItemsPanel>
                                 <ItemsPanelTemplate>
-                                    <controls:WrapPanel HorizontalSpacing="{StaticResource SpacingMedium}" VerticalSpacing="{StaticResource SpacingSmall}">
-                                        <controls:WrapPanel.ChildrenTransitions>
-                                            <TransitionCollection>
-                                                <AddDeleteThemeTransition />
-                                                <ReorderThemeTransition />
-                                                <RepositionThemeTransition />
-                                            </TransitionCollection>
-                                        </controls:WrapPanel.ChildrenTransitions>
-                                    </controls:WrapPanel>
+                                    <controls:WrapPanel HorizontalSpacing="{StaticResource SpacingMedium}" VerticalSpacing="{StaticResource SpacingSmall}" />
                                 </ItemsPanelTemplate>
                             </ItemsControl.ItemsPanel>
                             <ItemsControl.ItemTemplate>
@@ -477,6 +499,7 @@
                                             Padding="0"
                                             CanDrag="{x:Bind CanDrag}"
                                             Tag="{x:Bind}"
+                                            Loaded="OnAppChipLoaded"
                                             DragStarting="OnAppChipDragStarting"
                                             DropCompleted="OnAppChipDropCompleted"
                                             AutomationProperties.Name="{x:Bind DisplayLabel, Mode=OneWay}"
@@ -486,12 +509,47 @@
                                              chip's menu is a superset of the card's. The device / group block
                                              mirrors the card's ContextFlyout above - keep the two in sync. -->
                                         <Border.ContextFlyout>
-                                            <MenuFlyout>
+                                            <MenuFlyout Opening="OnAppChipFlyoutOpening">
                                                 <MenuFlyoutItem Text="Hide this app"
                                                                 Command="{x:Bind HideCommand}"
                                                                 ToolTipService.ToolTip="Permanently hide this app's chip from every device. Unhide it from Settings &#x2192; App indicators.">
                                                     <MenuFlyoutItem.Icon>
                                                         <FontIcon Glyph="&#xED1A;" />
+                                                    </MenuFlyoutItem.Icon>
+                                                </MenuFlyoutItem>
+                                                <!-- Close = graceful WM_CLOSE (the app can save / prompt). Disabled and
+                                                     relabelled when the app is elevated (a disabled item can't show a
+                                                     tooltip, so the reason lives in the text). Hidden for System Sounds
+                                                     and closed chips via ShowProcessActions. -->
+                                                <MenuFlyoutItem Text="{x:Bind CloseActionLabel, Mode=OneWay}"
+                                                                Command="{x:Bind CloseCommand}"
+                                                                IsEnabled="{x:Bind CanCloseProcess, Mode=OneWay}"
+                                                                Visibility="{x:Bind ShowProcessActions, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                                                ToolTipService.ToolTip="Ask this app to close, like clicking its X (it can save or prompt first).">
+                                                    <MenuFlyoutItem.Icon>
+                                                        <!-- Cancel (E711), not ChromeClose (E8BB): the chrome glyph is a
+                                                             heavy title-bar X that reads oversized next to the regular-weight
+                                                             menu icons. Terminate uses the red Blocked sign (E733). -->
+                                                        <FontIcon Glyph="&#xE711;" />
+                                                    </MenuFlyoutItem.Icon>
+                                                </MenuFlyoutItem>
+                                                <!-- Terminate = force kill (SIGKILL). Hidden until Shift is held when the
+                                                     menu opens (revealed in OnAppChipFlyoutOpening); Tag carries the chip
+                                                     so that handler can gate it. Critical-red; disabled / relabelled when
+                                                     elevated. No save, no prompt. -->
+                                                <MenuFlyoutItem Text="{x:Bind TerminateActionLabel, Mode=OneWay}"
+                                                                Command="{x:Bind TerminateCommand}"
+                                                                IsEnabled="{x:Bind CanControlProcess, Mode=OneWay}"
+                                                                Visibility="Collapsed"
+                                                                Tag="{x:Bind}"
+                                                                ToolTipService.ToolTip="Force this app to quit now. Unsaved work is lost.">
+                                                    <MenuFlyoutItem.Resources>
+                                                        <SolidColorBrush x:Key="MenuFlyoutItemForeground" Color="{ThemeResource SystemFillColorCritical}" />
+                                                        <SolidColorBrush x:Key="MenuFlyoutItemForegroundPointerOver" Color="{ThemeResource SystemFillColorCritical}" />
+                                                        <SolidColorBrush x:Key="MenuFlyoutItemForegroundPressed" Color="{ThemeResource SystemFillColorCritical}" />
+                                                    </MenuFlyoutItem.Resources>
+                                                    <MenuFlyoutItem.Icon>
+                                                        <FontIcon Glyph="&#xE733;" Foreground="{ThemeResource SystemFillColorCriticalBrush}" />
                                                     </MenuFlyoutItem.Icon>
                                                 </MenuFlyoutItem>
                                                 <MenuFlyoutSeparator />
@@ -508,14 +566,6 @@
                                                     </MenuFlyoutItem.Icon>
                                                 </MenuFlyoutItem>
                                                 <MenuFlyoutSeparator Visibility="{x:Bind OwnerCard.IsGroupMember, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                                <MenuFlyoutItem Text="Rename group"
-                                                                Click="OnRenameGroupClicked"
-                                                                Tag="{x:Bind OwnerCard}"
-                                                                Visibility="{x:Bind OwnerCard.IsGroupMember, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                                    <MenuFlyoutItem.Icon>
-                                                        <FontIcon Glyph="&#xE8AC;" />
-                                                    </MenuFlyoutItem.Icon>
-                                                </MenuFlyoutItem>
                                                 <MenuFlyoutItem Text="Ungroup device"
                                                                 Click="OnUngroupDeviceClicked"
                                                                 Tag="{x:Bind OwnerCard}"
@@ -524,12 +574,29 @@
                                                         <FontIcon Glyph="&#xF0B4;" />
                                                     </MenuFlyoutItem.Icon>
                                                 </MenuFlyoutItem>
-                                                <MenuFlyoutItem Text="Ungroup all"
-                                                                Click="OnUngroupAllClicked"
+                                                <MenuFlyoutSeparator Visibility="{x:Bind OwnerCard.IsGroupMember, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                                <MenuFlyoutItem Text="Rename group"
+                                                                Click="OnRenameGroupClicked"
                                                                 Tag="{x:Bind OwnerCard}"
                                                                 Visibility="{x:Bind OwnerCard.IsGroupMember, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
                                                     <MenuFlyoutItem.Icon>
-                                                        <FontIcon Glyph="&#xF0B4;" />
+                                                        <FontIcon Glyph="&#xE8AC;" />
+                                                    </MenuFlyoutItem.Icon>
+                                                </MenuFlyoutItem>
+                                                <MenuFlyoutItem Text="Delete group"
+                                                                Click="OnUngroupAllClicked"
+                                                                Tag="{x:Bind OwnerCard}"
+                                                                Visibility="{x:Bind OwnerCard.IsGroupMember, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                    <!-- Critical red across rest/hover/press so the destructive action
+                                                         reads as destructive; the default template would otherwise swap
+                                                         the foreground to the neutral theme brush on pointer-over. -->
+                                                    <MenuFlyoutItem.Resources>
+                                                        <SolidColorBrush x:Key="MenuFlyoutItemForeground" Color="{ThemeResource SystemFillColorCritical}" />
+                                                        <SolidColorBrush x:Key="MenuFlyoutItemForegroundPointerOver" Color="{ThemeResource SystemFillColorCritical}" />
+                                                        <SolidColorBrush x:Key="MenuFlyoutItemForegroundPressed" Color="{ThemeResource SystemFillColorCritical}" />
+                                                    </MenuFlyoutItem.Resources>
+                                                    <MenuFlyoutItem.Icon>
+                                                        <FontIcon Glyph="&#xE74D;" Foreground="{ThemeResource SystemFillColorCriticalBrush}" />
                                                     </MenuFlyoutItem.Icon>
                                                 </MenuFlyoutItem>
                                             </MenuFlyout>
@@ -583,7 +650,7 @@
                                                     VerticalAlignment="Top"
                                                     Margin="0,-3,-3,0"
                                                     ToolTipService.ToolTip="{x:Bind LockTooltip}"
-                                                    Visibility="{x:Bind IsRuleLocked, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                    Visibility="{x:Bind LockBadgeVisibility(MeterOptions.AlwaysShowPinnedApps), Mode=OneWay}">
                                                 <FontIcon Glyph="&#xE72E;"
                                                           FontSize="8"
                                                           Foreground="{ThemeResource TextFillColorPrimaryBrush}"
@@ -607,6 +674,26 @@
                                                 <FontIcon Glyph="&#xE711;"
                                                           FontSize="9"
                                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                          HorizontalAlignment="Center"
+                                                          VerticalAlignment="Center" />
+                                            </Border>
+
+                                            <!-- Elevated badge: the app runs as administrator (High integrity or
+                                                 above). Bottom-right, the conventional UAC-shield overlay corner, so
+                                                 it never collides with the lock (top-right) or closed (top-left)
+                                                 badges. Also explains why an elevated app's Close item is disabled. -->
+                                            <Border Grid.Row="0"
+                                                    Background="{ThemeResource SmokeFillColorDefaultBrush}"
+                                                    CornerRadius="7"
+                                                    Width="14" Height="14"
+                                                    HorizontalAlignment="Right"
+                                                    VerticalAlignment="Bottom"
+                                                    Margin="0,0,-3,-3"
+                                                    ToolTipService.ToolTip="Running as administrator (elevated)"
+                                                    Visibility="{x:Bind IsElevated, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                <FontIcon Glyph="&#xEA18;"
+                                                          FontSize="9"
+                                                          Foreground="{ThemeResource SystemFillColorCautionBrush}"
                                                           HorizontalAlignment="Center"
                                                           VerticalAlignment="Center" />
                                             </Border>
@@ -662,14 +749,22 @@
                               ToolTipService.ToolTip="Drag to move the group · double-click to rename">
                             <Grid.ContextFlyout>
                                 <MenuFlyout>
-                                    <MenuFlyoutItem Text="Rename" Click="OnRenameGroupClicked" Tag="{x:Bind}">
+                                    <MenuFlyoutItem Text="Rename group" Click="OnRenameGroupClicked" Tag="{x:Bind}">
                                         <MenuFlyoutItem.Icon>
                                             <FontIcon Glyph="&#xE8AC;" />
                                         </MenuFlyoutItem.Icon>
                                     </MenuFlyoutItem>
-                                    <MenuFlyoutItem Text="Ungroup all" Click="OnUngroupAllClicked" Tag="{x:Bind}">
+                                    <MenuFlyoutItem Text="Delete group" Click="OnUngroupAllClicked" Tag="{x:Bind}">
+                                        <!-- Critical red across rest/hover/press so the destructive action
+                                             reads as destructive; the default template would otherwise swap
+                                             the foreground to the neutral theme brush on pointer-over. -->
+                                        <MenuFlyoutItem.Resources>
+                                            <SolidColorBrush x:Key="MenuFlyoutItemForeground" Color="{ThemeResource SystemFillColorCritical}" />
+                                            <SolidColorBrush x:Key="MenuFlyoutItemForegroundPointerOver" Color="{ThemeResource SystemFillColorCritical}" />
+                                            <SolidColorBrush x:Key="MenuFlyoutItemForegroundPressed" Color="{ThemeResource SystemFillColorCritical}" />
+                                        </MenuFlyoutItem.Resources>
                                         <MenuFlyoutItem.Icon>
-                                            <FontIcon Glyph="&#xF0B4;" />
+                                            <FontIcon Glyph="&#xE74D;" Foreground="{ThemeResource SystemFillColorCriticalBrush}" />
                                         </MenuFlyoutItem.Icon>
                                     </MenuFlyoutItem>
                                 </MenuFlyout>
@@ -730,14 +825,17 @@
         </DataTemplate>
     </Page.Resources>
 
-    <Grid Padding="{StaticResource PagePadding}" RowSpacing="{StaticResource SpacingLarge}">
+    <!-- No page-level horizontal padding: the scroll region runs full-width so its scrollbar sits on
+         the window edge (matching Windows Settings). The header and the scroll *content* carry the
+         28px side inset instead, so cards line up under the header while the scrollbar hugs the edge. -->
+    <Grid RowSpacing="{StaticResource SpacingLarge}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <!-- Page header -->
-        <Grid Grid.Row="0" ColumnSpacing="{StaticResource SpacingMedium}">
+        <!-- Page header. Top inset gives the title breathing room that matches the gap below it. -->
+        <Grid Grid.Row="0" ColumnSpacing="{StaticResource SpacingMedium}" Padding="{StaticResource DevicesHeaderPadding}">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
@@ -765,6 +863,7 @@
                  state below isn't mistaken for "no devices". -->
             <Border Style="{StaticResource SectionCardStyle}"
                     Padding="32"
+                    Margin="{StaticResource DevicesPlaceholderMargin}"
                     Visibility="{x:Bind ViewModel.ShowLoadingState, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
                 <StackPanel Spacing="{StaticResource SpacingMedium}" HorizontalAlignment="Center" VerticalAlignment="Center">
                     <ProgressRing IsActive="{x:Bind ViewModel.ShowLoadingState, Mode=OneWay}"
@@ -778,6 +877,7 @@
             <!-- Empty -->
             <Border Style="{StaticResource SectionCardStyle}"
                     Padding="32"
+                    Margin="{StaticResource DevicesPlaceholderMargin}"
                     Visibility="{x:Bind ViewModel.ShowEmptyState, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
                 <StackPanel Spacing="{StaticResource SpacingMedium}" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="420">
                     <FontIcon Glyph="&#xE767;" FontSize="40"
@@ -793,12 +893,16 @@
                 </StackPanel>
             </Border>
 
-            <!-- Right padding insets the cards from the scrollbar so the (overlay) scrollbar sits in
-                 the gutter beside them instead of hugging the cards' right edge. -->
-            <ScrollViewer Visibility="{x:Bind ViewModel.HasItems, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
+            <!-- The scroll viewer fills the row edge-to-edge so its (overlay) scrollbar rides the
+                 window edge like Settings, and its padding is sides-only so content scrolls flush to
+                 the window's bottom edge (no dead band that clips cards short mid-scroll). The trailing
+                 breathing room lives on the list itself (DevicesRepeater.Margin) so only the last card
+                 clears the bottom edge when fully scrolled. -->
+            <ScrollViewer x:Name="DevicesScroller"
+                          Visibility="{x:Bind ViewModel.HasItems, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
                           VerticalScrollBarVisibility="Auto"
                           HorizontalScrollBarVisibility="Disabled"
-                          Padding="0,0,16,0"
+                          Padding="{StaticResource DevicesScrollPadding}"
                           VerticalContentAlignment="Top">
                 <!-- Transparent drop surface around the repeater: block reorder is handled here (not
                      per-card) so the insertion point is computed from the layout's frozen no-gap
@@ -812,6 +916,7 @@
                     <ItemsRepeater x:Name="DevicesRepeater"
                                    ItemsSource="{x:Bind ViewModel.Blocks}"
                                    ElementPrepared="OnBlockElementPrepared"
+                                   Margin="{StaticResource DevicesListBottomMargin}"
                                    VerticalAlignment="Top">
                         <ItemsRepeater.Layout>
                             <controls:BlockWrapLayout MinItemWidth="320"
