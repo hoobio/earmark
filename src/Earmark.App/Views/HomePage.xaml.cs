@@ -142,7 +142,7 @@ public sealed partial class HomePage : Page
 
         _draggedCard = card;
         _draggedCardGroup = card.IsGroupMember ? FindGroupOf(card) : null;
-        args.Data.SetText($"{DragPayloadCardPrefix}{card.Endpoint.Id}");
+        args.Data.SetText($"{DragPayloadCardPrefix}{card.DeviceKey}");
         args.Data.RequestedOperation = DataPackageOperation.Move;
 
         SetDragInProgress(true);
@@ -252,7 +252,15 @@ public sealed partial class HomePage : Page
     {
         if (sender is FrameworkElement { Tag: DeviceCard card })
         {
-            ViewModel.UngroupDevice(card.Endpoint.Id);
+            ViewModel.UngroupDevice(card.DeviceKey);
+        }
+    }
+
+    private void OnForgetDeviceClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: DeviceCard card })
+        {
+            ViewModel.ForgetDevice(card);
         }
     }
 
@@ -790,7 +798,7 @@ public sealed partial class HomePage : Page
         }
 
         if (_draggedCard is null) return;
-        var sourceId = _draggedCard.Endpoint.Id;
+        var sourceId = _draggedCard.DeviceKey;
 
         // Member drag: leave the group (with disband confirm) or reorder within it.
         if (_draggedCardGroup is not null)
@@ -862,8 +870,8 @@ public sealed partial class HomePage : Page
             && !ReferenceEquals(targetCard, _draggedCard)
             && IsCentreZone(point, Layout.GetContentRect(targetIdx)))
         {
-            _logger?.LogInformation("Create group: {Source} + {Target}", sourceId, targetCard.Endpoint.Id);
-            ViewModel.CreateGroup(sourceId, targetCard.Endpoint.Id);
+            _logger?.LogInformation("Create group: {Source} + {Target}", sourceId, targetCard.DeviceKey);
+            ViewModel.CreateGroup(sourceId, targetCard.DeviceKey);
             return;
         }
 
@@ -915,7 +923,7 @@ public sealed partial class HomePage : Page
         var raw = InnerInsertionIndex(inner, layout, point);
         for (var k = raw; k < group.Members.Count; k++)
         {
-            var id = group.Members[k].Endpoint.Id;
+            var id = group.Members[k].DeviceKey;
             if (draggedMemberId is null || !string.Equals(id, draggedMemberId, StringComparison.OrdinalIgnoreCase))
             {
                 return id;
@@ -977,7 +985,7 @@ public sealed partial class HomePage : Page
 
     private static string? PageBlockId(object block) => block switch
     {
-        DeviceCard card => card.Endpoint.Id,
+        DeviceCard card => card.DeviceKey,
         DeviceGroupCard group => group.Id,
         _ => null,
     };
@@ -1370,9 +1378,9 @@ public sealed partial class HomePage : Page
         if (TryParseChipPayload(text, out var pid, out var sourceEndpointId))
         {
             _ = pid;
-            // Capture endpoint -> cursor shows slashed circle. Same goes for dropping on the
-            // source card (no-op). Anything else accepts as Move.
-            if (card.IsCapture ||
+            // Capture endpoint or a disconnected card -> cursor shows slashed circle (neither can be
+            // a route target). Same goes for dropping on the source card (no-op). Else accept as Move.
+            if (card.IsCapture || !card.CanAcceptAppDrop ||
                 string.Equals(card.Endpoint.Id, sourceEndpointId, StringComparison.OrdinalIgnoreCase))
             {
                 e.AcceptedOperation = DataPackageOperation.None;
@@ -1399,7 +1407,7 @@ public sealed partial class HomePage : Page
         var text = TryReadText(e.DataView);
         if (text is null) return;
 
-        if (card.IsCapture) return;
+        if (card.IsCapture || !card.CanAcceptAppDrop) return;
         if (!TryParseChipPayload(text, out var pid, out var sourceEndpointId)) return;
         if (string.Equals(card.Endpoint.Id, sourceEndpointId, StringComparison.OrdinalIgnoreCase)) return;
 

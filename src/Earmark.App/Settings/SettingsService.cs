@@ -88,5 +88,30 @@ internal sealed class SettingsService : ISettingsService, IDisposable
         SettingsChanged?.Invoke(this, EventArgs.Empty);
     }
 
+    public async Task SaveBackupAsync(string label, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(label);
+        var backupPath = Path.Combine(
+            Path.GetDirectoryName(DefaultPath)!,
+            $"settings.{label}.json");
+        await _gate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(backupPath)!);
+            await using var stream = File.Create(backupPath);
+            await JsonSerializer
+                .SerializeAsync(stream, Current, SettingsJsonContext.Default.AppSettings, ct)
+                .ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // Best-effort: a missing backup must never block the migration or crash the app.
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
     public void Dispose() => _gate.Dispose();
 }
