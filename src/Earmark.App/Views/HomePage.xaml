@@ -826,6 +826,7 @@
                         <ItemsRepeater Grid.Row="1"
                                        HorizontalAlignment="Left"
                                        ItemsSource="{x:Bind Members}"
+                                       ElementPrepared="OnBlockElementPrepared"
                                        ItemTemplate="{StaticResource DeviceCardTemplate}">
                             <ItemsRepeater.Layout>
                                 <controls:WrapByRowLayout MinItemWidth="320"

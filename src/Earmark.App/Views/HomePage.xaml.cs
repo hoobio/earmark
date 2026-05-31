@@ -963,10 +963,13 @@ public sealed partial class HomePage : Page
     private void ClearInnerAnimations()
     {
         if (_animatedInner is null) return;
+        // Restore the always-on slide baseline (the inner repeater attaches it via ElementPrepared),
+        // rather than detaching - so group members keep gliding when a device is added / removed /
+        // reflows after a drag, not just during one.
         var count = _animatedInner.ItemsSourceView?.Count ?? 0;
         for (var i = 0; i < count; i++)
         {
-            if (_animatedInner.TryGetElement(i) is UIElement el) ApplyReorderAnimation(el, false);
+            if (_animatedInner.TryGetElement(i) is UIElement el) ApplyReorderAnimation(el, true);
         }
         _animatedInner = null;
     }
