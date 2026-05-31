@@ -773,12 +773,12 @@ public sealed partial class HomePage : Page
         if (_reorderActive) ApplyReorderAnimation(args.Element, true);
     }
 
-    /// <summary>Wires Composition implicit animations onto an app chip's container the first time it
-    /// renders: an Offset slide so a re-sort (active/idle tiering) or a sibling appearing/leaving
-    /// glides the chips to their new spots, and a fade-out so a pruned chip dissolves instead of
-    /// vanishing. No show animation is set, so a chip's first appearance is instant - it's there the
-    /// moment its card grows, with no blank gap while it waits to fade in. The animations live on the
-    /// container (the item the WrapPanel actually arranges), not the template root.</summary>
+    /// <summary>Attaches a Composition implicit Offset animation to an app chip's container the first
+    /// time it renders, so a re-sort (active/idle tiering) or a sibling appearing/leaving slides the
+    /// chips to their new spots instead of popping. Offset ONLY - no opacity, so a recycled container
+    /// can't come back stuck transparent (the bug an opacity hide animation caused). Attached after the
+    /// first arrange (Loaded), so a chip's first appearance is instant with no slide-from-origin. The
+    /// animation lives on the container the WrapPanel arranges, not the template root.</summary>
     private void OnAppChipLoaded(object sender, RoutedEventArgs e)
     {
         if (sender is not FrameworkElement border) return;
@@ -791,15 +791,10 @@ public sealed partial class HomePage : Page
         offset.Target = "Offset";
         offset.InsertExpressionKeyFrame(1.0f, "this.FinalValue");
         offset.Duration = TimeSpan.FromMilliseconds(220);
+
         var implicits = compositor.CreateImplicitAnimationCollection();
         implicits["Offset"] = offset;
         visual.ImplicitAnimations = implicits;
-
-        var fadeOut = compositor.CreateScalarKeyFrameAnimation();
-        fadeOut.Target = "Opacity";
-        fadeOut.InsertKeyFrame(1.0f, 0.0f);
-        fadeOut.Duration = TimeSpan.FromMilliseconds(150);
-        ElementCompositionPreview.SetImplicitHideAnimation(container, fadeOut);
     }
 
     private void OnUndoInvoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)

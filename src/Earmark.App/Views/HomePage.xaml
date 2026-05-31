@@ -477,13 +477,15 @@
                          Text payload. -->
                     <StackPanel x:Name="AppsSection" Spacing="{StaticResource SpacingXSmall}" Visibility="{x:Bind ShowAppsSection, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
                         <!-- Plain ItemsControl over a non-virtualizing WrapPanel (not ItemsRepeater) so
-                             each chip is a real, non-recycled element we can drive with Composition.
-                             Each chip's container gets implicit Offset + hide animations on load (see
-                             OnAppChipLoaded), matching the block reorder: a re-sort or a sibling
-                             appearing slides the chips to their new spots, a pruned chip fades out, and
-                             a new chip shows instantly (no make-room-then-fade stagger) so it's there
-                             the moment its card grows. Chip counts per card are tiny, so no
-                             virtualization is needed. -->
+                             each chip is a real element we drive with a Composition implicit Offset
+                             animation (attached per chip in OnAppChipLoaded): when the weighted sort
+                             Moves a chip or a sibling appears/leaves, the chips slide to their new
+                             spots. We animate Offset ONLY - no opacity. The earlier opacity hide
+                             animation got stuck at 0 on recycled card containers and rendered chips
+                             invisible; Offset can't do that. A new chip appears instantly (the animation
+                             is attached after its first arrange, so there's no slide-from-origin and no
+                             blank-gap stagger), and a pruned chip drops out cleanly. Chip counts per
+                             card are tiny, so no virtualization is needed. -->
                         <ItemsControl ItemsSource="{x:Bind Apps}">
                             <ItemsControl.ItemsPanel>
                                 <ItemsPanelTemplate>
@@ -837,12 +839,13 @@
             </Border>
 
             <!-- The scroll viewer fills the row edge-to-edge so its (overlay) scrollbar rides the
-                 window edge like Settings. Padding insets the *content* (28 sides matching the header,
-                 20 bottom for breathing room) while leaving the scrollbar out at the edge. -->
+                 window edge like Settings, and content scrolls right to the bottom edge (no bottom
+                 padding gap). Padding only insets the *content* sides (28, matching the header) while
+                 leaving the scrollbar out at the edge. -->
             <ScrollViewer Visibility="{x:Bind ViewModel.HasItems, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
                           VerticalScrollBarVisibility="Auto"
                           HorizontalScrollBarVisibility="Disabled"
-                          Padding="28,0,28,20"
+                          Padding="28,0,28,0"
                           VerticalContentAlignment="Top">
                 <!-- Transparent drop surface around the repeater: block reorder is handled here (not
                      per-card) so the insertion point is computed from the layout's frozen no-gap
