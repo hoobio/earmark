@@ -21,11 +21,29 @@ internal sealed class DeviceUndoStack
     public sealed record VolumeMuteUndo(string DeviceId, float PrevVolume, bool PrevMuted)
         : UndoAction(DeviceId);
 
+    /// <summary>Snapshot of the whole Devices layout (block order, groups, hidden apps) captured
+    /// before a structural change - a chip hide, a block / member reorder, or any group create / join /
+    /// leave / disband. Undo restores the three lists wholesale and resyncs, which is far simpler than
+    /// reversing each operation and handles them all uniformly. Not keyed to a single device, so its
+    /// <see cref="UndoAction.DeviceId"/> is empty.</summary>
+    public sealed record LayoutUndo(
+        List<string> Order,
+        List<GroupSnapshot> Groups,
+        List<HiddenAppSnapshot> HiddenApps)
+        : UndoAction(string.Empty);
+
+    public sealed record GroupSnapshot(string Id, string Title, List<string> MemberIds);
+
+    public sealed record HiddenAppSnapshot(string Key, string? Name);
+
     public void PushVisibility(string deviceId, bool prevHidden, bool prevPinned) =>
         Push(new VisibilityUndo(deviceId, prevHidden, prevPinned));
 
     public void PushVolumeMute(string deviceId, float prevVolume, bool prevMuted) =>
         Push(new VolumeMuteUndo(deviceId, prevVolume, prevMuted));
+
+    public void PushLayout(List<string> order, List<GroupSnapshot> groups, List<HiddenAppSnapshot> hiddenApps) =>
+        Push(new LayoutUndo(order, groups, hiddenApps));
 
     private void Push(UndoAction action)
     {

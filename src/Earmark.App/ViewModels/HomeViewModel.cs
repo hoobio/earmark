@@ -1333,6 +1333,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         var key = chip.Session.IdentityKey;
         if (string.IsNullOrEmpty(key)) return;
 
+        PushLayoutUndo();   // Ctrl+Z un-hides the app
         if (!_settings.Current.HiddenApps.Any(h => string.Equals(h.Key, key, StringComparison.OrdinalIgnoreCase)))
         {
             _settings.Current.HiddenApps.Add(new HiddenApp { Key = key, Name = chip.DisplayLabel });
@@ -1697,6 +1698,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         var visibleIds = Blocks.Select(BlockIdOf).ToList();
         if (!visibleIds.Any(id => string.Equals(id, blockId, StringComparison.OrdinalIgnoreCase))) return;
 
+        PushLayoutUndo();   // Ctrl+Z restores the prior block order
         var others = visibleIds.Where(id => !string.Equals(id, blockId, StringComparison.OrdinalIgnoreCase)).ToList();
         compactIndex = Math.Clamp(compactIndex, 0, others.Count);
         var anchorId = compactIndex < others.Count ? others[compactIndex] : null;
@@ -1732,6 +1734,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         if (FindCard(sourceId) is null || FindCard(targetId) is null) return;
         if (IsMember(sourceId) || IsMember(targetId)) return;
 
+        PushLayoutUndo();   // Ctrl+Z disbands the new group
         var full = ComputeOrderedBlockIds(out _);   // source + target are lone blocks here
         var group = new DeviceGroup
         {
@@ -1761,6 +1764,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         if (group is null) return;
         if (group.MemberIds.Any(id => string.Equals(id, sourceId, StringComparison.OrdinalIgnoreCase))) return;
 
+        PushLayoutUndo();   // Ctrl+Z removes the device from the group again
         var insertAt = anchorMemberId is not null
             ? group.MemberIds.FindIndex(id => string.Equals(id, anchorMemberId, StringComparison.OrdinalIgnoreCase))
             : group.MemberIds.Count;
@@ -1781,6 +1785,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             g.MemberIds.Any(id => string.Equals(id, memberId, StringComparison.OrdinalIgnoreCase)));
         if (group is null) return;
 
+        PushLayoutUndo();   // Ctrl+Z puts the device back in its group
         group.MemberIds.RemoveAll(id => string.Equals(id, memberId, StringComparison.OrdinalIgnoreCase));
         if (group.MemberIds.Count < 2)
         {
@@ -1824,6 +1829,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         if (source is null || ReferenceEquals(source, target)) return;
         if (target.MemberIds.Any(id => string.Equals(id, memberId, StringComparison.OrdinalIgnoreCase))) return;
 
+        PushLayoutUndo();   // Ctrl+Z moves the device back to its original group
         // Leave the source group; disband it (remaining member takes its block slot) if fewer than two remain.
         source.MemberIds.RemoveAll(id => string.Equals(id, memberId, StringComparison.OrdinalIgnoreCase));
         if (source.MemberIds.Count < 2)
@@ -1858,6 +1864,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             g.MemberIds.Any(id => string.Equals(id, memberId, StringComparison.OrdinalIgnoreCase)));
         if (group is null) return;
 
+        PushLayoutUndo();   // Ctrl+Z restores the prior member order
         group.MemberIds.RemoveAll(id => string.Equals(id, memberId, StringComparison.OrdinalIgnoreCase));
         var insertAt = anchorMemberId is not null
             ? group.MemberIds.FindIndex(id => string.Equals(id, anchorMemberId, StringComparison.OrdinalIgnoreCase))
@@ -1876,6 +1883,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         var group = FindGroupRecord(groupId);
         if (group is null) return;
 
+        PushLayoutUndo();   // Ctrl+Z recreates the deleted group
         var members = group.MemberIds.ToList();
         _settings.Current.DeviceGroups.Remove(group);
         var gi = _settings.Current.DeviceOrder.FindIndex(id => string.Equals(id, groupId, StringComparison.OrdinalIgnoreCase));
@@ -1902,6 +1910,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             g.MemberIds.Any(id => string.Equals(id, endpointId, StringComparison.OrdinalIgnoreCase)));
         if (group is null) return;
 
+        PushLayoutUndo();   // Ctrl+Z puts the device back in its group
         var groupId = group.Id;
         group.MemberIds.RemoveAll(id => string.Equals(id, endpointId, StringComparison.OrdinalIgnoreCase));
 
@@ -1981,12 +1990,54 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         _undoStack.PushVolumeMute(card.Endpoint.Id, prevVolume, prevMuted);
     }
 
-    /// <summary>Reverts the most recent reversible action (hide/show, volume drag, mute toggle).
-    /// Bound to Ctrl+Z on the page.</summary>
+    /// <summary>Snapshots the current Devices layout (block order, groups, hidden apps) onto the undo
+    /// stack right before a structural change, so Ctrl+Z restores it. Deep-copies the lists so later
+    /// mutations can't corrupt the captured state. Call after a method's no-op guards (so a guarded
+    /// no-op doesn't leave a dead undo entry) and before the first mutation.</summary>
+    private void PushLayoutUndo()
+    {
+        var order = new List<string>(_settings.Current.DeviceOrder);
+        var groups = _settings.Current.DeviceGroups
+            .Select(g => new DeviceUndoStack.GroupSnapshot(g.Id, g.Title, new List<string>(g.MemberIds)))
+            .ToList();
+        var hidden = _settings.Current.HiddenApps
+            .Select(h => new DeviceUndoStack.HiddenAppSnapshot(h.Key, h.Name))
+            .ToList();
+        _undoStack.PushLayout(order, groups, hidden);
+    }
+
+    /// <summary>Restores a layout snapshot: swaps the three persisted lists back wholesale, refreshes
+    /// the live hidden-app set, persists, and resyncs (which rebuilds the blocks / groups from the
+    /// restored settings). A restored hidden-apps set re-shows or re-hides chips on the next reconcile
+    /// tick; no explicit chip rebuild is needed here.</summary>
+    private void RestoreLayout(DeviceUndoStack.LayoutUndo layout)
+    {
+        _settings.Current.DeviceOrder = new List<string>(layout.Order);
+        _settings.Current.DeviceGroups = layout.Groups
+            .Select(g => new DeviceGroup { Id = g.Id, Title = g.Title, MemberIds = new List<string>(g.MemberIds) })
+            .ToList();
+        _settings.Current.HiddenApps = layout.HiddenApps
+            .Select(h => new HiddenApp { Key = h.Key, Name = h.Name })
+            .ToList();
+        RefreshHiddenApps();
+        QueueSettingsSave();
+        SyncBlocks();
+    }
+
+    /// <summary>Reverts the most recent reversible action: a layout change (chip hide, reorder, group
+    /// create / join / leave / disband), a card hide/show, or a volume / mute change. Bound to Ctrl+Z
+    /// on the page.</summary>
     [RelayCommand]
     public void UndoVisibilityChange()
     {
         if (!_undoStack.TryPop(out var action)) return;
+
+        // A layout snapshot isn't tied to one card; restore it and skip the per-card lookup below.
+        if (action is DeviceUndoStack.LayoutUndo layout)
+        {
+            RestoreLayout(layout);
+            return;
+        }
 
         var card = _allCards.FirstOrDefault(c =>
             string.Equals(c.Endpoint.Id, action.DeviceId, StringComparison.OrdinalIgnoreCase));
