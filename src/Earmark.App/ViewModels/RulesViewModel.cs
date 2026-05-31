@@ -56,6 +56,9 @@ public partial class RulesViewModel : ObservableObject, IDisposable
         _rules.RulesChanged += OnRulesChanged;
         _sessions.SessionsChanged += OnSessionsOrEndpointsChanged;
         _endpoints.EndpointsChanged += OnSessionsOrEndpointsChanged;
+        // A default-device change can flip a "Default device is" condition's preview, so refresh
+        // the match/status when the system default switches (not just on topology changes).
+        _endpoints.DefaultsChanged += OnSessionsOrEndpointsChanged;
         _waveLink.SnapshotChanged += OnWaveLinkChanged;
         _waveLink.StateChanged += OnWaveLinkChanged;
         QueueMatchRefresh();
@@ -341,6 +344,7 @@ public partial class RulesViewModel : ObservableObject, IDisposable
         _rules.RulesChanged -= OnRulesChanged;
         _sessions.SessionsChanged -= OnSessionsOrEndpointsChanged;
         _endpoints.EndpointsChanged -= OnSessionsOrEndpointsChanged;
+        _endpoints.DefaultsChanged -= OnSessionsOrEndpointsChanged;
         _waveLink.SnapshotChanged -= OnWaveLinkChanged;
         _waveLink.StateChanged -= OnWaveLinkChanged;
         Items.CollectionChanged -= OnItemsCollectionChanged;

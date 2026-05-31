@@ -153,24 +153,35 @@
                         </Button>
                     </Grid>
 
-                    <!-- Mode row: exactly one of these shows, by kind. Direction (Output/Input) for
-                         app + default-device actions; membership for Wave Link; mute state for mute. -->
-                    <ToggleSwitch Header="Direction"
-                                  OffContent="Output" OnContent="Input"
-                                  IsOn="{x:Bind IsInput, Mode=TwoWay}"
-                                  Visibility="{x:Bind ShowDirection, Mode=OneWay}" />
+                    <!-- Behaviour row: the kind-specific mode control (exactly one shows) sits beside
+                         the Pin toggle so "what it does" and "how it's enforced" read together and the
+                         card stays compact. Direction (Output/Input) for app + default-device actions;
+                         membership for Wave Link; mute state for mute. -->
+                    <StackPanel Orientation="Horizontal" Spacing="{StaticResource SpacingXLarge}">
+                        <ToggleSwitch Header="Direction"
+                                      OffContent="Output" OnContent="Input"
+                                      IsOn="{x:Bind IsInput, Mode=TwoWay}"
+                                      Visibility="{x:Bind ShowDirection, Mode=OneWay}" />
 
-                    <ComboBox Header="Membership"
-                              ItemsSource="{x:Bind AvailableMembershipOptions}"
-                              SelectedItem="{x:Bind SelectedMembershipOption, Mode=OneWay}"
-                              SelectionChanged="OnActionMembershipChanged"
-                              HorizontalAlignment="Stretch"
-                              Visibility="{x:Bind ShowMembership, Mode=OneWay}" />
+                        <ComboBox Header="Membership"
+                                  MinWidth="240"
+                                  ItemsSource="{x:Bind AvailableMembershipOptions}"
+                                  SelectedItem="{x:Bind SelectedMembershipOption, Mode=OneWay}"
+                                  SelectionChanged="OnActionMembershipChanged"
+                                  Visibility="{x:Bind ShowMembership, Mode=OneWay}" />
 
-                    <ToggleSwitch Header="State"
-                                  OffContent="Unmute" OnContent="Mute"
-                                  IsOn="{x:Bind Muted, Mode=TwoWay}"
-                                  Visibility="{x:Bind ShowMuteToggle, Mode=OneWay}" />
+                        <ToggleSwitch Header="State"
+                                      OffContent="Unmute" OnContent="Mute"
+                                      IsOn="{x:Bind Muted, Mode=TwoWay}"
+                                      Visibility="{x:Bind ShowMuteToggle, Mode=OneWay}" />
+
+                        <!-- Pin vs one-shot. Pinned reverts external drift; one-shot applies once when
+                             the rule's branch activates, then leaves the device editable. -->
+                        <ToggleSwitch Header="Enforcement"
+                                      OffContent="One-shot" OnContent="Pinned"
+                                      IsOn="{x:Bind Pinned, Mode=TwoWay}"
+                                      ToolTipService.ToolTip="Pinned reverts external changes back to this setting. One-shot applies it once when the rule's conditions are first met, then leaves it free to change." />
+                    </StackPanel>
 
                     <AutoSuggestBox PlaceholderText="Headphone Mix"
                                     Text="{x:Bind MixPattern, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
@@ -262,15 +273,6 @@
                                       OffContent="Off" OnContent="On"
                                       IsOn="{x:Bind SetsCommunications, Mode=TwoWay}" />
                     </StackPanel>
-
-                    <!-- Pin vs one-shot. Pinned keeps the device at this setting and reverts external
-                         drift; one-shot applies it once when the rule's branch activates, then leaves
-                         it editable. -->
-                    <ToggleSwitch Header="Enforcement"
-                                  OffContent="One-shot (apply once)"
-                                  OnContent="Pinned (keep enforced)"
-                                  IsOn="{x:Bind Pinned, Mode=TwoWay}"
-                                  ToolTipService.ToolTip="Pinned reverts external changes back to this setting. One-shot applies it once when the rule's conditions are first met, then leaves it free to change." />
 
                     <Border Background="{ThemeResource SystemFillColorCautionBackgroundBrush}"
                             BorderBrush="{ThemeResource SystemFillColorCautionBrush}"
