@@ -1,4 +1,3 @@
-using System.Collections.Specialized;
 using System.Runtime.InteropServices.WindowsRuntime;
 
 using Earmark.App.Controls;
@@ -51,29 +50,6 @@ public sealed partial class HomePage : Page
         // on other pages. Loaded/Unloaded fire on every Frame content swap.
         Loaded += (_, _) => ViewModel.ResumePeakPolling();
         Unloaded += (_, _) => ViewModel.PausePeakPolling();
-
-        // Ease the block reflow whenever the layout changes height: a card's apps row appearing /
-        // disappearing (AppsRowChanged), or a device connecting / disconnecting, a card being shown /
-        // hidden, or a group forming / disbanding (Blocks changing). The cards around the change slide
-        // to their new spots. The animation is armed for a short window around the change then dropped
-        // by a timer, so plain scrolling outside that window never animates the blocks. It stays
-        // disarmed until the first layout settles, so the initial fill / a tab-return places cards
-        // instantly instead of sliding them in.
-        ViewModel.AppsRowChanged += OnAppsRowChanged;
-        ViewModel.Blocks.CollectionChanged += OnBlocksCollectionChanged;
-        Loaded += (_, _) =>
-        {
-            _pageSettled = false;
-            _blockReflowArmed = false;   // a tab-return re-realises blocks; re-arm on the next reflow
-            LayoutUpdated -= OnFirstLayoutSettled;   // no double-subscribe on a tab-return
-            LayoutUpdated += OnFirstLayoutSettled;
-        };
-    }
-
-    private void OnFirstLayoutSettled(object? sender, object e)
-    {
-        LayoutUpdated -= OnFirstLayoutSettled;
-        _pageSettled = true;
     }
 
     public HomeViewModel ViewModel { get; }
@@ -108,27 +84,6 @@ public sealed partial class HomePage : Page
     /// <summary>The group currently highlighted as a join target (accent outline).</summary>
     private DeviceGroupCard? _joinTarget;
 
-    /// <summary>True between a reorder drag start and its completion; gates whether newly realised
-    /// blocks get the implicit slide animation attached as they scroll into view.</summary>
-    private bool _reorderActive;
-
-    /// <summary>True once the page's first layout has settled. Until then a chip sync (the initial
-    /// fill, or a tab-return) must NOT pulse the block reflow animation, or every block would slide in
-    /// from the origin on appearance.</summary>
-    private bool _pageSettled;
-
-    /// <summary>True while the block Offset animations are attached so a layout reflow (a card's apps
-    /// row appearing/disappearing, or a device added/removed/shown/hidden/grouped) slides the cards
-    /// around it instead of snapping. Armed on the change and dropped a short time later by
-    /// <see cref="_reflowDisarmTimer"/>, so the implicit is present for the reflow's arrange but gone
-    /// before any later scroll (which re-arranges realised blocks and would otherwise lag behind).</summary>
-    private bool _blockReflowArmed;
-
-    /// <summary>One-shot timer that disarms the block reflow animation a beat after the last change,
-    /// once its slide has run. A timer rather than the ScrollViewer's ViewChanging: a reflow grows the
-    /// content and itself raises ViewChanging once the list is scrolled, so disarming on that event
-    /// stripped the implicit mid-reflow and killed the slide for the rest of the session.</summary>
-    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _reflowDisarmTimer;
 
     /// <summary>The group's inner layout currently showing a member make-space gap (within-group
     /// reorder) or a phantom join slot, or null.</summary>
@@ -150,7 +105,6 @@ public sealed partial class HomePage : Page
         args.Data.SetText($"{DragPayloadCardPrefix}{card.Endpoint.Id}");
         args.Data.RequestedOperation = DataPackageOperation.Move;
 
-        EnableReorderAnimations(true);
         SetDragInProgress(true);
 
         // Opaque drag bitmap (the card fill is translucent, so lifted off the backdrop it reads as
@@ -181,7 +135,6 @@ public sealed partial class HomePage : Page
         args.Data.SetText($"{DragPayloadGroupPrefix}{group.Id}");
         args.Data.RequestedOperation = DataPackageOperation.Move;
 
-        EnableReorderAnimations(true);
         SetDragInProgress(true);   // reveals the dotted outline + drag padding on every group
 
         // Drag visual: a snapshot of the group BOX (cards + title + its dotted outline), bounded to
@@ -312,7 +265,8 @@ public sealed partial class HomePage : Page
     }
 
     /// <summary>Shared teardown for any reorder / reparent drag (committed or cancelled): drop the gap,
-    /// clear highlights + outlines, detach the slide animation, and reset the dragged state.</summary>
+    /// clear highlights + outlines, the inner-group slide animation, and reset the dragged state. The
+    /// block-level slide stays attached (it's always on), so blocks keep gliding after a drag.</summary>
     private void EndDrag()
     {
         _draggedCard = null;
@@ -323,7 +277,6 @@ public sealed partial class HomePage : Page
         ClearInnerAnimations();
         Layout?.ClearReorderState();
         SetDragInProgress(false);
-        EnableReorderAnimations(false);
     }
 
     private void OnBlocksDragOver(object sender, DragEventArgs e)
@@ -778,20 +731,6 @@ public sealed partial class HomePage : Page
         e.DragUIOverride.IsGlyphVisible = true;
     }
 
-    /// <summary>Attaches (or removes) a Composition implicit Offset animation on each realised block so
-    /// any layout re-arrange slides smoothly. On only during a reorder drag.</summary>
-    private void EnableReorderAnimations(bool enable)
-    {
-        _reorderActive = enable;
-        for (var i = 0; i < ViewModel.Blocks.Count; i++)
-        {
-            if (DevicesRepeater.TryGetElement(i) is UIElement element)
-            {
-                ApplyReorderAnimation(element, enable);
-            }
-        }
-    }
-
     private static void ApplyReorderAnimation(UIElement element, bool enable)
     {
         var visual = ElementCompositionPreview.GetElementVisual(element);
@@ -812,64 +751,20 @@ public sealed partial class HomePage : Page
         visual.ImplicitAnimations = animations;
     }
 
+    /// <summary>Gives every realised block the implicit Offset slide so ANY layout re-arrange glides:
+    /// a reflow (a card's apps row appears and it grows), a device added / removed, a card shown /
+    /// hidden, a group forming / disbanding, or a drag reorder. The implicit is attached AFTER the
+    /// element's first (or recycle-reuse) arrange, never during it, so a freshly realised or recycled
+    /// card snaps into place instead of sliding in from the origin or its previous slot - while every
+    /// later move animates. Detaching on (re)prepare is also what keeps scrolling crisp: a card
+    /// recycled onto a new item is repositioned without the implicit, so it never lags the scroll.</summary>
     private void OnBlockElementPrepared(ItemsRepeater sender, ItemsRepeaterElementPreparedEventArgs args)
     {
-        if (_reorderActive) ApplyReorderAnimation(args.Element, true);
-    }
-
-    /// <summary>A chip was added to / removed from some card (its row may have changed height).</summary>
-    private void OnAppsRowChanged(object? sender, EventArgs e) => ArmBlockReflow();
-
-    /// <summary>The block list changed: a device connected / disconnected, a card was shown / hidden,
-    /// or a group formed / disbanded. The cards around the change reflow, so animate that slide. A
-    /// newly added card isn't realised yet when we arm, so it appears in place while the cards around
-    /// it slide; a removed card vanishes and the rest slide to close the gap.</summary>
-    private void OnBlocksCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e) => ArmBlockReflow();
-
-    /// <summary>Attaches the block Offset animation for an imminent reflow and (re)starts the timer
-    /// that drops it once the slide has run. Gated off until the first layout settles (so the initial
-    /// fill places instantly) and while a drag owns the animations.</summary>
-    private void ArmBlockReflow()
-    {
-        if (!_pageSettled) return;      // initial fill / tab-return: place instantly, don't slide in
-        if (_reorderActive) return;     // a drag already owns the block animations
-
-        _blockReflowArmed = true;
-        SetBlockReflowAnimations(true);
-
-        _reflowDisarmTimer ??= CreateReflowDisarmTimer();
-        _reflowDisarmTimer.Stop();
-        _reflowDisarmTimer.Start();
-    }
-
-    private Microsoft.UI.Dispatching.DispatcherQueueTimer CreateReflowDisarmTimer()
-    {
-        var timer = DispatcherQueue.CreateTimer();
-        timer.Interval = TimeSpan.FromMilliseconds(300);   // past the 220ms slide; short enough that a later scroll isn't caught
-        timer.IsRepeating = false;
-        timer.Tick += (_, _) => DisarmBlockReflow();
-        return timer;
-    }
-
-    private void DisarmBlockReflow()
-    {
-        _reflowDisarmTimer?.Stop();
-        if (!_blockReflowArmed) return;
-        _blockReflowArmed = false;
-        if (_reorderActive) return;     // a drag took over the animations mid-window
-        SetBlockReflowAnimations(false);
-    }
-
-    /// <summary>Attaches / detaches the implicit Offset animation on every realised block.</summary>
-    private void SetBlockReflowAnimations(bool enable)
-    {
-        for (var i = 0; i < ViewModel.Blocks.Count; i++)
-        {
-            if (DevicesRepeater.TryGetElement(i) is UIElement element)
-            {
-                ApplyReorderAnimation(element, enable);
-            }
-        }
+        var element = args.Element;
+        ApplyReorderAnimation(element, false);   // off for the imminent placement arrange
+        DispatcherQueue.TryEnqueue(
+            Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
+            () => ApplyReorderAnimation(element, true));   // on once placed, for every later move
     }
 
     /// <summary>Attaches a Composition implicit Offset animation to an app chip's container the first

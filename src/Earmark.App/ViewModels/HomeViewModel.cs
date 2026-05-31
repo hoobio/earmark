@@ -182,17 +182,13 @@ public partial class HomeViewModel : ObservableObject, IDisposable
 
     public IReadOnlyList<DeviceCard> VisibleCards => _visibleCards;
 
-    /// <summary>Raised after a chip is added to / removed from any card, i.e. whenever a card's apps
-    /// row may have appeared, disappeared, or changed height. The page uses it to ease the resulting
-    /// block reflow (cards below sliding to their new spots) for just that layout pass.</summary>
-    public event EventHandler? AppsRowChanged;
-
     /// <summary>Single chokepoint for "this card's apps changed": refreshes the card's HasApps-derived
-    /// bindings and signals the page so the reflow eases. Called wherever a chip is added / removed.</summary>
-    private void NotifyCardApps(DeviceCard card)
+    /// bindings (section visibility, layout opt-out, dividers). Called wherever a chip is added /
+    /// removed. The resulting reflow is animated by the page's always-on block slide, so there's no
+    /// signal to raise here.</summary>
+    private static void NotifyCardApps(DeviceCard card)
     {
         card.NotifyAppsChanged();
-        AppsRowChanged?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>Group container VMs by id, reused across rebuilds so an in-progress title edit and
