@@ -77,6 +77,16 @@
                                 <FontIcon Glyph="{x:Bind VolumeControlsToggleGlyph, Mode=OneWay}" />
                             </MenuFlyoutItem.Icon>
                         </MenuFlyoutItem>
+                        <!-- Customise the card glyph + accent colour. Opens a picker flyout anchored
+                             on the card; built in code-behind so the heavy ColorPicker isn't
+                             instantiated per card. -->
+                        <MenuFlyoutItem Text="Customise…"
+                                        Click="OnCustomiseClicked"
+                                        Tag="{x:Bind}">
+                            <MenuFlyoutItem.Icon>
+                                <FontIcon Glyph="&#xE790;" />
+                            </MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
                         <!-- Ungroup device (pull just this device out of its group) sits in its own
                              section between the device options above and the group-wide actions below,
                              all shown only for a grouped device. -->
@@ -159,7 +169,6 @@
                                         CornerRadius="{StaticResource CardCornerRadius}"
                                         Tag="{x:Bind}"
                                         IsEnabled="{x:Bind IsMuteToggleEnabled, Mode=OneWay}"
-                                        IsHitTestVisible="{x:Bind ShowVolumeControls, Mode=OneWay}"
                                         Click="OnMuteToggleClicked"
                                         ToolTipService.ToolTip="{x:Bind MuteTooltip, Mode=OneWay}">
                                     <!-- Transparent in every state but hover/press, where a faint white
@@ -510,13 +519,17 @@
                                              mirrors the card's ContextFlyout above - keep the two in sync. -->
                                         <Border.ContextFlyout>
                                             <MenuFlyout Opening="OnAppChipFlyoutOpening">
-                                                <MenuFlyoutItem Text="Hide this app"
-                                                                Command="{x:Bind HideCommand}"
-                                                                ToolTipService.ToolTip="Permanently hide this app's chip from every device. Unhide it from Settings &#x2192; App indicators.">
-                                                    <MenuFlyoutItem.Icon>
+                                                <MenuFlyoutSubItem Text="Hide this app">
+                                                    <MenuFlyoutSubItem.Icon>
                                                         <FontIcon Glyph="&#xED1A;" />
-                                                    </MenuFlyoutItem.Icon>
-                                                </MenuFlyoutItem>
+                                                    </MenuFlyoutSubItem.Icon>
+                                                    <MenuFlyoutItem Text="On this device"
+                                                                    Command="{x:Bind HideOnDeviceCommand}"
+                                                                    ToolTipService.ToolTip="Hide this app's chip on this device only; it stays on other devices. Unhide it from Settings &#x2192; App indicators." />
+                                                    <MenuFlyoutItem Text="Everywhere"
+                                                                    Command="{x:Bind HideCommand}"
+                                                                    ToolTipService.ToolTip="Permanently hide this app's chip from every device. Unhide it from Settings &#x2192; App indicators." />
+                                                </MenuFlyoutSubItem>
                                                 <!-- Close = graceful WM_CLOSE (the app can save / prompt). Disabled and
                                                      relabelled when the app is elevated (a disabled item can't show a
                                                      tooltip, so the reason lives in the text). Hidden for System Sounds

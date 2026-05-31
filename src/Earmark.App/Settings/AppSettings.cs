@@ -139,6 +139,15 @@ public sealed class AppSettings
     /// </summary>
     public List<HiddenApp> HiddenApps { get; set; } = new();
 
+    /// <summary>
+    /// Apps hidden from a single device card's chip row, via a chip's "Hide this app &gt; On this
+    /// device" context menu. Unlike <see cref="HiddenApps"/> (hidden everywhere), these are keyed by
+    /// the app's <see cref="Earmark.Core.Models.AudioSession.IdentityKey"/> paired with the card's
+    /// <see cref="Earmark.Core.Models.AudioEndpoint.Id"/>, so the app still shows on every other card.
+    /// Managed (unhidden) from Settings &gt; App indicators alongside the global hides.
+    /// </summary>
+    public List<HiddenAppOnDevice> HiddenAppsOnDevice { get; set; } = new();
+
     /// <summary>Persisted window size in physical pixels. Null until the user has resized
     /// at least once (so first launch picks the WinUI default).</summary>
     public int? WindowWidth { get; set; }
@@ -167,6 +176,29 @@ public sealed class HiddenApp
 }
 
 /// <summary>
+/// One app hidden from a single device card's chip row. Keyed by the app's
+/// <see cref="Earmark.Core.Models.AudioSession.IdentityKey"/> (<see cref="Key"/>) plus the card's
+/// <see cref="Earmark.Core.Models.AudioEndpoint.Id"/> (<see cref="EndpointId"/>). <see cref="Name"/>
+/// and <see cref="DeviceName"/> are the friendly labels captured at hide time so the manage list
+/// reads "Discord - on Speakers" without the app running or the device present.
+/// </summary>
+public sealed class HiddenAppOnDevice
+{
+    /// <summary>Match key: the app's <see cref="Earmark.Core.Models.AudioSession.IdentityKey"/>.</summary>
+    public string Key { get; set; } = string.Empty;
+
+    /// <summary>The card's <see cref="Earmark.Core.Models.AudioEndpoint.Id"/> the app is hidden on.</summary>
+    public string EndpointId { get; set; } = string.Empty;
+
+    /// <summary>Friendly app name captured at hide time. Null falls back to a name derived from
+    /// <see cref="Key"/>.</summary>
+    public string? Name { get; set; }
+
+    /// <summary>Friendly endpoint name captured at hide time, shown as context in the manage list.</summary>
+    public string? DeviceName { get; set; }
+}
+
+/// <summary>
 /// Per-device user configuration. Flags are nullable so an unset flag is omitted from the JSON
 /// (null = the default), keeping persisted entries compact; null is read as false.
 /// </summary>
@@ -184,10 +216,19 @@ public sealed class DeviceConfig
     /// knob), Windows still reports a writable control, so this is a manual opt-out.</summary>
     public bool? VolumeControlsHidden { get; set; }
 
+    /// <summary>User-chosen glyph override (a single Segoe Fluent codepoint string). Null = derive
+    /// the glyph automatically from the device name / Wave Link channel.</summary>
+    public string? Glyph { get; set; }
+
+    /// <summary>User-chosen accent tile colour as "#AARRGGBB". Null = use the Wave Link accent (or
+    /// the default tile when there is none).</summary>
+    public string? AccentColour { get; set; }
+
     /// <summary>True when every flag is unset/false, so the entry carries no information and can be
     /// pruned from the map on save. Not serialised (it's a derived helper, not stored state).</summary>
     [JsonIgnore]
-    public bool IsDefault => Hidden is not true && Pinned is not true && VolumeControlsHidden is not true;
+    public bool IsDefault => Hidden is not true && Pinned is not true && VolumeControlsHidden is not true
+        && Glyph is null && AccentColour is null;
 }
 
 /// <summary>

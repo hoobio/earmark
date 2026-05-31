@@ -5,6 +5,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:vm="using:Earmark.App.ViewModels"
     xmlns:ctrl="using:CommunityToolkit.WinUI.Controls"
+    xmlns:controls="using:Earmark.App.Controls"
     xmlns:ui="using:Windows.UI"
     Background="Transparent">
 
@@ -151,38 +152,8 @@
                                 </StackPanel>
                                 <Button.Flyout>
                                     <Flyout>
-                                        <StackPanel Spacing="{StaticResource SpacingMedium}" Width="296">
-                                            <TextBlock Text="Quick colours"
-                                                       Style="{StaticResource CaptionTextBlockStyle}"
-                                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                            <ItemsControl ItemsSource="{x:Bind MeterSwatches}">
-                                                <ItemsControl.ItemsPanel>
-                                                    <ItemsPanelTemplate>
-                                                        <StackPanel Orientation="Horizontal" Spacing="{StaticResource SpacingXSmall}" />
-                                                    </ItemsPanelTemplate>
-                                                </ItemsControl.ItemsPanel>
-                                                <ItemsControl.ItemTemplate>
-                                                    <DataTemplate x:DataType="ui:Color">
-                                                        <Button Width="28" Height="28"
-                                                                Padding="0"
-                                                                Click="OnMeterSwatchClick"
-                                                                Tag="{x:Bind}"
-                                                                HorizontalContentAlignment="Stretch"
-                                                                VerticalContentAlignment="Stretch">
-                                                            <Border CornerRadius="{ThemeResource ControlCornerRadius}"
-                                                                    Background="{x:Bind Converter={StaticResource ColorToBrushConverter}}" />
-                                                        </Button>
-                                                    </DataTemplate>
-                                                </ItemsControl.ItemTemplate>
-                                            </ItemsControl>
-                                            <ColorPicker x:Name="MeterColorPicker"
-                                                         Color="{x:Bind ViewModel.PeakMeterSingleColour, Mode=TwoWay}"
-                                                         ColorSpectrumShape="Ring"
-                                                         IsAlphaEnabled="False"
-                                                         IsMoreButtonVisible="True"
-                                                         IsColorSliderVisible="True"
-                                                         IsColorChannelTextInputVisible="False"
-                                                         IsHexInputVisible="True" />
+                                        <StackPanel Spacing="{StaticResource SpacingMedium}">
+                                            <controls:ColourSwatchPicker x:Name="MeterColourPicker" />
                                             <Button Content="Reset to default"
                                                     Click="OnResetMeterColour"
                                                     HorizontalAlignment="Right" />

@@ -223,7 +223,8 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     /// <see cref="LoadHiddenApps"/> when the manage modal opens, and mutated by unhide / clear.</summary>
     public ObservableCollection<HiddenAppRow> HiddenApps { get; } = new();
 
-    public bool HasHiddenApps => _settings.Current.HiddenApps.Count > 0;
+    private int HiddenAppsTotal => _settings.Current.HiddenApps.Count + _settings.Current.HiddenAppsOnDevice.Count;
+    public bool HasHiddenApps => HiddenAppsTotal > 0;
     public bool NoHiddenApps => !HasHiddenApps;
 
     /// <summary>Card description that reflects how many apps are hidden.</summary>
@@ -231,9 +232,9 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     {
         get
         {
-            var n = _settings.Current.HiddenApps.Count;
+            var n = HiddenAppsTotal;
             return n == 0
-                ? "Apps you've hidden from the device cards with a chip's right-click menu. None hidden yet."
+                ? "Apps you've hidden from the device cards with a chip's right-click menu (everywhere or on one device). None hidden yet."
                 : $"{n} app{(n == 1 ? "" : "s")} hidden from the device cards. Manage to unhide.";
         }
     }
@@ -247,6 +248,10 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         {
             HiddenApps.Add(new HiddenAppRow(app.Key, app.Name));
         }
+        foreach (var app in _settings.Current.HiddenAppsOnDevice)
+        {
+            HiddenApps.Add(new HiddenAppRow(app.Key, app.EndpointId, app.Name, app.DeviceName));
+        }
         RefreshHiddenAppsState();
     }
 
@@ -256,16 +261,25 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     {
         if (row is null) return;
         HiddenApps.Remove(row);
-        Persist(s => s.HiddenApps.RemoveAll(h => string.Equals(h.Key, row.Key, StringComparison.OrdinalIgnoreCase)));
+        if (row.IsPerDevice)
+        {
+            Persist(s => s.HiddenAppsOnDevice.RemoveAll(h =>
+                string.Equals(h.Key, row.Key, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(h.EndpointId, row.EndpointId, StringComparison.OrdinalIgnoreCase)));
+        }
+        else
+        {
+            Persist(s => s.HiddenApps.RemoveAll(h => string.Equals(h.Key, row.Key, StringComparison.OrdinalIgnoreCase)));
+        }
         RefreshHiddenAppsState();
     }
 
-    /// <summary>Unhides every app at once.</summary>
+    /// <summary>Unhides every app at once (both global and per-device hides).</summary>
     public void ClearAllHiddenApps()
     {
-        if (_settings.Current.HiddenApps.Count == 0) return;
+        if (HiddenAppsTotal == 0) return;
         HiddenApps.Clear();
-        Persist(s => s.HiddenApps.Clear());
+        Persist(s => { s.HiddenApps.Clear(); s.HiddenAppsOnDevice.Clear(); });
         RefreshHiddenAppsState();
     }
 
@@ -337,20 +351,38 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
 /// <see cref="Detail"/> is the full identity key, shown as muted subtext when it differs.</summary>
 public sealed class HiddenAppRow
 {
+    /// <summary>Global hide (hidden on every device).</summary>
     public HiddenAppRow(string key, string? name)
     {
         Key = key ?? string.Empty;
         Name = string.IsNullOrWhiteSpace(name) ? DeriveName(Key) : name!;
     }
 
+    /// <summary>Per-device hide (hidden on one endpoint only).</summary>
+    public HiddenAppRow(string key, string endpointId, string? name, string? deviceName)
+        : this(key, name)
+    {
+        EndpointId = endpointId ?? string.Empty;
+        _deviceName = string.IsNullOrWhiteSpace(deviceName) ? "this device" : deviceName!;
+    }
+
+    private readonly string? _deviceName;
+
     /// <summary>Match key (the app's identity key) used to remove the entry on unhide.</summary>
     public string Key { get; }
 
+    /// <summary>Endpoint id for a per-device hide; empty for a global hide.</summary>
+    public string EndpointId { get; } = string.Empty;
+
+    public bool IsPerDevice => !string.IsNullOrEmpty(EndpointId);
+
     public string Name { get; }
 
-    public string Detail => Key;
+    /// <summary>Muted subtext: the hidden-on device for a per-device row, else the identity key.</summary>
+    public string Detail => IsPerDevice ? $"on {_deviceName} - {Key}" : Key;
 
-    public bool HasDetail => !string.IsNullOrEmpty(Key) && !string.Equals(Key, Name, StringComparison.OrdinalIgnoreCase);
+    public bool HasDetail => IsPerDevice ||
+        (!string.IsNullOrEmpty(Key) && !string.Equals(Key, Name, StringComparison.OrdinalIgnoreCase));
 
     private static string DeriveName(string key)
     {

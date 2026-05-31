@@ -215,6 +215,115 @@ public sealed partial class HomePage : Page
         }
     }
 
+    private void OnCustomiseClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: DeviceCard card }) return;
+        // Defer so the context MenuFlyout finishes dismissing before the dialog opens.
+        DispatcherQueue.TryEnqueue(async () =>
+        {
+            try
+            {
+                var dialog = BuildCustomiseDialog(card);
+                dialog.XamlRoot = XamlRoot;
+                await dialog.ShowAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError(ex, "Customise: dialog threw");
+            }
+        });
+    }
+
+    private static ContentDialog BuildCustomiseDialog(DeviceCard card)
+    {
+        var root = new StackPanel { Spacing = 12, MinWidth = 320 };
+
+        root.Children.Add(new TextBlock
+        {
+            Text = "Glyph",
+            Style = (Style)Application.Current.Resources["CaptionTextBlockStyle"],
+            Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
+        });
+
+        // Glyph picker: a wrap of selectable buttons, single-select. The current selection (or
+        // Auto when no override) gets the accent outline. Built by hand so we can toggle the
+        // selected outline and apply live.
+        var glyphHost = new WrapPanel { HorizontalSpacing = 6, VerticalSpacing = 6 };
+        var glyphButtons = new List<Button>();
+        foreach (var choice in DeviceGlyphMapper.GlyphChoices)
+        {
+            var btn = new Button
+            {
+                Width = 40,
+                Height = 40,
+                Padding = new Thickness(0),
+                Tag = choice,
+            };
+            if (choice.IsAuto)
+            {
+                btn.Content = new TextBlock
+                {
+                    Text = "Auto",
+                    FontSize = 11,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                };
+            }
+            else
+            {
+                btn.Content = new FontIcon { Glyph = choice.Glyph, FontSize = 20 };
+            }
+            ToolTipService.SetToolTip(btn, choice.Label);
+            glyphHost.Children.Add(btn);
+            glyphButtons.Add(btn);
+        }
+
+        void RefreshGlyphSelection()
+        {
+            var current = card.CurrentGlyphOverride;
+            foreach (var btn in glyphButtons)
+            {
+                var choice = (GlyphChoice)btn.Tag;
+                var selected = choice.IsAuto ? current is null : choice.Glyph == current;
+                btn.BorderThickness = new Thickness(selected ? 2 : 1);
+                btn.BorderBrush = selected
+                    ? (Brush)Application.Current.Resources["AccentFillColorDefaultBrush"]
+                    : (Brush)Application.Current.Resources["ControlStrokeColorDefaultBrush"];
+            }
+        }
+
+        foreach (var btn in glyphButtons)
+        {
+            btn.Click += (_, _) =>
+            {
+                var choice = (GlyphChoice)btn.Tag;
+                card.SetUserCustomisation(choice.Glyph, card.CurrentAccent);
+                RefreshGlyphSelection();
+            };
+        }
+        RefreshGlyphSelection();
+        root.Children.Add(glyphHost);
+
+        // Colour picker (shared control). Auto allowed so the user can clear the colour override.
+        var colourPicker = new Controls.ColourSwatchPicker
+        {
+            AllowAuto = true,
+            SelectedColour = card.CurrentAccent,
+        };
+        colourPicker.RegisterPropertyChangedCallback(
+            Controls.ColourSwatchPicker.SelectedColourProperty,
+            (_, _) => card.SetUserCustomisation(card.CurrentGlyphOverride, colourPicker.SelectedColour));
+        root.Children.Add(colourPicker);
+
+        return new ContentDialog
+        {
+            Title = $"Customise {card.DeviceNameOnly}",
+            // Changes apply live behind the dialog; a single close button dismisses it.
+            Content = new ScrollViewer { Content = root, VerticalScrollBarVisibility = ScrollBarVisibility.Auto },
+            CloseButtonText = "Done",
+            DefaultButton = ContentDialogButton.Close,
+        };
+    }
+
     private void OnGroupTitleKeyDown(object sender, KeyRoutedEventArgs e)
     {
         if (e.Key != VirtualKey.Enter) return;

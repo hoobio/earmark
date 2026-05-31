@@ -35,6 +35,7 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     private readonly IEndpointWriter _writer;
     private readonly Action<DeviceCard, VisibilityState> _onVisibilityToggled;
     private readonly Action<DeviceCard> _onVolumeControlsToggled;
+    private readonly Action<DeviceCard> _onCustomisationChanged;
     private bool _suppressVolumeWrite;
     private bool _showHidden;
     private float _leftHold;
@@ -66,13 +67,19 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         bool showHidden,
         PeakMeterOptions meterOptions,
         bool isVolumeControlsHiddenByUser,
+        string? userGlyphOverride,
+        Color? userAccent,
         Action<DeviceCard, VisibilityState> onUserVisibilityToggled,
-        Action<DeviceCard> onVolumeControlsToggled)
+        Action<DeviceCard> onVolumeControlsToggled,
+        Action<DeviceCard> onCustomisationChanged)
     {
         _endpoints = endpoints;
         _writer = writer;
         _onVisibilityToggled = onUserVisibilityToggled;
         _onVolumeControlsToggled = onVolumeControlsToggled;
+        _onCustomisationChanged = onCustomisationChanged;
+        _userGlyphOverride = userGlyphOverride;
+        _userAccent = userAccent;
         MeterOptions = meterOptions;
         Endpoint = endpoint;
         _split = SplitFriendlyName(endpoint.FriendlyName);
@@ -555,6 +562,9 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     {
         get
         {
+            // A user-chosen glyph wins over everything below.
+            if (_userGlyphOverride is not null) return _userGlyphOverride;
+
             // A Wave Link mix exposes a named icon (no bitmap); we map that to the closest
             // Fluent glyph and let it win over the device-name guess below.
             if (_waveLinkGlyphOverride is not null) return _waveLinkGlyphOverride;
@@ -588,8 +598,15 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     private ImageSource? _waveLinkIcon;
     private string? _waveLinkGlyphOverride;
 
+    // User overrides win over the Wave Link / themed visuals. A null override defers to the
+    // auto-derived value ("Auto"). Seeded from the persisted DeviceConfig at construction.
+    private string? _userGlyphOverride;
+    private Color? _userAccent;
+
     /// <summary>Applies (or clears) the Wave Link visual. Called on the UI thread by the Home
-    /// view-model after a rebuild or a style-setting change.</summary>
+    /// view-model after a rebuild or a style-setting change. The caller snaps an artwork-derived
+    /// accent to the nearest Fluent palette colour before passing it (the white mix tile is passed
+    /// as-is); a user override, applied separately, still wins over this.</summary>
     public void SetWaveLinkVisual(Color? accent, ImageSource? icon, string? glyphOverride)
     {
         _waveLinkAccent = accent;
@@ -608,22 +625,59 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         OnPropertyChanged(nameof(Glyph));
     }
 
-    public ImageSource? WaveLinkIconSource => _waveLinkIcon;
-    public bool ShowWaveLinkIcon => _waveLinkIcon is not null;
-    public bool ShowGlyph => _waveLinkIcon is null;
+    /// <summary>
+    /// Applies (or clears) the user's customisation overrides and persists them via the host.
+    /// A null <paramref name="glyph"/> or <paramref name="accent"/> means "Auto" for that axis -
+    /// the card falls back to its derived glyph / Wave Link accent. Mirrors
+    /// <see cref="SetWaveLinkVisual"/> in the set of visual properties it refreshes.
+    /// </summary>
+    public void SetUserCustomisation(string? glyph, Color? accent)
+    {
+        _userGlyphOverride = glyph;
+        _userAccent = accent;
+        OnPropertyChanged(nameof(Glyph));
+        OnPropertyChanged(nameof(ShowAccentTile));
+        OnPropertyChanged(nameof(ShowDefaultTile));
+        OnPropertyChanged(nameof(WaveLinkTileBrush));
+        OnPropertyChanged(nameof(GlyphContrastBrush));
+        OnPropertyChanged(nameof(GlyphOnAccent));
+        OnPropertyChanged(nameof(GlyphMutedThemed));
+        OnPropertyChanged(nameof(GlyphNormalThemed));
+        OnPropertyChanged(nameof(CurrentGlyphOverride));
+        OnPropertyChanged(nameof(CurrentAccent));
+        _onCustomisationChanged?.Invoke(this);
+    }
 
-    /// <summary>Absolute (theme-independent) accent fill for the icon tile: the Wave Link
-    /// channel colour, or white for a mix (mixes carry only a monochrome named icon). Null when
-    /// no tint applies.</summary>
-    public Brush? WaveLinkTileBrush => _waveLinkAccent is Color c ? new SolidColorBrush(c) : null;
+    /// <summary>Current user glyph override (null = Auto), read by the picker to seed selection.</summary>
+    public string? CurrentGlyphOverride => _userGlyphOverride;
+
+    /// <summary>Current user accent override (null = Auto), read by the picker to seed selection.</summary>
+    public Color? CurrentAccent => _userAccent;
+
+    /// <summary>The accent actually painted on the tile: a user override wins over the snapped
+    /// Wave Link accent.</summary>
+    private Color? EffectiveAccent => _userAccent ?? _waveLinkAccent;
+
+    public ImageSource? WaveLinkIconSource => _waveLinkIcon;
+
+    // A user accent override hides the Wave Link bitmap so the chosen tile colour + glyph show.
+    public bool ShowWaveLinkIcon => _waveLinkIcon is not null && _userAccent is null;
+    public bool ShowGlyph => !ShowWaveLinkIcon;
+
+    /// <summary>Absolute (theme-independent) accent fill for the icon tile: the user override, the
+    /// Wave Link channel colour, or white for a mix. Null when no tint applies.</summary>
+    public Brush? WaveLinkTileBrush => EffectiveAccent is Color c ? new SolidColorBrush(c) : null;
 
     /// <summary>Show the absolute-colour accent tile: a tint exists, the device isn't muted (the
-    /// muted card tint owns that signal), and it isn't showing a bitmap or rule-locked.</summary>
-    public bool ShowAccentTile => _waveLinkAccent.HasValue && !IsMuted && _waveLinkIcon is null && !IsMuteLockedByRule;
+    /// muted card tint owns that signal), and it isn't showing a bitmap. A rule-lock suppresses the
+    /// auto Wave Link accent (the lock owns the tile state), but a deliberate <em>user</em> colour
+    /// is honoured regardless - the user explicitly chose it.</summary>
+    public bool ShowAccentTile => EffectiveAccent.HasValue && !IsMuted && !ShowWaveLinkIcon
+        && (_userAccent is not null || !IsMuteLockedByRule);
 
-    /// <summary>Show the default theme tile ({ThemeResource} subtle fill): no Wave Link tint or
-    /// bitmap, and not rule-locked (locked stays transparent / non-interactive).</summary>
-    public bool ShowDefaultTile => _waveLinkIcon is null && !IsMuteLockedByRule && !ShowAccentTile;
+    /// <summary>Show the default theme tile ({ThemeResource} subtle fill): no tint or bitmap, and
+    /// not rule-locked (a rule-locked device with no user accent stays transparent / non-interactive).</summary>
+    public bool ShowDefaultTile => !ShowWaveLinkIcon && !IsMuteLockedByRule && !ShowAccentTile;
 
     // The glyph is drawn by one of three overlaid FontIcons in XAML, chosen by the bools below,
     // so the two theme-dependent colours can stay {ThemeResource} (which a code-resolved brush
@@ -635,7 +689,7 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
 
     /// <summary>Absolute contrast colour (near-black or white) for a glyph sitting on an accent
     /// or white tile. Null when there's no tile colour.</summary>
-    public Brush? GlyphContrastBrush => _waveLinkAccent is Color c ? new SolidColorBrush(ContrastingGlyph(c)) : null;
+    public Brush? GlyphContrastBrush => EffectiveAccent is Color c ? new SolidColorBrush(ContrastingGlyph(c)) : null;
 
     public bool GlyphOnAccent => ShowGlyph && ShowAccentTile;
     public bool GlyphMutedThemed => ShowGlyph && !ShowAccentTile && IsMuted;
