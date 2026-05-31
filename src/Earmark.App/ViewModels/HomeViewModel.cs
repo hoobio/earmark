@@ -50,6 +50,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     private WaveLinkChannelStyle? _lastAppliedStyle;
     private bool? _lastFilterForwarders;
     private bool? _lastShowAppIndicators;
+    private bool? _lastAlwaysShowPinned;
     private int? _lastHiddenAppsCount;
     /// <summary>Identity keys of apps the user has permanently hidden from the chip rows, mirrored
     /// from <see cref="AppSettings.HiddenApps"/> for O(1) lookups on the 20Hz tick.</summary>
@@ -275,14 +276,19 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         TimeSpan.FromSeconds(Math.Clamp(_settings.Current.AppChipLingerSeconds, 0, MaxLingerSeconds));
 
     /// <summary>True when an unpinned chip has lingered past <see cref="LingerWindow"/> and should
-    /// be removed. Rule-pinned chips stay while their app runs; once closed, even they age out.</summary>
-    private static bool ShouldPrune(AppChip chip, DateTime now, TimeSpan linger)
+    /// be removed. Rule-pinned chips stay while their app runs (and skip the prune) only while
+    /// <paramref name="alwaysShowPinned"/> is on; with it off a pinned chip ages out like any other,
+    /// and a forced-show pinned chip that has never made a sound is dropped outright. Once closed,
+    /// even a pinned chip ages out.</summary>
+    private static bool ShouldPrune(AppChip chip, DateTime now, TimeSpan linger, bool alwaysShowPinned)
     {
         if (chip.IsClosed) return now - chip.ClosedAt!.Value > linger;
-        if (chip.RulePinnedHere) return false;
+        if (chip.RulePinnedHere && alwaysShowPinned) return false;
         if (chip.PlayingSince is not null) return false;            // still producing audio
         if (chip.LastStoppedAt is { } stopped) return now - stopped > linger;
-        return false;   // never played and not pinned - nothing to age out from
+        // Never produced audio. A normal chip never reaches this state (additions need audible or
+        // pinned); the only one here is a silent pinned chip the setting has just un-stuck - drop it.
+        return chip.RulePinnedHere && !alwaysShowPinned;
     }
 
     /// <summary>Whether a session earns an app chip, honouring the live "filter audio forwarders"
@@ -302,6 +308,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     {
         var now = DateTime.UtcNow;
         var linger = LingerWindow;
+        var alwaysShowPinned = _settings.Current.AlwaysShowPinnedApps;
         var sessionsSnapshot = _sessions.GetSessions();
         var rulesSnapshot = _rules.Rules;
         List<AudioEndpoint>? combinedEndpointsCache = null;
@@ -411,7 +418,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             // so it never touches the running-process list on the UI thread.
             for (var i = card.Apps.Count - 1; i >= 0; i--)
             {
-                if (ShouldPrune(card.Apps[i], now, linger))
+                if (ShouldPrune(card.Apps[i], now, linger, alwaysShowPinned))
                 {
                     _logger.LogInformation("Chip prune: pid={Pid} closed={Closed} past linger",
                         card.Apps[i].ProcessId, card.Apps[i].IsClosed);
@@ -615,12 +622,18 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             // it doesn't re-trigger; the chip's own Hide path already updated it before saving.
             var hiddenAppsChanged = _settings.Current.HiddenApps.Count != _lastHiddenAppsCount;
             if (hiddenAppsChanged) RefreshHiddenApps();
+            // The always-show-pinned toggle changes which chips exist (silent pinned apps gain or
+            // lose their forced chip), so a change re-runs the in-place reconcile alongside the
+            // forwarder filter and master toggle. The padlock badge updates live via the
+            // _meterOptions push in SyncMeterOptions above - no rebuild needed for that part.
             if (hiddenAppsChanged ||
                 _settings.Current.FilterAudioForwarders != _lastFilterForwarders ||
-                _settings.Current.ShowAppIndicators != _lastShowAppIndicators)
+                _settings.Current.ShowAppIndicators != _lastShowAppIndicators ||
+                _settings.Current.AlwaysShowPinnedApps != _lastAlwaysShowPinned)
             {
                 _lastFilterForwarders = _settings.Current.FilterAudioForwarders;
                 _lastShowAppIndicators = _settings.Current.ShowAppIndicators;
+                _lastAlwaysShowPinned = _settings.Current.AlwaysShowPinnedApps;
                 QueueAppsReconcile();
             }
             if (_settings.Current.WaveLinkChannelStyle == _lastAppliedStyle) return;
@@ -639,6 +652,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         _meterOptions.SingleColour = PeakMeterOptions.ColourFromHex(s.PeakMeterSingleColour);
         _meterOptions.ShowAppIndicators = s.ShowAppIndicators;
         _meterOptions.ShowAppMeters = s.ShowAppPeakMeters;
+        _meterOptions.AlwaysShowPinnedApps = s.AlwaysShowPinnedApps;
         foreach (var card in _allCards) card.NotifyMeterStyleChanged();
     }
 
@@ -762,8 +776,14 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         }
 
         // Fold in matched-but-silent running apps (no audio session, so absent from the snapshot).
+        // Only when "always show pinned apps" is on: a synthetic session exists purely to give a
+        // silent rule-pinned app a chip before it makes a sound, which is exactly what the setting
+        // governs. Off, we skip it so a pinned app's chip appears only once it's audible.
+        var alwaysShowPinned = _settings.Current.AlwaysShowPinnedApps;
         var runningIdentities = new HashSet<string>(StringComparer.Ordinal);
-        var synthetic = BuildSyntheticSessions(rules, combined, sessions, realIdentities, routeByPid, runningIdentities);
+        var synthetic = alwaysShowPinned
+            ? BuildSyntheticSessions(rules, combined, sessions, realIdentities, routeByPid, runningIdentities)
+            : new List<AudioSession>();
         IReadOnlyList<AudioSession> effectiveSessions = sessions;
         if (synthetic.Count > 0)
         {
@@ -781,7 +801,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
 
         foreach (var card in _allCards)
         {
-            SyncCardApps(card, effectiveSessions, routeByPid, existsIdentities, liveSessionByIdentity);
+            SyncCardApps(card, effectiveSessions, routeByPid, existsIdentities, liveSessionByIdentity, alwaysShowPinned);
         }
     }
 
@@ -957,7 +977,8 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         IReadOnlyList<AudioSession> sessions,
         Dictionary<uint, AppRouteMatch?> routeByPid,
         HashSet<string> existsIdentities,
-        Dictionary<string, AudioSession> liveSessionByIdentity)
+        Dictionary<string, AudioSession> liveSessionByIdentity,
+        bool alwaysShowPinned)
     {
         if (card.Endpoint.Flow != EndpointFlow.Render)
         {
@@ -1014,7 +1035,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             // Never prune a chip that's audible right now: the run state can be stale here (the
             // 20Hz tick that advances it is paused while the Home page is off-screen). The visible
             // path's Phase 3 prune ages idle/closed chips out with a fresh clock.
-            if (!audibleHere && ShouldPrune(chip, now, linger))
+            if (!audibleHere && ShouldPrune(chip, now, linger, alwaysShowPinned))
             {
                 _logger.LogInformation("Chip removed: pid={Pid} key='{Key}' card={Card} closed={Closed}",
                     chip.ProcessId, key, card.Endpoint.DisplayName, chip.IsClosed);
@@ -1075,7 +1096,9 @@ public partial class HomeViewModel : ObservableObject, IDisposable
 
             var livePeak = _sessionMeters.GetPeak(session.ProcessId, card.Endpoint.Id) ?? 0f;
             var audible = livePeak >= AppChip.AudibleAmplitudeThreshold;
-            if (!audible && !pinnedHere) continue;
+            // A silent app earns a chip only when a rule pins it here AND the always-show setting is
+            // on. Off, a pinned-but-silent app is treated like any other silent app (no chip).
+            if (!audible && !(pinnedHere && alwaysShowPinned)) continue;
 
             // One addition per app, preferring an audible representative (so its meter shows real
             // audio) and carrying any rule match for the lock badge.

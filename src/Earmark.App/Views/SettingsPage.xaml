@@ -85,6 +85,11 @@
                                            IsEnabled="{x:Bind ViewModel.AppIndicatorChildrenEnabled, Mode=OneWay}">
                             <ToggleSwitch IsOn="{x:Bind ViewModel.FilterAudioForwarders, Mode=TwoWay}" />
                         </ctrl:SettingsCard>
+                        <ctrl:SettingsCard Header="Always show pinned apps"
+                                           Description="Keep a chip on the card for any app a rule pins to that device, even while it's silent, with a padlock badge. Off shows a pinned app only while it's actually producing audio and hides the badge."
+                                           IsEnabled="{x:Bind ViewModel.AppIndicatorChildrenEnabled, Mode=OneWay}">
+                            <ToggleSwitch IsOn="{x:Bind ViewModel.AlwaysShowPinnedApps, Mode=TwoWay}" />
+                        </ctrl:SettingsCard>
                         <ctrl:SettingsCard Header="Keep stopped apps visible"
                                            Description="After an app stops playing or closes, its chip dims and lingers for this many seconds before it disappears. Closed apps also show a badge. Set 0 to remove a chip as soon as its app stops."
                                            IsEnabled="{x:Bind ViewModel.AppIndicatorChildrenEnabled, Mode=OneWay}">

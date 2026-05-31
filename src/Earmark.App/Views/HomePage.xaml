@@ -583,7 +583,7 @@
                                                     VerticalAlignment="Top"
                                                     Margin="0,-3,-3,0"
                                                     ToolTipService.ToolTip="{x:Bind LockTooltip}"
-                                                    Visibility="{x:Bind IsRuleLocked, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                    Visibility="{x:Bind LockBadgeVisibility(MeterOptions.AlwaysShowPinnedApps), Mode=OneWay}">
                                                 <FontIcon Glyph="&#xE72E;"
                                                           FontSize="8"
                                                           Foreground="{ThemeResource TextFillColorPrimaryBrush}"

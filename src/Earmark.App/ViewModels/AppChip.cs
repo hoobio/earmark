@@ -157,6 +157,14 @@ public partial class AppChip : ObservableObject
     public AudioSession Session { get; private set; }
     public RoutingRule? LockingRule { get; private set; }
     public bool IsRuleLocked => LockingRule is not null;
+
+    /// <summary>Visibility of the rule-lock padlock badge: shown when the chip is rule-locked AND
+    /// the "always show pinned apps" indicator setting is on. Bound via an x:Bind function (returning
+    /// <see cref="Visibility"/> directly, since function bindings don't take a converter) so it
+    /// re-evaluates live when the shared <see cref="PeakMeterOptions.AlwaysShowPinnedApps"/> flips -
+    /// that observable path argument is what drives the re-evaluation.</summary>
+    public Visibility LockBadgeVisibility(bool alwaysShowPinned) =>
+        IsRuleLocked && alwaysShowPinned ? Visibility.Visible : Visibility.Collapsed;
     // Closed apps can't be rerouted (the process is gone), so the chip stops being a drag source.
     public bool CanDrag => !IsRuleLocked && !IsClosed && !Session.IsSystemSounds;
     public uint ProcessId => Session.ProcessId;

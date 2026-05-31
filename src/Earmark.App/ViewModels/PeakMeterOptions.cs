@@ -38,6 +38,12 @@ public partial class PeakMeterOptions : ObservableObject
     [ObservableProperty]
     public partial bool ShowAppMeters { get; set; } = true;
 
+    /// <summary>Whether a rule-pinned app always shows its chip (dimmed while silent) plus the lock
+    /// padlock badge. Off shows a pinned app only while it's audible and hides the badge. Shared and
+    /// observable so a settings change updates every chip's padlock binding live.</summary>
+    [ObservableProperty]
+    public partial bool AlwaysShowPinnedApps { get; set; } = true;
+
     /// <summary>True unless the meter is switched off (the card then shows a plain volume slider).</summary>
     public bool ShowMeter => ColourMode != PeakMeterColourMode.Off;
 

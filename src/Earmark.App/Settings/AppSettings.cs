@@ -87,6 +87,13 @@ public sealed class AppSettings
     /// shows them like any other app.</summary>
     public bool FilterAudioForwarders { get; set; } = true;
 
+    /// <summary>Whether an app pinned by an <c>ApplicationOutput</c> rule always shows its chip on
+    /// the pinned device (dimmed while silent), plus the rule-lock padlock badge. Default true
+    /// (the original behaviour). Off makes a pinned app's chip appear only while it's actually
+    /// producing audio - like any other app - and hides the padlock. Only meaningful when
+    /// <see cref="ShowAppIndicators"/> is also on.</summary>
+    public bool AlwaysShowPinnedApps { get; set; } = true;
+
     /// <summary>
     /// Per-device configuration, keyed by endpoint id. Only devices that deviate from the
     /// defaults get an entry (all-default entries are pruned on save), so the map stays sparse.

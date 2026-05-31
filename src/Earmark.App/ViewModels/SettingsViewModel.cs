@@ -69,6 +69,11 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     public partial bool FilterAudioForwarders { get; set; }
 
+    /// <summary>Whether a rule-pinned app always shows its chip (and the lock padlock badge), or only
+    /// while it's audible. Only meaningful when <see cref="ShowAppIndicators"/> is on.</summary>
+    [ObservableProperty]
+    public partial bool AlwaysShowPinnedApps { get; set; }
+
     /// <summary>Seconds a Devices-page app chip lingers (dimmed) after its app stops playing or
     /// closes, before it's removed. Bound to a NumberBox, so it's a double here; persisted as a
     /// clamped int.</summary>
@@ -158,6 +163,7 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
             ShowAppIndicators = _settings.Current.ShowAppIndicators;
             ShowAppPeakMeters = _settings.Current.ShowAppPeakMeters;
             FilterAudioForwarders = _settings.Current.FilterAudioForwarders;
+            AlwaysShowPinnedApps = _settings.Current.AlwaysShowPinnedApps;
             AppChipLingerSeconds = _settings.Current.AppChipLingerSeconds;
             AppThemeIndex = (int)_settings.Current.Theme;
             BackdropIndex = (int)_settings.Current.Backdrop;
@@ -195,6 +201,7 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     }
     partial void OnShowAppPeakMetersChanged(bool value) => Persist(s => s.ShowAppPeakMeters = value);
     partial void OnFilterAudioForwardersChanged(bool value) => Persist(s => s.FilterAudioForwarders = value);
+    partial void OnAlwaysShowPinnedAppsChanged(bool value) => Persist(s => s.AlwaysShowPinnedApps = value);
 
     /// <summary>Gates the app-indicator child settings - they only matter while the chips show.</summary>
     public bool AppIndicatorChildrenEnabled => ShowAppIndicators;
