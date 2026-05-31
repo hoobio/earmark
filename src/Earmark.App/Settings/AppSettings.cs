@@ -1,9 +1,24 @@
 using System.Text.Json.Serialization;
 
+using Earmark.Core.Models;
+
 namespace Earmark.App.Settings;
 
 public sealed class AppSettings
 {
+    /// <summary>
+    /// Persistence schema revision. 0 (the implicit value for a file written before the device-key
+    /// migration) triggers the one-time re-key of <see cref="DeviceOrder"/> / <see cref="DeviceGroups"/>
+    /// / <see cref="Devices"/> from endpoint id to <see cref="Earmark.Core.Models.DeviceIdentity"/>
+    /// key, after which it is bumped to <see cref="DeviceKeySchemaVersion"/>. See the ADR
+    /// <c>docs/adr/device-persistence-and-identity.md</c>.
+    /// </summary>
+    public int SettingsSchemaVersion { get; set; }
+
+    /// <summary>The schema version once the device-key migration has run.</summary>
+    [JsonIgnore]
+    public const int DeviceKeySchemaVersion = 1;
+
     public bool LaunchOnStartup { get; set; }
 
     public bool ShowTrayIcon { get; set; } = true;
@@ -116,29 +131,40 @@ public sealed class AppSettings
     public bool LockDeviceLayout { get; set; }
 
     /// <summary>
-    /// Per-device configuration, keyed by endpoint id. Only devices that deviate from the
+    /// Per-device configuration, keyed by <see cref="Earmark.Core.Models.DeviceIdentity"/> device key
+    /// (stable across a driver reinstall, unlike the endpoint id). Only devices that deviate from the
     /// defaults get an entry (all-default entries are pruned on save), so the map stays sparse.
     /// Replaces the old parallel hidden / pinned / volume-controls-hidden id lists.
     /// </summary>
     public Dictionary<string, DeviceConfig> Devices { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Top-level block arrangement on the Devices page, top-to-bottom across the grid. Each entry
-    /// is either a lone device's endpoint id or a <see cref="DeviceGroup.Id"/>; an entry that
-    /// matches a known group id is a group block, everything else a lone card. Devices that belong
-    /// to a group are <b>omitted</b> here (their slot is the group's, their order is the group's
-    /// <see cref="DeviceGroup.MemberIds"/>). Empty until the user first reorders. A block not in
-    /// this list slots into its default-sort position among the rest.
+    /// Top-level block arrangement on the Devices page, top-to-bottom across the grid. Each entry is
+    /// either a lone device's <see cref="Earmark.Core.Models.DeviceIdentity"/> key or a
+    /// <see cref="DeviceGroup.Id"/>; an entry that matches a known group id is a group block,
+    /// everything else a lone card. Devices that belong to a group are <b>omitted</b> here (their
+    /// slot is the group's, their order is the group's <see cref="DeviceGroup.MemberIds"/>). Empty
+    /// until the user first reorders. A block not in this list slots into its default-sort position.
     /// </summary>
     public List<string> DeviceOrder { get; set; } = new();
 
     /// <summary>
     /// User-defined device groups on the Devices page. A group is an atomic block that bundles two
-    /// or more device cards under an editable title. <see cref="DeviceGroup.MemberIds"/> is the
-    /// single source of truth for membership and intra-group order; the group's position among
-    /// other blocks comes from its id's slot in <see cref="DeviceOrder"/>.
+    /// or more device cards under an editable title. <see cref="DeviceGroup.MemberIds"/> (device
+    /// keys) is the single source of truth for membership and intra-group order; the group's position
+    /// among other blocks comes from its id's slot in <see cref="DeviceOrder"/>.
     /// </summary>
     public List<DeviceGroup> DeviceGroups { get; set; } = new();
+
+    /// <summary>
+    /// Devices Earmark has seen at least once, so a disconnected device keeps its card (rendered
+    /// dimmed) in its order / group slot instead of vanishing, and reconnect is a state toggle on a
+    /// surviving element rather than a card-list rebuild (which is what makes the block slide animate
+    /// and removes the connect/disconnect flash). Keyed by <see cref="KnownDevice.Key"/>
+    /// (<see cref="Earmark.Core.Models.DeviceIdentity"/>); capped + aged out (see the Devices
+    /// view-model). Populated as devices are enumerated; "Forget device" removes a row.
+    /// </summary>
+    public List<KnownDevice> KnownDevices { get; set; } = new();
 
     /// <summary>
     /// Apps the user has permanently hidden from the device cards' app-indicator rows, via a chip's
@@ -255,6 +281,41 @@ public sealed class DeviceGroup
 
     public string Title { get; set; } = string.Empty;
 
-    /// <summary>Member endpoint ids, in left-to-right member order.</summary>
+    /// <summary>Member <see cref="Earmark.Core.Models.DeviceIdentity"/> keys, in left-to-right member order.</summary>
     public List<string> MemberIds { get; set; } = new();
+}
+
+/// <summary>
+/// A device Earmark has seen, persisted so it survives disconnect (and a driver reinstall, which
+/// changes <see cref="LastEndpointId"/> but not <see cref="Key"/>). <see cref="Key"/> is the stable
+/// <see cref="Earmark.Core.Models.DeviceIdentity"/>; the rest is the last-seen state used to render a
+/// disconnected card (name / flow) and to resolve it back to a live endpoint when it reconnects.
+/// </summary>
+public sealed class KnownDevice
+{
+    /// <summary>Stable identity (<c>container|flow</c>, or a friendly-name fallback). The key the
+    /// order / group / config stores reference.</summary>
+    public string Key { get; set; } = string.Empty;
+
+    /// <summary>The endpoint id this device most recently presented as. Refreshed every time the
+    /// device is seen; used for display and to find the live card while connected.</summary>
+    public string LastEndpointId { get; set; } = string.Empty;
+
+    /// <summary>Friendly name captured at last sight, shown on the disconnected card.</summary>
+    public string FriendlyName { get; set; } = string.Empty;
+
+    /// <summary>Device description (adapter / driver) captured at last sight, shown as the subtitle.</summary>
+    public string DeviceDescription { get; set; } = string.Empty;
+
+    /// <summary>Render or capture - a device exposing both flows is two rows (the flow is part of the key).</summary>
+    public EndpointFlow Flow { get; set; }
+
+    /// <summary>The container id captured at last sight (for the Bluetooth control mapping); may be null.</summary>
+    public string? ContainerId { get; set; }
+
+    /// <summary>Whether the device was last seen as a Bluetooth endpoint.</summary>
+    public bool IsBluetooth { get; set; }
+
+    /// <summary>When the device was last enumerated (UTC). Drives the age-out prune.</summary>
+    public DateTimeOffset LastSeenUtc { get; set; }
 }

@@ -31,6 +31,15 @@ public sealed class AudioEndpointService : IAudioEndpointService, IMMNotificatio
     private const int FriendlyNamePid = 14;
     private const int DeviceDescPid = 2;
 
+    // DEVPKEY_Device_ContainerId ({8c7ed206-3f8a-4827-b3ab-ae9e1faefc6c}, 2): the physical-device
+    // container GUID, stable across a driver reinstall (and MAC-derived for Bluetooth), so it backs
+    // the persistent device identity. PKEY_AudioEndpoint_FormFactor ({1da5d803-...}, 0) is read to
+    // flag Bluetooth endpoints (form factor 13 = BluetoothHeadset / 9 = Headset over a BT container).
+    private static readonly NAudio.CoreAudioApi.PropertyKey ContainerIdKey = new() { formatId = new Guid("8c7ed206-3f8a-4827-b3ab-ae9e1faefc6c"), propertyId = 2 };
+    private static readonly Guid AudioEndpointFmtId = new("1da5d803-d492-4edd-8c23-e0c0ffee7f0e");
+    private const int FormFactorPid = 0;
+    private const int FormFactorBluetoothHeadset = 13;
+
     private readonly ILogger<AudioEndpointService> _logger;
     private readonly MMDeviceEnumerator _enumerator;
     private readonly Lock _rebuildGate = new();
@@ -552,6 +561,8 @@ public sealed class AudioEndpointService : IAudioEndpointService, IMMNotificatio
             _ => EndpointState.Disabled,
         };
 
+        var (containerId, isBluetooth) = ReadIdentityProperties(device);
+
         return new AudioEndpoint(
             Id: device.ID,
             FriendlyName: device.FriendlyName,
@@ -559,7 +570,42 @@ public sealed class AudioEndpointService : IAudioEndpointService, IMMNotificatio
             Flow: flow,
             State: state,
             IsDefault: defaultMultimediaId is not null && string.Equals(device.ID, defaultMultimediaId, StringComparison.OrdinalIgnoreCase),
-            IsDefaultCommunications: defaultCommsId is not null && string.Equals(device.ID, defaultCommsId, StringComparison.OrdinalIgnoreCase));
+            IsDefaultCommunications: defaultCommsId is not null && string.Equals(device.ID, defaultCommsId, StringComparison.OrdinalIgnoreCase),
+            ContainerId: containerId,
+            IsBluetooth: isBluetooth);
+    }
+
+    /// <summary>
+    /// Reads the persistent-identity properties off an endpoint's property store: the container id
+    /// (<c>DEVPKEY_Device_ContainerId</c>, stable across reinstalls) and a Bluetooth flag derived
+    /// from <c>PKEY_AudioEndpoint_FormFactor</c>. Defensive: any read failure yields (null, false)
+    /// so a quirky endpoint never breaks enumeration.
+    /// </summary>
+    private static (string? ContainerId, bool IsBluetooth) ReadIdentityProperties(MMDevice device)
+    {
+        string? containerId = null;
+        var isBluetooth = false;
+        try
+        {
+            var properties = device.Properties;
+            if (properties.Contains(ContainerIdKey) && properties[ContainerIdKey].Value is Guid guid && guid != Guid.Empty)
+            {
+                containerId = guid.ToString("D");
+            }
+
+            var formFactorKey = new NAudio.CoreAudioApi.PropertyKey { formatId = AudioEndpointFmtId, propertyId = FormFactorPid };
+            if (properties.Contains(formFactorKey) && properties[formFactorKey].Value is { } ffValue)
+            {
+                try { isBluetooth = Convert.ToInt32(ffValue, System.Globalization.CultureInfo.InvariantCulture) == FormFactorBluetoothHeadset; }
+                catch (Exception ex) when (ex is FormatException or InvalidCastException or OverflowException) { /* leave false */ }
+            }
+        }
+        catch (Exception)
+        {
+            // Some virtual / loopback endpoints expose no readable property store; fall back to no
+            // container id (the friendly-name identity path) rather than failing the whole map.
+        }
+        return (containerId, isBluetooth);
     }
 
     // Drift-correction only: refresh the cached snapshot silently. It must NOT raise

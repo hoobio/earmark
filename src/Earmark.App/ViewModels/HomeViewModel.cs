@@ -35,6 +35,12 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     // the dimmed chip shouldn't outstay the configurable window the user set for incidental exits.
     private static readonly TimeSpan UserClosedLinger = TimeSpan.FromSeconds(3);
 
+    // Known-devices table bounds (persisted disconnected devices). Constants, not magic numbers:
+    // forget a device unseen for longer than this, and never keep more than this many rows (the
+    // oldest-last-seen are dropped first) so the list can't grow unbounded over years of pairings.
+    private static readonly TimeSpan KnownDeviceMaxAge = TimeSpan.FromDays(90);
+    private const int MaxKnownDevices = 64;
+
     private readonly IRulesService _rules;
     private readonly IAudioEndpointService _endpoints;
     private readonly IEndpointWriter _writer;
@@ -51,6 +57,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     private readonly IWaveLinkVisualService _waveLinkVisuals;
     private readonly IDispatcherQueueProvider _dispatcher;
     private readonly IDeviceDefaultsService _deviceDefaults;
+    private readonly IBluetoothAudioControl _bluetoothControl;
     private WaveLinkChannelStyle? _lastAppliedStyle;
     private bool? _lastFilterForwarders;
     private bool? _lastShowAppIndicators;
@@ -100,6 +107,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         IProcessControlService processControl,
         IDispatcherQueueProvider dispatcher,
         IDeviceDefaultsService deviceDefaults,
+        IBluetoothAudioControl bluetoothControl,
         ILogger<HomeViewModel> logger)
     {
         _rules = rules ?? throw new ArgumentNullException(nameof(rules));
@@ -121,6 +129,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         _processControl = processControl ?? throw new ArgumentNullException(nameof(processControl));
         _dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
         _deviceDefaults = deviceDefaults ?? throw new ArgumentNullException(nameof(deviceDefaults));
+        _bluetoothControl = bluetoothControl ?? throw new ArgumentNullException(nameof(bluetoothControl));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
         // Show-hidden is session-only: defaults to off on every launch.
@@ -212,25 +221,38 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     public partial bool IsInitializing { get; set; }
 
     public bool ShowLoadingState => IsInitializing;
-    public bool ShowEmptyState => !IsInitializing && IsEmpty;
+
+    /// <summary>Genuine "no devices" state: the grid is empty AND no devices exist at all (live or
+    /// persisted).</summary>
+    public bool ShowEmptyState => !IsInitializing && IsEmpty && _allCards.Count == 0;
+
+    /// <summary>"Everything is filtered out" state: the grid is empty but devices DO exist - they're
+    /// all hidden / disconnected with the matching toggle off. Distinct copy points at the toggles
+    /// rather than implying there are no devices.</summary>
+    public bool ShowFilteredEmptyState => !IsInitializing && IsEmpty && _allCards.Count > 0;
 
     partial void OnIsInitializingChanged(bool value)
     {
         OnPropertyChanged(nameof(ShowLoadingState));
         OnPropertyChanged(nameof(ShowEmptyState));
+        OnPropertyChanged(nameof(ShowFilteredEmptyState));
     }
 
+    /// <summary>Reveals devices auto-hidden for having no rules (plus user-hidden ones), dimmed.
+    /// Session-only: defaults off every launch. The view-model owns the filter, so a change just
+    /// resyncs the blocks - no per-card flag to push.</summary>
     [ObservableProperty]
     public partial bool ShowHiddenDevices { get; set; }
 
-    partial void OnShowHiddenDevicesChanged(bool value)
-    {
-        foreach (var card in _allCards)
-        {
-            card.RefreshListed(value);
-        }
-        SyncBlocks();
-    }
+    partial void OnShowHiddenDevicesChanged(bool value) => SyncBlocks();
+
+    /// <summary>Reveals persisted-but-disconnected devices (dimmed, controls disabled). Session-only
+    /// too, matching <see cref="ShowHiddenDevices"/>, so a fresh launch isn't cluttered by every
+    /// headset ever paired. A change just resyncs (filter + in-place reconcile, no rebuild).</summary>
+    [ObservableProperty]
+    public partial bool ShowDisconnectedDevices { get; set; }
+
+    partial void OnShowDisconnectedDevicesChanged(bool value) => SyncBlocks();
 
     /// <summary>Whether the Devices page header row (the "Devices" title) is shown. Persisted; toggled
     /// from the page's "..." / right-click menu (the "..." stays visible either way).</summary>
@@ -488,8 +510,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         var muted = e.Muted;
         _dispatcher.Enqueue(() =>
         {
-            var card = _allCards.FirstOrDefault(c =>
-                string.Equals(c.Endpoint.Id, deviceId, StringComparison.OrdinalIgnoreCase));
+            var card = FindCardByEndpointId(deviceId);
             if (card is null) return;
             ApplyExternalMute(card, muted);
         });
@@ -503,9 +524,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         var volume = e.Volume;
         _dispatcher.Enqueue(() =>
         {
-            var card = _allCards.FirstOrDefault(c =>
-                string.Equals(c.Endpoint.Id, deviceId, StringComparison.OrdinalIgnoreCase));
-            card?.SyncVolumeFromDevice(volume);
+            FindCardByEndpointId(deviceId)?.SyncVolumeFromDevice(volume);
         });
     }
 
@@ -636,27 +655,165 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         {
             return;
         }
+        if (ct.IsCancellationRequested) return;
 
-        // Snapshot the per-device config map on the UI thread so the background BuildCards reads a
-        // stable copy (mutations replace entries rather than the dictionary reference).
+        // Resolve the stable device key of every live endpoint up front (immutable snapshot reads,
+        // thread-safe). This drives the persistence identity: the known-devices table, the
+        // live+persisted union, the instance-reuse reconcile, and the store re-key migration.
+        var renderEndpoints = _endpoints.GetEndpoints(EndpointFlow.Render);
+        var captureEndpoints = _endpoints.GetEndpoints(EndpointFlow.Capture);
+        var liveActive = renderEndpoints.Concat(captureEndpoints)
+            .Where(e => e.State == EndpointState.Active)
+            .ToList();
+        var idToKey = DeviceIdentity.ComputeKeys(liveActive);
+        foreach (var e in liveActive)
+        {
+            if (DeviceIdentity.IsNameFallback(idToKey[e.Id]))
+            {
+                _logger.LogInformation("Device identity fell back to friendly name (no container id): '{Name}' {Flow}", e.FriendlyName, e.Flow);
+            }
+        }
+
+        // Immutable copies for the background pass - it must not touch _settings (mutated on the UI
+        // thread) or existing DeviceCard instances (their ObservableProperty setters are UI-thread).
         var deviceConfigs = new Dictionary<string, DeviceConfig>(_settings.Current.Devices, StringComparer.OrdinalIgnoreCase);
-        var showHidden = ShowHiddenDevices;
+        var knownDevices = _settings.Current.KnownDevices.Select(CloneKnown).ToList();
+        var now = DateTimeOffset.UtcNow;
 
-        // BuildCards produces the cards in default-sort order only; the manual block order and
-        // grouping are applied on the UI thread in SyncBlocks (which reads _settings directly).
-        var built = await Task.Run(() => BuildCards(deviceConfigs, showHidden), ct).ConfigureAwait(false);
+        CardBuildResult built;
+        try
+        {
+            built = await Task.Run(
+                () => BuildCards(deviceConfigs, knownDevices, liveActive, idToKey, renderEndpoints, captureEndpoints, now),
+                ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
 
         if (ct.IsCancellationRequested) return;
+
+        // One-time pre-migration backup, AWAITED here (before any mutation) so it captures the
+        // pre-re-key settings - the recovery point the ADR promises. Doing it fire-and-forget from
+        // the dispatcher block would race the in-place re-key and could snapshot already-migrated data.
+        if (_settings.Current.SettingsSchemaVersion < AppSettings.DeviceKeySchemaVersion)
+        {
+            try { await _settings.SaveBackupAsync("backup.v0", ct).ConfigureAwait(false); }
+            catch { /* best-effort: a missing backup must never block the migration */ }
+            if (ct.IsCancellationRequested) return;
+        }
 
         _dispatcher.Enqueue(() =>
         {
             if (ct.IsCancellationRequested) return;
-            _allCards.Clear();
-            _allCards.AddRange(built);
+
+            // 1. Re-key the persisted stores to device keys (convergent rewrite; the one-time backup
+            //    already ran above). Runs before SyncBlocks so a first-launch-post-upgrade keeps order.
+            MaybeMigrateDeviceKeys(idToKey);
+
+            // 2. Persist the refreshed known-devices table (only when it materially changed, so the
+            //    per-rebuild last-seen touch doesn't churn the file), and drop the persisted order /
+            //    group / config footprint of any device the prune just forgot.
+            if (built.KnownDevicesChanged)
+            {
+                _settings.Current.KnownDevices = built.KnownDevices;
+                foreach (var prunedKey in built.PrunedKeys) PurgeDeviceKeyFromStores(prunedKey);
+                QueueSettingsSave();
+            }
+
+            // 3. Reconcile _allCards BY DEVICE KEY: reuse + refresh surviving instances, create only
+            //    for new keys, drop the rest. Reusing instances is what lets the ItemsRepeater keep
+            //    its elements so the block slide animates a connect/disconnect (no rebuild flash).
+            ReconcileAllCards(built.Snapshots);
             SyncBlocks();
             SyncAllCardsApps();
             _ = ApplyWaveLinkVisualsAsync(ct);
         });
+    }
+
+    /// <summary>Result of the background card-build pass: the ordered snapshot set (live +
+    /// persisted-absent), the refreshed known-devices table, whether that table changed enough to
+    /// warrant a save, and the device keys the prune dropped (so their order / group / config
+    /// footprint can be purged on the UI thread).</summary>
+    private sealed record CardBuildResult(
+        List<DeviceCardSnapshot> Snapshots,
+        List<KnownDevice> KnownDevices,
+        bool KnownDevicesChanged,
+        List<string> PrunedKeys);
+
+    private static KnownDevice CloneKnown(KnownDevice d) => new()
+    {
+        Key = d.Key,
+        LastEndpointId = d.LastEndpointId,
+        FriendlyName = d.FriendlyName,
+        DeviceDescription = d.DeviceDescription,
+        Flow = d.Flow,
+        ContainerId = d.ContainerId,
+        IsBluetooth = d.IsBluetooth,
+        LastSeenUtc = d.LastSeenUtc,
+    };
+
+    /// <summary>
+    /// UI-thread one-time migration of the persisted stores (block order, group membership,
+    /// per-device config) from endpoint id to the stable device key, plus the convergent per-rebuild
+    /// completion for devices that were absent during the one-time pass (see the ADR). Idempotent.
+    /// </summary>
+    private void MaybeMigrateDeviceKeys(IReadOnlyDictionary<string, string> idToKey)
+    {
+        var s = _settings.Current;
+        var firstTime = s.SettingsSchemaVersion < AppSettings.DeviceKeySchemaVersion;
+        // The one-time pre-migration backup is taken (awaited) by RebuildAsync before this runs.
+
+        var changed = false;
+        changed |= DeviceKeyStore.ReKeyList(s.DeviceOrder, idToKey);
+        foreach (var group in s.DeviceGroups)
+        {
+            changed |= DeviceKeyStore.ReKeyList(group.MemberIds, idToKey);
+        }
+        changed |= DeviceKeyStore.ReKeyMap(s.Devices, idToKey);
+
+        if (firstTime)
+        {
+            s.SettingsSchemaVersion = AppSettings.DeviceKeySchemaVersion;
+            changed = true;
+            _logger.LogInformation("Migrated device stores to device keys (schema v{Version})", AppSettings.DeviceKeySchemaVersion);
+        }
+        if (changed) QueueSettingsSave();
+    }
+
+    /// <summary>Reconciles <see cref="_allCards"/> with the fresh snapshot set by device key: a
+    /// surviving device's existing <see cref="DeviceCard"/> is reused and refreshed in place; a new
+    /// key gets a new instance; a device on neither list is dropped. Order follows the snapshots.</summary>
+    private void ReconcileAllCards(List<DeviceCardSnapshot> snapshots)
+    {
+        var existingByKey = new Dictionary<string, DeviceCard>(StringComparer.OrdinalIgnoreCase);
+        foreach (var card in _allCards)
+        {
+            existingByKey.TryAdd(card.DeviceKey, card);
+        }
+
+        var rebuilt = new List<DeviceCard>(snapshots.Count);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var snap in snapshots)
+        {
+            if (!seen.Add(snap.DeviceKey)) continue;   // defensive: never two cards for one key
+            if (existingByKey.TryGetValue(snap.DeviceKey, out var card))
+            {
+                card.RefreshFrom(snap);
+            }
+            else
+            {
+                card = new DeviceCard(
+                    _endpoints, _writer, _meterOptions, snap,
+                    OnCardVisibilityToggled, OnCardVolumeControlsToggled, OnCardCustomisationChanged,
+                    OnCardBluetoothToggle);
+            }
+            rebuilt.Add(card);
+        }
+
+        _allCards.Clear();
+        _allCards.AddRange(rebuilt);
     }
 
     private void OnSettingsChanged(object? sender, EventArgs e)
@@ -904,10 +1061,22 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         return result;
     }
 
-    private List<DeviceCard> BuildCards(Dictionary<string, DeviceConfig> deviceConfigs, bool showHidden)
+    /// <summary>
+    /// Background pass: builds the ordered snapshot set the UI thread reconciles into cards. The set
+    /// is the union of live endpoints (in default-sort order) and persisted-but-absent known devices
+    /// (the disconnected ones, appended by flow + name). Returns plain data only - no
+    /// <see cref="DeviceCard"/> is constructed here (instance reuse / refresh happens on the UI
+    /// thread). Also refreshes the known-devices table from the live set.
+    /// </summary>
+    private CardBuildResult BuildCards(
+        Dictionary<string, DeviceConfig> deviceConfigs,
+        List<KnownDevice> knownDevices,
+        List<AudioEndpoint> liveActive,
+        IReadOnlyDictionary<string, string> idToKey,
+        IReadOnlyList<AudioEndpoint> renderEndpoints,
+        IReadOnlyList<AudioEndpoint> captureEndpoints,
+        DateTimeOffset now)
     {
-        var renderEndpoints = _endpoints.GetEndpoints(EndpointFlow.Render);
-        var captureEndpoints = _endpoints.GetEndpoints(EndpointFlow.Capture);
         var sessions = _sessions.GetSessions();
         var rules = _rules.Rules;
         var waveLinkOutputDeviceNames = BuildWaveLinkDeviceNameSet(_waveLink.LastSnapshot);
@@ -922,8 +1091,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         //   7. Everything else
         // Within each tier: render before capture, then alphabetical. The manual block order and
         // grouping are layered on top later, on the UI thread, in SyncBlocks.
-        var ordered = renderEndpoints.Concat(captureEndpoints)
-            .Where(e => e.State == EndpointState.Active)
+        var ordered = liveActive
             .OrderByDescending(e => e.IsDefault && e.Flow == EndpointFlow.Render)
             .ThenByDescending(e => e.IsDefault)
             .ThenByDescending(e => e.IsDefaultCommunications && e.Flow == EndpointFlow.Render)
@@ -934,42 +1102,157 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             .ThenBy(e => e.FriendlyName, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        var cards = new List<DeviceCard>(ordered.Count);
+        // Bluetooth detection per live render endpoint (topology walk, cached in the control). Only
+        // the render side carries the connect/disconnect button; capture endpoints are never flagged.
+        var btByEndpointId = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
         foreach (var endpoint in ordered)
         {
+            btByEndpointId[endpoint.Id] = endpoint.Flow == EndpointFlow.Render && _bluetoothControl.IsBluetooth(endpoint.Id);
+        }
+
+        var snapshots = new List<DeviceCardSnapshot>(ordered.Count + knownDevices.Count);
+        var liveKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var endpoint in ordered)
+        {
+            var key = idToKey[endpoint.Id];
+            liveKeys.Add(key);
             var summary = DeviceRulesSummary.For(endpoint, rules, renderEndpoints, captureEndpoints, sessions, _matcher, _evaluator);
             var volume = _endpoints.GetVolume(endpoint.Id) ?? 0f;
             var muted = _endpoints.GetMuted(endpoint.Id) ?? false;
-            deviceConfigs.TryGetValue(endpoint.Id, out var cfg);
-
-            var card = new DeviceCard(
-                _endpoints,
-                _writer,
-                endpoint,
-                volume,
-                muted,
-                summary.VolumeLocked,
-                summary.MuteLocked,
-                summary.RuleMutedTarget,
-                summary.RuleMutedSource,
-                summary.RuleVolumeSource,
-                summary.Rules,
-                cfg?.Hidden == true,
-                cfg?.Pinned == true,
-                showHidden,
-                _meterOptions,
-                cfg?.VolumeControlsHidden == true,
-                cfg?.Glyph,
-                Controls.DeviceAccentPalette.TryParseHex(cfg?.AccentColour),
-                Controls.DeviceAccentPalette.IsNoneSentinel(cfg?.AccentColour),
-                OnCardVisibilityToggled,
-                OnCardVolumeControlsToggled,
-                OnCardCustomisationChanged);
-            // Group membership + apps are filled later on the UI thread (SyncBlocks / SyncAllCardsApps);
-            // ObservableCollection mutations have to happen there.
-            cards.Add(card);
+            snapshots.Add(ToSnapshot(endpoint, key, isConnected: true, volume, muted, summary, LookupConfig(deviceConfigs, key, endpoint.Id), btByEndpointId[endpoint.Id]));
         }
-        return cards;
+
+        // Refresh the known-devices table from the live set (recording each device's Bluetooth flag so
+        // a disconnected BT device keeps its connect button), then build a disconnected snapshot for
+        // every remembered device that isn't live right now.
+        var (refreshedKnown, knownChanged, prunedKeys) = ReconcileKnownDevices(knownDevices, ordered, idToKey, btByEndpointId, now);
+        foreach (var row in refreshedKnown
+            .Where(r => !liveKeys.Contains(r.Key))
+            .OrderBy(r => r.Flow)
+            .ThenBy(r => r.FriendlyName, StringComparer.OrdinalIgnoreCase))
+        {
+            var endpoint = new AudioEndpoint(
+                Id: row.LastEndpointId,
+                FriendlyName: row.FriendlyName,
+                DeviceDescription: row.DeviceDescription,
+                Flow: row.Flow,
+                State: EndpointState.NotPresent,
+                IsDefault: false,
+                IsDefaultCommunications: false,
+                ContainerId: row.ContainerId,
+                IsBluetooth: row.IsBluetooth);
+            var summary = DeviceRulesSummary.For(endpoint, rules, renderEndpoints, captureEndpoints, sessions, _matcher, _evaluator);
+            snapshots.Add(ToSnapshot(endpoint, row.Key, isConnected: false, volume: 0f, muted: false, summary, LookupConfig(deviceConfigs, row.Key, row.LastEndpointId), row.IsBluetooth));
+        }
+
+        return new CardBuildResult(snapshots, refreshedKnown, knownChanged, prunedKeys);
+    }
+
+    /// <summary>Per-device config lookup that works before and after the store re-key: by device key
+    /// first, then by the (legacy) endpoint id.</summary>
+    private static DeviceConfig? LookupConfig(Dictionary<string, DeviceConfig> configs, string deviceKey, string endpointId)
+        => configs.TryGetValue(deviceKey, out var byKey) ? byKey
+            : configs.TryGetValue(endpointId, out var byId) ? byId
+            : null;
+
+    private static DeviceCardSnapshot ToSnapshot(
+        AudioEndpoint endpoint, string deviceKey, bool isConnected, float volume, bool muted,
+        DeviceRulesSummary.Result summary, DeviceConfig? cfg, bool isBluetooth)
+        => new(
+            Endpoint: endpoint,
+            DeviceKey: deviceKey,
+            IsConnected: isConnected,
+            IsBluetooth: isBluetooth,
+            Volume: volume,
+            IsMuted: muted,
+            VolumeLocked: summary.VolumeLocked,
+            MuteLocked: summary.MuteLocked,
+            RuleMutedTarget: summary.RuleMutedTarget,
+            RuleMutedSource: summary.RuleMutedSource,
+            RuleVolumeSource: summary.RuleVolumeSource,
+            Rules: summary.Rules,
+            IsHiddenByUser: cfg?.Hidden == true,
+            IsPinnedByUser: cfg?.Pinned == true,
+            IsVolumeControlsHiddenByUser: cfg?.VolumeControlsHidden == true,
+            UserGlyphOverride: cfg?.Glyph,
+            UserAccent: Controls.DeviceAccentPalette.TryParseHex(cfg?.AccentColour),
+            UserAccentNone: Controls.DeviceAccentPalette.IsNoneSentinel(cfg?.AccentColour));
+
+    /// <summary>
+    /// Seeds / refreshes the known-devices table from the live endpoints, then prunes it (age-out
+    /// past <see cref="KnownDeviceMaxAge"/>, then capped at <see cref="MaxKnownDevices"/> by
+    /// most-recently-seen, never dropping a currently-live device). Returns the new list and whether
+    /// it changed materially enough to persist (a new / removed / re-id'd / renamed device, or a
+    /// last-seen that advanced by more than a day - so a steady-state rebuild doesn't churn the file).
+    /// </summary>
+    private (List<KnownDevice> Devices, bool Changed, List<string> PrunedKeys) ReconcileKnownDevices(
+        List<KnownDevice> existing, IReadOnlyList<AudioEndpoint> liveActive,
+        IReadOnlyDictionary<string, string> idToKey, Dictionary<string, bool> btByEndpointId,
+        DateTimeOffset now)
+    {
+        var changed = false;
+        var byKey = new Dictionary<string, KnownDevice>(StringComparer.OrdinalIgnoreCase);
+        foreach (var row in existing) byKey.TryAdd(row.Key, row);
+
+        foreach (var endpoint in liveActive)
+        {
+            var key = idToKey[endpoint.Id];
+            if (!byKey.TryGetValue(key, out var row))
+            {
+                row = new KnownDevice { Key = key };
+                byKey[key] = row;
+                changed = true;
+                _logger.LogInformation("Known device added: {Key} '{Name}' {Flow}", key, endpoint.FriendlyName, endpoint.Flow);
+            }
+
+            if (!string.Equals(row.LastEndpointId, endpoint.Id, StringComparison.OrdinalIgnoreCase))
+            {
+                if (!string.IsNullOrEmpty(row.LastEndpointId))
+                {
+                    _logger.LogInformation("Known device endpoint id changed (driver reinstall?): {Key} '{Name}' {Old} -> {New}", key, endpoint.FriendlyName, row.LastEndpointId, endpoint.Id);
+                }
+                row.LastEndpointId = endpoint.Id;
+                changed = true;
+            }
+            if (!string.Equals(row.FriendlyName, endpoint.FriendlyName, StringComparison.Ordinal)) { row.FriendlyName = endpoint.FriendlyName; changed = true; }
+            if (!string.Equals(row.DeviceDescription, endpoint.DeviceDescription, StringComparison.Ordinal)) { row.DeviceDescription = endpoint.DeviceDescription; changed = true; }
+            if (row.Flow != endpoint.Flow) { row.Flow = endpoint.Flow; changed = true; }
+            if (!string.Equals(row.ContainerId, endpoint.ContainerId, StringComparison.OrdinalIgnoreCase)) { row.ContainerId = endpoint.ContainerId; changed = true; }
+            var isBt = btByEndpointId.TryGetValue(endpoint.Id, out var bt) && bt;
+            if (row.IsBluetooth != isBt) { row.IsBluetooth = isBt; changed = true; }
+            // Only treat a last-seen advance as "changed" past a day, so steady-state rebuilds don't
+            // resave every device event - last-seen only feeds the 90-day age-out.
+            if (now - row.LastSeenUtc > TimeSpan.FromDays(1)) changed = true;
+            row.LastSeenUtc = now;
+        }
+
+        var liveKeys = new HashSet<string>(idToKey.Values, StringComparer.OrdinalIgnoreCase);
+        var pruned = new List<string>();
+        var kept = new List<KnownDevice>();
+        foreach (var row in byKey.Values)
+        {
+            if (!liveKeys.Contains(row.Key) && now - row.LastSeenUtc > KnownDeviceMaxAge)
+            {
+                _logger.LogInformation("Known device aged out (>{Days}d unseen): {Key} '{Name}'", KnownDeviceMaxAge.TotalDays, row.Key, row.FriendlyName);
+                pruned.Add(row.Key);
+                changed = true;
+                continue;
+            }
+            kept.Add(row);
+        }
+        if (kept.Count > MaxKnownDevices)
+        {
+            var capped = kept
+                .OrderByDescending(r => liveKeys.Contains(r.Key))
+                .ThenByDescending(r => r.LastSeenUtc)
+                .ToList();
+            pruned.AddRange(capped.Skip(MaxKnownDevices).Select(r => r.Key));
+            kept = capped.Take(MaxKnownDevices).ToList();
+            changed = true;
+            _logger.LogInformation("Known devices capped to {Cap} (oldest dropped)", MaxKnownDevices);
+        }
+
+        return (kept, changed, pruned);
     }
 
     /// <summary>
@@ -1027,547 +1310,19 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         return -1;
     }
 
-    /// <summary>
-    /// Reconciles the card's <see cref="DeviceCard.Apps"/> collection with the current
-    /// session snapshot. Mutates in place (Add / Remove on the ObservableCollection) so the
-    /// XAML implicit animations fire per chip; replacing the collection wholesale tears down
-    /// and re-creates every chip on every refresh, which both kills the fade and forces an
-    /// icon re-load.
-    /// </summary>
-    private void SyncCardApps(
-        DeviceCard card,
-        IReadOnlyList<AudioSession> sessions,
-        Dictionary<uint, AppRouteMatch?> routeByPid,
-        HashSet<string> existsIdentities,
-        Dictionary<string, AudioSession> liveSessionByIdentity,
-        bool alwaysShowPinned)
-    {
-        if (card.Endpoint.Flow != EndpointFlow.Render)
-        {
-            if (card.Apps.Count > 0)
-            {
-                card.Apps.Clear();
-                NotifyCardApps(card);
-            }
-            return;
-        }
+    /// <summary>Finds a card by its stable device key (the persistence / layout identity).</summary>
+    private DeviceCard? FindCardByKey(string deviceKey) =>
+        _allCards.FirstOrDefault(c => string.Equals(c.DeviceKey, deviceKey, StringComparison.OrdinalIgnoreCase));
 
-        // Drop any chip whose app the user has hidden - globally, or on this card's device (either set
-        // may have grown since the chip was placed). The additions loop below skips both too, so
-        // nothing re-adds them.
-        if (_hiddenAppKeys.Count > 0 || _hiddenAppOnDeviceKeys.Count > 0)
-        {
-            var removedHidden = false;
-            for (var i = card.Apps.Count - 1; i >= 0; i--)
-            {
-                var ik = card.Apps[i].Session.IdentityKey;
-                if (IsAppHidden(ik) || IsAppHiddenOnDevice(ik, card.Endpoint.Id))
-                {
-                    card.Apps.RemoveAt(i);
-                    removedHidden = true;
-                }
-            }
-            if (removedHidden) NotifyCardApps(card);
-        }
-
-        // Classify + age out existing chips. An app whose identity is on no live source (no audio
-        // session, no running process) has exited -> mark the chip closed (it lingers, dimmed +
-        // badged). An app that's back -> revive a stale closed chip, adopting its live session.
-        // Either way, remove the chip once it's lingered past the configured window. The "audible
-        // right now" check protects a still-playing app from a momentary snapshot gap.
-        var now = DateTime.UtcNow;
-        var linger = LingerWindow;
-        for (var i = card.Apps.Count - 1; i >= 0; i--)
-        {
-            var chip = card.Apps[i];
-            var key = chip.Session.IdentityKey;
-            var peak = _sessionMeters.GetPeak(chip.ProcessId, card.Endpoint.Id) ?? 0f;
-            var audibleHere = peak >= AppChip.AudibleAmplitudeThreshold;
-            var exists = audibleHere || existsIdentities.Contains(key);
-
-            if (!exists)
-            {
-                chip.MarkClosed();
-            }
-            else if (chip.IsClosed && liveSessionByIdentity.TryGetValue(key, out var live))
-            {
-                // App reopened with a live audio session - re-adopt it (and its rule match).
-                routeByPid.TryGetValue(live.ProcessId, out var liveMatch);
-                chip.Revive(live, liveMatch?.Rule, _processControl.CanControl(live.ProcessId), _processControl.CanClose(live.ProcessId), _processControl.IsElevated(live.ProcessId));
-            }
-
-            // Never prune a chip that's audible right now: the run state can be stale here (the
-            // 20Hz tick that advances it is paused while the Home page is off-screen). The visible
-            // path's Phase 3 prune ages idle/closed chips out with a fresh clock.
-            if (!audibleHere && ShouldPrune(chip, now, linger, alwaysShowPinned))
-            {
-                _logger.LogInformation("Chip removed: pid={Pid} key='{Key}' card={Card} closed={Closed}",
-                    chip.ProcessId, key, card.Endpoint.DisplayName, chip.IsClosed);
-                card.Apps.RemoveAt(i);
-                NotifyCardApps(card);
-            }
-        }
-
-        // Collapse any pre-existing duplicate chips for the same app (an app spawns several
-        // processes), keeping the loudest so the survivor's meter reflects real output. One chip
-        // per app remains, keyed by executable path.
-        var existingByApp = new Dictionary<string, AppChip>(StringComparer.Ordinal);
-        for (var i = card.Apps.Count - 1; i >= 0; i--)
-        {
-            var chip = card.Apps[i];
-            var key = chip.Session.IdentityKey;
-            if (existingByApp.TryGetValue(key, out var kept))
-            {
-                var keptPeak = _sessionMeters.GetPeak(kept.ProcessId, card.Endpoint.Id) ?? 0f;
-                var thisPeak = _sessionMeters.GetPeak(chip.ProcessId, card.Endpoint.Id) ?? 0f;
-                if (thisPeak > keptPeak)
-                {
-                    var keptIndex = card.Apps.IndexOf(kept);
-                    if (keptIndex >= 0) card.Apps.RemoveAt(keptIndex);
-                    existingByApp[key] = chip;
-                }
-                else
-                {
-                    card.Apps.RemoveAt(i);
-                }
-            }
-            else
-            {
-                existingByApp[key] = chip;
-            }
-        }
-
-        // A session belongs on this render card when EITHER it's audible here now OR an enabled
-        // ApplicationOutput rule pins it to this endpoint (and the process is running, i.e. it's
-        // in the snapshot). Audibility uses the live peak cache; rule-pinning uses the pre-resolved
-        // route map (no matcher calls here). Silent-but-pinned apps still get a chip so a running
-        // app shows under its device before it makes a sound. Processes of one app collapse to a
-        // single chip, keyed by executable path.
-        var rulePinnedApps = new HashSet<string>(StringComparer.Ordinal);
-        var additions = new Dictionary<string, (AudioSession Session, bool Audible, RoutingRule? Rule, bool PinnedHere)>(StringComparer.Ordinal);
-        foreach (var session in sessions)
-        {
-            if (!ShouldShow(session)) continue;
-
-            var key = session.IdentityKey;
-            if (IsAppHidden(key) || IsAppHiddenOnDevice(key, card.Endpoint.Id)) continue;
-            routeByPid.TryGetValue(session.ProcessId, out var match);
-            var pinnedHere = match is not null &&
-                string.Equals(match.Endpoint.Id, card.Endpoint.Id, StringComparison.OrdinalIgnoreCase);
-            if (pinnedHere) rulePinnedApps.Add(key);
-
-            if (existingByApp.ContainsKey(key)) continue;
-
-            var livePeak = _sessionMeters.GetPeak(session.ProcessId, card.Endpoint.Id) ?? 0f;
-            var audible = livePeak >= AppChip.AudibleAmplitudeThreshold;
-            // A silent app earns a chip only when a rule pins it here AND the always-show setting is
-            // on. Off, a pinned-but-silent app is treated like any other silent app (no chip).
-            if (!audible && !(pinnedHere && alwaysShowPinned)) continue;
-
-            // One addition per app, preferring an audible representative (so its meter shows real
-            // audio) and carrying any rule match for the lock badge.
-            if (additions.TryGetValue(key, out var cur))
-            {
-                var rep = (audible && !cur.Audible) ? session : cur.Session;
-                additions[key] = (rep, cur.Audible || audible, cur.Rule ?? match?.Rule, cur.PinnedHere || pinnedHere);
-            }
-            else
-            {
-                additions[key] = (session, audible, match?.Rule, pinnedHere);
-            }
-        }
-
-        // Past the classify/prune sweep above, this loop does ADDITIONS only (plus the rule-pin
-        // flag refresh below). Removal is never tied to "peak says silent right now" - a chip lingers
-        // until it's been idle or closed past the configured window (the sweep here and the Phase 3
-        // tick prune), so a brief gap (track change, pause, seek) can't yank it.
-        foreach (var add in additions.Values
-            .OrderBy(a => a.Session.IsSystemSounds ? "System Sounds" : a.Session.DisplayName, StringComparer.OrdinalIgnoreCase))
-        {
-            var chip = new AppChip(add.Session, card.Endpoint.Id, _iconService, _meterOptions, add.Rule, startsActive: add.Audible, ownerCard: card, onHide: HideApp, onHideOnDevice: HideAppOnDevice, onClose: CloseApp, onTerminate: TerminateApp, canControlProcess: _processControl.CanControl(add.Session.ProcessId), canCloseProcess: _processControl.CanClose(add.Session.ProcessId), isElevated: _processControl.IsElevated(add.Session.ProcessId))
-            {
-                RulePinnedHere = add.PinnedHere,
-            };
-            InsertChipSorted(card.Apps, chip);
-            // Full identity at creation: the icon is loaded from ExecutablePath while the label
-            // uses DisplayName. If a stale PID-keyed process-info cache makes those disagree
-            // (e.g. display='Audacity' but path points at msedge.exe), the chip shows a mismatched
-            // icon - this line makes that obvious in the log.
-            _logger.LogInformation(
-                "Chip placed: pid={Pid} name='{Name}' display='{Display}' path='{Path}' key='{Key}' card='{Card}' pinnedHere={Pinned} audible={Audible}",
-                add.Session.ProcessId, add.Session.ProcessName, add.Session.DisplayName,
-                add.Session.ExecutablePath, add.Session.IdentityKey, card.Endpoint.DisplayName,
-                add.PinnedHere, add.Audible);
-        }
-
-        // Refresh the cached rule-pin flag on every surviving chip: a rule may have started or
-        // stopped pinning this app since the chip was created. When it flips false the now-silent
-        // chip becomes eligible for the Phase 3 grace prune again.
-        foreach (var chip in card.Apps)
-        {
-            chip.RulePinnedHere = rulePinnedApps.Contains(chip.Session.IdentityKey);
-        }
-
-        // Pin / close state just changed for some chips - re-sort so the audio-activity order holds.
-        SortCardApps(card);
-
-        NotifyCardApps(card);
-    }
-
-    /// <summary>Peak for the chip's app on an endpoint: the max live peak across every process of
-    /// that app (one chip stands in for them all). Falls back to the chip's own pid if the app
-    /// isn't in the grouped snapshot.</summary>
-    private float MaxPeakForApp(AppChip chip, string endpointId, Dictionary<string, List<uint>> pidsByAppKey)
-    {
-        if (pidsByAppKey.TryGetValue(chip.Session.IdentityKey, out var pids))
-        {
-            var best = 0f;
-            foreach (var pid in pids)
-            {
-                var p = _sessionMeters.GetPeak(pid, endpointId) ?? 0f;
-                if (p > best) best = p;
-            }
-            return best;
-        }
-        return _sessionMeters.GetPeak(chip.ProcessId, endpointId) ?? 0f;
-    }
-
-    /// <summary>
-    /// Front-to-back tier for a chip (higher sorts earlier): 3 playing now, 2 played then stopped,
-    /// 1 never produced audio, 0 closed. Ordering is driven purely by audio activity - rule-pinning
-    /// no longer weights the order (it still keeps a silent chip from being pruned).
-    /// </summary>
-    private static int ChipTier(AppChip c)
-    {
-        if (c.IsClosed) return 0;
-        if (c.PlayingSince is not null) return 3;
-        if (c.LastStoppedAt is not null) return 2;
-        return 1;
-    }
-
-    /// <summary>Orders chips by <see cref="ChipTier"/> (descending), then within a tier: playing
-    /// chips by start time ascending (first to start sits in front), stopped chips by stop time
-    /// descending (most recently stopped in front), and the rest alphabetically for a stable order.
-    /// Returns &lt;0 when <paramref name="a"/> sorts before <paramref name="b"/>.</summary>
-    private static int CompareChips(AppChip a, AppChip b)
-    {
-        var byTier = ChipTier(b).CompareTo(ChipTier(a));
-        if (byTier != 0) return byTier;
-
-        if (a.PlayingSince is { } aStart && b.PlayingSince is { } bStart)
-        {
-            var byStart = aStart.CompareTo(bStart);
-            if (byStart != 0) return byStart;
-        }
-        else if (a.LastStoppedAt is { } aStop && b.LastStoppedAt is { } bStop)
-        {
-            var byStop = bStop.CompareTo(aStop);
-            if (byStop != 0) return byStop;
-        }
-
-        return string.Compare(NameOf(a), NameOf(b), StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static string NameOf(AppChip c) =>
-        c.Session.IsSystemSounds ? "System Sounds" : c.Session.DisplayName;
-
-    private static void InsertChipSorted(ObservableCollection<AppChip> chips, AppChip chip)
-    {
-        for (var i = 0; i < chips.Count; i++)
-        {
-            if (CompareChips(chip, chips[i]) < 0)
-            {
-                chips.Insert(i, chip);
-                return;
-            }
-        }
-        chips.Add(chip);
-    }
-
-    /// <summary>
-    /// Assigns each chip its <see cref="AppChip.WrapOrder"/> rank in <see cref="CompareChips"/> order.
-    /// The apps-row <see cref="Controls.WrapPanel"/> arranges chips by that rank, NOT by collection
-    /// order, so a re-sort re-positions the SAME containers and each moved chip's implicit Offset
-    /// animation glides it to its new slot. We deliberately do NOT <see cref="ObservableCollection{T}.Move"/>
-    /// the collection: a Move makes the ItemsControl recreate the moved chip's container, which lands
-    /// fresh at its destination with no slide (only the chips that stayed would animate). The
-    /// collection keeps its arrival order; chip instance identity is preserved so icons / bindings survive.
-    /// </summary>
-    private void SortCardApps(DeviceCard card)
-    {
-        var chips = card.Apps;
-        if (chips.Count == 0) return;
-
-        var desired = new List<AppChip>(chips);
-        desired.Sort(CompareChips);
-
-        var changed = false;
-        for (var i = 0; i < desired.Count; i++)
-        {
-            if (desired[i].WrapOrder != i)
-            {
-                desired[i].WrapOrder = i;
-                changed = true;
-            }
-        }
-
-        if (changed)
-        {
-            _logger.LogInformation("Apps re-sorted on '{Card}': {Order}",
-                card.Endpoint.DisplayName,
-                string.Join(" > ", desired.Select(c => $"{c.DisplayLabel}[t{ChipTier(c)}]")));
-        }
-    }
-
-    /// <summary>
-    /// Per-app default endpoint override. Called by the Home page drag/drop handler when a
-    /// chip lands on a render card whose endpoint id differs from the chip's source. Calls
-    /// straight into <see cref="IAudioPolicyService"/>; the OS routes new audio streams to
-    /// the target on the next session activation. The session snapshot rebuild that the
-    /// session manager fires picks the chip up on the new card.
-    /// </summary>
-    public void MoveSessionToEndpoint(AppChip chip, AudioEndpoint targetEndpoint)
-    {
-        ArgumentNullException.ThrowIfNull(chip);
-        ArgumentNullException.ThrowIfNull(targetEndpoint);
-        if (targetEndpoint.Flow != EndpointFlow.Render) return;
-        if (chip.IsRuleLocked) return;
-        if (string.Equals(chip.SourceEndpointId, targetEndpoint.Id, StringComparison.OrdinalIgnoreCase)) return;
-
-        try
-        {
-            var pid = chip.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture);
-            _policy.SetDefaultEndpointForApp(pid, targetEndpoint.Id, RoleScope.All, EndpointFlow.Render);
-        }
-        catch
-        {
-            // Errors surface via the logger inside the policy service.
-        }
-    }
-
-    /// <summary>Rebuilds <see cref="_hiddenAppKeys"/> and <see cref="_hiddenAppOnDeviceKeys"/> from
-    /// settings and refreshes the count baselines used to detect changes in
-    /// <see cref="OnSettingsChanged"/>.</summary>
-    private void RefreshHiddenApps()
-    {
-        _hiddenAppKeys.Clear();
-        foreach (var app in _settings.Current.HiddenApps)
-        {
-            if (!string.IsNullOrEmpty(app.Key)) _hiddenAppKeys.Add(app.Key);
-        }
-        _lastHiddenAppsCount = _settings.Current.HiddenApps.Count;
-
-        _hiddenAppOnDeviceKeys.Clear();
-        foreach (var app in _settings.Current.HiddenAppsOnDevice)
-        {
-            if (!string.IsNullOrEmpty(app.Key) && !string.IsNullOrEmpty(app.EndpointId))
-                _hiddenAppOnDeviceKeys.Add(DeviceHideKey(app.Key, app.EndpointId));
-        }
-        _lastHiddenAppsOnDeviceCount = _settings.Current.HiddenAppsOnDevice.Count;
-    }
-
-    /// <summary>Composite lookup key for a per-device hide: the app's identity key and the card's
-    /// endpoint id joined by NUL (both compared case-insensitively).</summary>
-    private static string DeviceHideKey(string identityKey, string endpointId) =>
-        identityKey + "\0" + endpointId;
-
-    private bool IsAppHidden(string identityKey) => _hiddenAppKeys.Contains(identityKey);
-
-    private bool IsAppHiddenOnDevice(string identityKey, string endpointId) =>
-        _hiddenAppOnDeviceKeys.Count > 0 && _hiddenAppOnDeviceKeys.Contains(DeviceHideKey(identityKey, endpointId));
-
-    /// <summary>
-    /// Permanently hides an app from every device card's chip row (the chip's "Hide this app"
-    /// context menu). Records the app's identity key + friendly name in settings, drops every chip
-    /// for it now for instant feedback, and persists. The app keeps routing / playing; only its
-    /// chip is suppressed. Reversible from Settings &gt; App indicators.
-    /// </summary>
-    public void HideApp(AppChip chip)
-    {
-        ArgumentNullException.ThrowIfNull(chip);
-        var key = chip.Session.IdentityKey;
-        if (string.IsNullOrEmpty(key)) return;
-
-        PushLayoutUndo();   // Ctrl+Z un-hides the app
-        if (!_settings.Current.HiddenApps.Any(h => string.Equals(h.Key, key, StringComparison.OrdinalIgnoreCase)))
-        {
-            _settings.Current.HiddenApps.Add(new HiddenApp { Key = key, Name = chip.DisplayLabel });
-        }
-        // Update the live set + count baseline now so the 20Hz tick can't re-add the chip and our
-        // own save's SettingsChanged doesn't trigger a redundant reconcile.
-        _hiddenAppKeys.Add(key);
-        _lastHiddenAppsCount = _settings.Current.HiddenApps.Count;
-
-        // An app can be audible on more than one card; drop every chip that matches.
-        foreach (var card in _allCards)
-        {
-            var removed = false;
-            for (var i = card.Apps.Count - 1; i >= 0; i--)
-            {
-                if (string.Equals(card.Apps[i].Session.IdentityKey, key, StringComparison.OrdinalIgnoreCase))
-                {
-                    card.Apps.RemoveAt(i);
-                    removed = true;
-                }
-            }
-            if (removed) NotifyCardApps(card);
-        }
-
-        _logger.LogInformation("App hidden from chip rows: key='{Key}'", key);
-        QueueSettingsSave();
-    }
-
-    /// <summary>
-    /// Hides an app's chip on the owning card's device only (the chip's "Hide this app &gt; On this
-    /// device" context menu). The app still shows on every other card. Records the app's identity key
-    /// + the card's endpoint id (plus friendly names for the manage list), drops the matching chip on
-    /// that card now, and persists. Reversible from Settings &gt; App indicators.
-    /// </summary>
-    public void HideAppOnDevice(AppChip chip)
-    {
-        ArgumentNullException.ThrowIfNull(chip);
-        var key = chip.Session.IdentityKey;
-        var endpointId = chip.OwnerCard?.Endpoint.Id ?? chip.PlacementEndpointId;
-        if (string.IsNullOrEmpty(key) || string.IsNullOrEmpty(endpointId)) return;
-
-        PushLayoutUndo();   // Ctrl+Z un-hides the app
-        if (!_settings.Current.HiddenAppsOnDevice.Any(h =>
-                string.Equals(h.Key, key, StringComparison.OrdinalIgnoreCase) &&
-                string.Equals(h.EndpointId, endpointId, StringComparison.OrdinalIgnoreCase)))
-        {
-            _settings.Current.HiddenAppsOnDevice.Add(new HiddenAppOnDevice
-            {
-                Key = key,
-                EndpointId = endpointId,
-                Name = chip.DisplayLabel,
-                DeviceName = chip.OwnerCard?.Endpoint.FriendlyName,
-            });
-        }
-        // Update the live set + count baseline now so the 20Hz tick can't re-add the chip and our
-        // own save's SettingsChanged doesn't trigger a redundant reconcile.
-        _hiddenAppOnDeviceKeys.Add(DeviceHideKey(key, endpointId));
-        _lastHiddenAppsOnDeviceCount = _settings.Current.HiddenAppsOnDevice.Count;
-
-        // Drop only the chip on the matching card; the app stays on every other card.
-        foreach (var card in _allCards)
-        {
-            if (!string.Equals(card.Endpoint.Id, endpointId, StringComparison.OrdinalIgnoreCase)) continue;
-            var removed = false;
-            for (var i = card.Apps.Count - 1; i >= 0; i--)
-            {
-                if (string.Equals(card.Apps[i].Session.IdentityKey, key, StringComparison.OrdinalIgnoreCase))
-                {
-                    card.Apps.RemoveAt(i);
-                    removed = true;
-                }
-            }
-            if (removed) NotifyCardApps(card);
-        }
-
-        _logger.LogInformation("App hidden from chip row on one device: key='{Key}' endpoint='{Endpoint}'", key, endpointId);
-        QueueSettingsSave();
-    }
-
-    /// <summary>Gracefully closes an app from its chip's context menu (WM_CLOSE, the SIGTERM
-    /// equivalent - the app can save / prompt). On success the chip is flagged user-closed so it
-    /// prunes on the short window instead of the full linger; failures the disabled state couldn't
-    /// pre-empt (a controllable app with no window, or a race) surface as a toast.</summary>
-    public void CloseApp(AppChip chip)
-    {
-        ArgumentNullException.ThrowIfNull(chip);
-        var pids = AppProcessIds(chip);
-        var result = _processControl.Close(pids);
-        _logger.LogInformation("Close requested: pids=[{Pids}] name='{Name}' result={Result}",
-            string.Join(",", pids), chip.DisplayLabel, result);
-
-        switch (result)
-        {
-            case ProcessActionResult.Success:
-                MarkUserClosed(chip);
-                break;
-            case ProcessActionResult.NoWindow:
-                _inAppNotifications.Show($"{chip.DisplayLabel} has no window to close. Shift + right-click it to Terminate.");
-                break;
-            case ProcessActionResult.AccessDenied:
-                // We could terminate it (or the item would be disabled), but Windows refused the
-                // graceful WM_CLOSE - it runs at a higher privilege. Point at the action that works.
-                _inAppNotifications.Show($"Windows blocked closing {chip.DisplayLabel}. Shift + right-click it to Terminate.");
-                break;
-            case ProcessActionResult.NotFound:
-                break;   // already gone - the chip's close-detection catches up on its own
-            default:
-                _inAppNotifications.Show($"Couldn't close {chip.DisplayLabel}. See the log for details.");
-                break;
-        }
-    }
-
-    /// <summary>Force-terminates an app from its chip's shift-revealed context menu (TerminateProcess,
-    /// the SIGKILL equivalent - no save, no prompt). Same user-closed / toast handling as
-    /// <see cref="CloseApp"/>.</summary>
-    public void TerminateApp(AppChip chip)
-    {
-        ArgumentNullException.ThrowIfNull(chip);
-        var pids = AppProcessIds(chip);
-        var result = _processControl.Kill(pids);
-        _logger.LogInformation("Terminate requested: pids=[{Pids}] name='{Name}' result={Result}",
-            string.Join(",", pids), chip.DisplayLabel, result);
-
-        switch (result)
-        {
-            case ProcessActionResult.Success:
-                MarkUserClosed(chip);
-                break;
-            case ProcessActionResult.AccessDenied:
-                _inAppNotifications.Show($"Couldn't terminate {chip.DisplayLabel} - access denied.");
-                break;
-            case ProcessActionResult.NotFound:
-                break;
-            default:
-                _inAppNotifications.Show($"Couldn't terminate {chip.DisplayLabel}. See the log for details.");
-                break;
-        }
-    }
-
-    /// <summary>Every running pid that shares the chip's app identity (its lowercase executable path),
-    /// so close / terminate act on the whole app, not just the one process holding the audio session.
-    /// A browser fans out into GPU / renderer / audio children all running the same exe; the chip's
-    /// pid is usually a child, so closing it alone does nothing visible. Unions the running-process
-    /// snapshot and the live session list (either may know a pid the other hasn't caught yet), always
-    /// including the chip's own pid.</summary>
-    private HashSet<uint> AppProcessIds(AppChip chip)
-    {
-        var key = chip.Session.IdentityKey;
-        var pids = new HashSet<uint> { chip.ProcessId };
-        foreach (var process in _processes.GetRunningProcesses())
-        {
-            if (string.Equals(process.IdentityKey, key, StringComparison.OrdinalIgnoreCase)) pids.Add(process.ProcessId);
-        }
-        foreach (var session in _sessions.GetSessions())
-        {
-            if (string.Equals(session.IdentityKey, key, StringComparison.OrdinalIgnoreCase)) pids.Add(session.ProcessId);
-        }
-        return pids;
-    }
-
-    /// <summary>Flags every chip of the just-closed app (it can sit on more than one card) so the
-    /// prune drops them on the short user-closed window once the process exits.</summary>
-    private void MarkUserClosed(AppChip chip)
-    {
-        var key = chip.Session.IdentityKey;
-        foreach (var card in _allCards)
-        {
-            foreach (var c in card.Apps)
-            {
-                if (string.Equals(c.Session.IdentityKey, key, StringComparison.OrdinalIgnoreCase))
-                {
-                    c.UserClosed = true;
-                }
-            }
-        }
-    }
-
-    private DeviceCard? FindCard(string endpointId) =>
+    /// <summary>Finds a card by its current live endpoint id (used by device-level events: external
+    /// mute / volume, peak). Only matches a connected device.</summary>
+    private DeviceCard? FindCardByEndpointId(string endpointId) =>
         _allCards.FirstOrDefault(c => string.Equals(c.Endpoint.Id, endpointId, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>The centralised Devices-grid filter: whether a card is listed, given its intrinsic
+    /// state and the two view-model toggles. The card no longer carries any toggle state.</summary>
+    private bool IsListed(DeviceCard card) => DeviceListFilter.IsListed(
+        card.IsGroupMember, card.IsEffectivelyHidden, card.IsConnected, ShowHiddenDevices, ShowDisconnectedDevices);
 
     /// <summary>The persisted group record for a group id, or null.</summary>
     private DeviceGroup? FindGroupRecord(string groupId) =>
@@ -1620,14 +1375,14 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     private void SyncBlocks()
     {
         var cardById = new Dictionary<string, DeviceCard>(StringComparer.OrdinalIgnoreCase);
-        foreach (var c in _allCards) cardById[c.Endpoint.Id] = c;
+        foreach (var c in _allCards) cardById[c.DeviceKey] = c;
 
         // Full block order (lone cards incl. hidden + live groups), and which member maps to which
         // live group.
         var orderedBlockIds = ComputeOrderedBlockIds(out var groupByMemberId);
 
         // Stamp membership (drives the per-card context menu and the visible pin).
-        foreach (var c in _allCards) c.IsGroupMember = groupByMemberId.ContainsKey(c.Endpoint.Id);
+        foreach (var c in _allCards) c.IsGroupMember = groupByMemberId.ContainsKey(c.DeviceKey);
 
         // Build / reuse a group card per live group (>=2 present members) and gather each group's
         // desired member list WITHOUT mutating Members yet (the two-phase reconcile below does that).
@@ -1635,12 +1390,19 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         var desiredMembers = new Dictionary<DeviceGroupCard, List<DeviceCard>>();
         foreach (var group in _settings.Current.DeviceGroups)
         {
-            var members = group.MemberIds
+            var presentMembers = group.MemberIds
                 .Where(cardById.ContainsKey)
                 .Select(id => cardById[id])
                 .Distinct()
                 .ToList();
-            if (members.Count < 2) continue;   // a sub-two group isn't live this build
+            if (presentMembers.Count < 2) continue;   // a sub-two group isn't live this build
+
+            // The filter applies inside groups too: a disconnected member drops out when "Show
+            // disconnected" is off (the disconnected filter is universal), while a connected member
+            // stays even with no rules (membership overrides the hidden filter). A group with no
+            // member left to show after filtering doesn't render this build.
+            var members = presentMembers.Where(IsListed).ToList();
+            if (members.Count == 0) continue;
 
             if (!_groupCards.TryGetValue(group.Id, out var gc))
             {
@@ -1661,7 +1423,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         foreach (var id in orderedBlockIds)
         {
             if (liveGroupCardById.TryGetValue(id, out var gc)) desired.Add(gc);
-            else if (cardById.TryGetValue(id, out var card) && card.IsListed) desired.Add(card);
+            else if (cardById.TryGetValue(id, out var card) && IsListed(card)) desired.Add(card);
         }
 
         // Reconcile in two phases - ALL removals before ANY additions - so a card moving between the
@@ -1713,6 +1475,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         // genuine empty state) shows. Idempotent on later rebuilds.
         IsInitializing = false;
         OnPropertyChanged(nameof(ShowEmptyState));
+        OnPropertyChanged(nameof(ShowFilteredEmptyState));
     }
 
     /// <summary>Removal half of the two-phase reconcile: drops from <paramref name="target"/> any item
@@ -1752,14 +1515,16 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     /// </summary>
     private List<string> ComputeOrderedBlockIds(out Dictionary<string, string> groupByMemberId)
     {
-        var present = new HashSet<string>(_allCards.Select(c => c.Endpoint.Id), StringComparer.OrdinalIgnoreCase);
+        // "Present" is keyed by device key and includes persisted-absent (disconnected) devices, so a
+        // disconnected device keeps its order slot and group membership.
+        var present = new HashSet<string>(_allCards.Select(c => c.DeviceKey), StringComparer.OrdinalIgnoreCase);
         groupByMemberId = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var group in _settings.Current.DeviceGroups)
         {
             if (group.MemberIds.Count(present.Contains) < 2) continue;   // a sub-two group isn't live
-            foreach (var id in group.MemberIds)
+            foreach (var key in group.MemberIds)
             {
-                if (present.Contains(id)) groupByMemberId[id] = group.Id;
+                if (present.Contains(key)) groupByMemberId[key] = group.Id;
             }
         }
 
@@ -1769,13 +1534,13 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         var emitted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var card in _allCards)
         {
-            if (groupByMemberId.TryGetValue(card.Endpoint.Id, out var gid))
+            if (groupByMemberId.TryGetValue(card.DeviceKey, out var gid))
             {
                 if (emitted.Add(gid)) defaultBlockIds.Add(gid);
             }
             else
             {
-                defaultBlockIds.Add(card.Endpoint.Id);
+                defaultBlockIds.Add(card.DeviceKey);
             }
         }
         return ApplyManualBlockOrder(defaultBlockIds, _settings.Current.DeviceOrder);
@@ -1785,7 +1550,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     /// group section.</summary>
     private static string BlockIdOf(object block) => block switch
     {
-        DeviceCard card => card.Endpoint.Id,
+        DeviceCard card => card.DeviceKey,
         DeviceGroupCard group => group.Id,
         _ => string.Empty,
     };
@@ -1824,7 +1589,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
 
     /// <summary>Whether an endpoint is currently a member of a live group (drives the "ungrouped"
     /// guard on create / join).</summary>
-    private bool IsMember(string endpointId) => FindCard(endpointId)?.IsGroupMember ?? false;
+    private bool IsMember(string deviceKey) => FindCardByKey(deviceKey)?.IsGroupMember ?? false;
 
     /// <summary>Total persisted member count of a group (including absent endpoints), or 0. The page
     /// uses this to decide whether a member drag-out needs the disband confirmation.</summary>
@@ -1837,7 +1602,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     {
         if (string.IsNullOrEmpty(sourceId) || string.IsNullOrEmpty(targetId)) return;
         if (string.Equals(sourceId, targetId, StringComparison.OrdinalIgnoreCase)) return;
-        if (FindCard(sourceId) is null || FindCard(targetId) is null) return;
+        if (FindCardByKey(sourceId) is null || FindCardByKey(targetId) is null) return;
         if (IsMember(sourceId) || IsMember(targetId)) return;
 
         PushLayoutUndo();   // Ctrl+Z disbands the new group
@@ -1865,7 +1630,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     public void AddToGroup(string sourceId, string groupId, string? anchorMemberId = null)
     {
         if (string.IsNullOrEmpty(sourceId) || string.IsNullOrEmpty(groupId)) return;
-        if (FindCard(sourceId) is null || IsMember(sourceId)) return;
+        if (FindCardByKey(sourceId) is null || IsMember(sourceId)) return;
         var group = FindGroupRecord(groupId);
         if (group is null) return;
         if (group.MemberIds.Any(id => string.Equals(id, sourceId, StringComparison.OrdinalIgnoreCase))) return;
@@ -2010,15 +1775,15 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     /// <summary>Removes a single device from its group (context-menu "Ungroup device") and drops it
     /// as a lone block right after the group, rather than leaving it wedged among the members.
     /// Disbands the group if that leaves fewer than two.</summary>
-    public void UngroupDevice(string endpointId)
+    public void UngroupDevice(string deviceKey)
     {
         var group = _settings.Current.DeviceGroups.FirstOrDefault(g =>
-            g.MemberIds.Any(id => string.Equals(id, endpointId, StringComparison.OrdinalIgnoreCase)));
+            g.MemberIds.Any(id => string.Equals(id, deviceKey, StringComparison.OrdinalIgnoreCase)));
         if (group is null) return;
 
         PushLayoutUndo();   // Ctrl+Z puts the device back in its group
         var groupId = group.Id;
-        group.MemberIds.RemoveAll(id => string.Equals(id, endpointId, StringComparison.OrdinalIgnoreCase));
+        group.MemberIds.RemoveAll(id => string.Equals(id, deviceKey, StringComparison.OrdinalIgnoreCase));
 
         var afterId = groupId;   // land the freed card just after the group block
         if (group.MemberIds.Count < 2)
@@ -2036,25 +1801,57 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         }
 
         var full = ComputeOrderedBlockIds(out _);
-        full.RemoveAll(id => string.Equals(id, endpointId, StringComparison.OrdinalIgnoreCase));
+        full.RemoveAll(id => string.Equals(id, deviceKey, StringComparison.OrdinalIgnoreCase));
         var anchorIdx = afterId is not null
             ? full.FindIndex(id => string.Equals(id, afterId, StringComparison.OrdinalIgnoreCase))
             : -1;
-        full.Insert(anchorIdx >= 0 ? anchorIdx + 1 : full.Count, endpointId);
+        full.Insert(anchorIdx >= 0 ? anchorIdx + 1 : full.Count, deviceKey);
 
         _settings.Current.DeviceOrder = full;
         QueueSettingsSave();
         SyncBlocks();
     }
 
+    /// <summary>
+    /// "Forget device" (context menu on a disconnected card): drops the persisted known-device row
+    /// and its order / group / config footprint so it leaves the list. A no-op for a connected device
+    /// (it would just reappear on the next enumeration). Deliberately NOT undoable - it's a "stop
+    /// remembering" action; the device returns as new if it ever reconnects.
+    /// </summary>
+    [RelayCommand]
+    public void ForgetDevice(DeviceCard? card)
+    {
+        if (card is null || card.IsConnected) return;
+        var key = card.DeviceKey;
+
+        _settings.Current.KnownDevices.RemoveAll(d => string.Equals(d.Key, key, StringComparison.OrdinalIgnoreCase));
+        PurgeDeviceKeyFromStores(key);
+
+        _allCards.RemoveAll(c => string.Equals(c.DeviceKey, key, StringComparison.OrdinalIgnoreCase));
+        _logger.LogInformation("Forgot device: {Key} '{Name}'", key, card.Endpoint.FriendlyName);
+        QueueSettingsSave();
+        SyncBlocks();
+    }
+
+    /// <summary>Removes a device key's persisted footprint - its block-order slot, its per-device
+    /// config entry, and its group membership (disbanding the group if that drops it below two). Used
+    /// by "Forget device" and by the known-devices prune so a dropped device leaves no orphaned
+    /// entries behind.</summary>
+    private void PurgeDeviceKeyFromStores(string deviceKey)
+    {
+        _settings.Current.DeviceOrder.RemoveAll(id => string.Equals(id, deviceKey, StringComparison.OrdinalIgnoreCase));
+        _settings.Current.Devices.Remove(deviceKey);
+        RemoveMemberFromGroupRecord(deviceKey);
+    }
+
     private void OnCardVisibilityToggled(DeviceCard card, DeviceCard.VisibilityState prev)
     {
-        _undoStack.PushVisibility(card.Endpoint.Id, prev.IsHidden, prev.IsPinned);
+        _undoStack.PushVisibility(card.DeviceKey, prev.IsHidden, prev.IsPinned);
         // Hiding a grouped device removes it from its group (a group's members are always shown);
         // that disbands the group if it drops below two members.
         if (card.IsHiddenByUser && card.IsGroupMember)
         {
-            RemoveMemberFromGroupRecord(card.Endpoint.Id);
+            RemoveMemberFromGroupRecord(card.DeviceKey);
         }
         PersistAndResync(card);
     }
@@ -2074,16 +1871,33 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         // No resync: glyph + accent are bound live on the existing card; visibility is unaffected.
     }
 
+    /// <summary>
+    /// Bluetooth connect/disconnect from a card's button: connect when the device is currently
+    /// disconnected, disconnect when connected. The KS one-shot is fire-and-attempt and does COM, so
+    /// it runs off the UI thread; the card's connected state settles from the device-arrival events
+    /// (which trigger a rebuild), not from this call.
+    /// </summary>
+    private void OnCardBluetoothToggle(DeviceCard card)
+    {
+        var endpointId = card.Endpoint.Id;
+        var connected = card.IsConnected;
+        _ = Task.Run(() =>
+        {
+            if (connected) _bluetoothControl.RequestDisconnect(endpointId);
+            else _bluetoothControl.RequestConnect(endpointId);
+        });
+    }
+
     /// <summary>Removes an endpoint from whichever group's persisted record holds it, disbanding the
     /// group (dropping its record + block-order slot) when that leaves fewer than two members. The
     /// caller persists and resyncs.</summary>
-    private void RemoveMemberFromGroupRecord(string endpointId)
+    private void RemoveMemberFromGroupRecord(string deviceKey)
     {
         var group = _settings.Current.DeviceGroups.FirstOrDefault(g =>
-            g.MemberIds.Any(id => string.Equals(id, endpointId, StringComparison.OrdinalIgnoreCase)));
+            g.MemberIds.Any(id => string.Equals(id, deviceKey, StringComparison.OrdinalIgnoreCase)));
         if (group is null) return;
 
-        group.MemberIds.RemoveAll(id => string.Equals(id, endpointId, StringComparison.OrdinalIgnoreCase));
+        group.MemberIds.RemoveAll(id => string.Equals(id, deviceKey, StringComparison.OrdinalIgnoreCase));
         if (group.MemberIds.Count < 2)
         {
             _settings.Current.DeviceGroups.Remove(group);
@@ -2100,7 +1914,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         {
             return;
         }
-        _undoStack.PushVolumeMute(card.Endpoint.Id, prevVolume, prevMuted);
+        _undoStack.PushVolumeMute(card.DeviceKey, prevVolume, prevMuted);
     }
 
     /// <summary>Snapshots the current Devices layout (block order, groups, hidden apps) onto the undo
@@ -2152,8 +1966,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             return;
         }
 
-        var card = _allCards.FirstOrDefault(c =>
-            string.Equals(c.Endpoint.Id, action.DeviceId, StringComparison.OrdinalIgnoreCase));
+        var card = FindCardByKey(action.DeviceId);
         if (card is null) return;
 
         switch (action)
@@ -2188,8 +2001,8 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             Glyph = card.CurrentGlyphOverride,
             AccentColour = card.AccentOverrideHex,
         };
-        if (cfg.IsDefault) map.Remove(card.Endpoint.Id);
-        else map[card.Endpoint.Id] = cfg;
+        if (cfg.IsDefault) map.Remove(card.DeviceKey);
+        else map[card.DeviceKey] = cfg;
     }
 
     public void Dispose()

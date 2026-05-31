@@ -27,6 +27,11 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     private const double PeakHoldSeconds = 1.5;
     private const float PeakHoldDecayPerSecond = 0.55f;
 
+    // Opacity tiers (see CardOpacity). A disconnected card dims harder than a hidden-but-shown one,
+    // and the disconnected dim wins when both apply.
+    private const double DisconnectedOpacity = 0.4;
+    private const double HiddenShownOpacity = 0.5;
+
     // Don't pull external volume back onto the slider for a moment after the user moves it,
     // so a poll landing mid-drag can't fight the drag.
     private static readonly TimeSpan UserVolumeGrace = TimeSpan.FromMilliseconds(600);
@@ -36,8 +41,8 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     private readonly Action<DeviceCard, VisibilityState> _onVisibilityToggled;
     private readonly Action<DeviceCard> _onVolumeControlsToggled;
     private readonly Action<DeviceCard> _onCustomisationChanged;
+    private readonly Action<DeviceCard> _onBluetoothToggle;
     private bool _suppressVolumeWrite;
-    private bool _showHidden;
     private float _leftHold;
     private float _rightHold;
     private float _centreLfeHold;
@@ -53,70 +58,67 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     public DeviceCard(
         IAudioEndpointService endpoints,
         IEndpointWriter writer,
-        AudioEndpoint endpoint,
-        float volume,
-        bool isMuted,
-        bool isVolumeLockedByRule,
-        bool isMuteLockedByRule,
-        bool? ruleMutedTarget,
-        string? ruleMutedSource,
-        string? ruleVolumeSource,
-        IReadOnlyList<RuleSummary> rules,
-        bool isHiddenByUser,
-        bool isPinnedByUser,
-        bool showHidden,
         PeakMeterOptions meterOptions,
-        bool isVolumeControlsHiddenByUser,
-        string? userGlyphOverride,
-        Color? userAccent,
-        bool userAccentNone,
+        DeviceCardSnapshot snapshot,
         Action<DeviceCard, VisibilityState> onUserVisibilityToggled,
         Action<DeviceCard> onVolumeControlsToggled,
-        Action<DeviceCard> onCustomisationChanged)
+        Action<DeviceCard> onCustomisationChanged,
+        Action<DeviceCard> onBluetoothToggle)
     {
+        ArgumentNullException.ThrowIfNull(snapshot);
         _endpoints = endpoints;
         _writer = writer;
         _onVisibilityToggled = onUserVisibilityToggled;
         _onVolumeControlsToggled = onVolumeControlsToggled;
         _onCustomisationChanged = onCustomisationChanged;
-        _userGlyphOverride = userGlyphOverride;
-        _userAccent = userAccent;
-        _userAccentNone = userAccentNone;
+        _onBluetoothToggle = onBluetoothToggle;
+        _userGlyphOverride = snapshot.UserGlyphOverride;
+        _userAccent = snapshot.UserAccent;
+        _userAccentNone = snapshot.UserAccentNone;
         MeterOptions = meterOptions;
-        Endpoint = endpoint;
+        DeviceKey = snapshot.DeviceKey;
+        Endpoint = snapshot.Endpoint;
+        IsConnected = snapshot.IsConnected;
+        IsBluetooth = snapshot.IsBluetooth;
         // Deterministic resting accent for devices with no Wave Link colour: hash the stable
-        // endpoint id into the palette so a given device keeps the same tile colour across reboots
-        // without persisting anything. A Wave Link accent or a user override still wins over this.
-        _autoAccent = Controls.DeviceAccentPalette.DeterministicSwatch(endpoint.Id);
-        _split = SplitFriendlyName(endpoint.FriendlyName);
-        // Resolve the thematic glyph once - the name doesn't change for the lifetime of
-        // the card (a rename triggers a full rebuild) and the prefix scan, while cheap,
-        // would otherwise re-run on every binding refresh during slider drags.
+        // device key into the palette so a given device keeps the same tile colour across reboots
+        // (and driver reinstalls) without persisting anything. A Wave Link accent or a user override
+        // still wins over this.
+        _autoAccent = Controls.DeviceAccentPalette.DeterministicSwatch(snapshot.DeviceKey);
+        _split = SplitFriendlyName(snapshot.Endpoint.FriendlyName);
+        // Resolve the thematic glyph from the name. Recomputed by RefreshFrom only when the name
+        // actually changes (a rename now reuses the card instance instead of rebuilding it), so the
+        // prefix scan doesn't re-run on every binding refresh during slider drags.
         _themedGlyph = DeviceGlyphMapper.TryResolve(_split.Name);
 
         _suppressVolumeWrite = true;
-        Volume = Math.Clamp(volume, 0f, 1f);
+        Volume = Math.Clamp(snapshot.Volume, 0f, 1f);
         _suppressVolumeWrite = false;
 
-        IsMuted = isMuted;
-        IsVolumeLockedByRule = isVolumeLockedByRule;
-        IsMuteLockedByRule = isMuteLockedByRule;
-        RuleMutedTarget = ruleMutedTarget;
-        RuleMutedSource = ruleMutedSource;
-        RuleVolumeSource = ruleVolumeSource;
-        Rules = rules;
+        IsMuted = snapshot.IsMuted;
+        IsVolumeLockedByRule = snapshot.VolumeLocked;
+        IsMuteLockedByRule = snapshot.MuteLocked;
+        RuleMutedTarget = snapshot.RuleMutedTarget;
+        RuleMutedSource = snapshot.RuleMutedSource;
+        RuleVolumeSource = snapshot.RuleVolumeSource;
+        Rules = snapshot.Rules;
         for (var i = 1; i < Rules.Count; i++)
         {
             AdditionalRules.Add(Rules[i]);
         }
-        _showHidden = showHidden;
-        IsHiddenByUser = isHiddenByUser;
-        IsPinnedByUser = isPinnedByUser;
-        IsVolumeControlsHiddenByUser = isVolumeControlsHiddenByUser;
+        IsHiddenByUser = snapshot.IsHiddenByUser;
+        IsPinnedByUser = snapshot.IsPinnedByUser;
+        IsVolumeControlsHiddenByUser = snapshot.IsVolumeControlsHiddenByUser;
     }
 
-    public AudioEndpoint Endpoint { get; }
-    public IReadOnlyList<RuleSummary> Rules { get; }
+    /// <summary>The stable persistence identity (see <see cref="Earmark.Core.Models.DeviceIdentity"/>).
+    /// Block order, group membership, and per-device config are all keyed by this, not the volatile
+    /// endpoint id, so they survive a disconnect and a driver reinstall. Constant for a card's life
+    /// (the rebuild reconciles instances by this key).</summary>
+    public string DeviceKey { get; }
+
+    public AudioEndpoint Endpoint { get; private set; }
+    public IReadOnlyList<RuleSummary> Rules { get; private set; }
 
     /// <summary>Shared peak-meter styling (colour mode / channels / hold), bound by the meter and
     /// the slider layering. The same instance backs every card so a settings change applies live.</summary>
@@ -208,8 +210,10 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     public string DeviceIdSubtext => _split.Subtext ?? string.Empty;
     public bool HasDeviceIdSubtext => !string.IsNullOrEmpty(_split.Subtext);
 
-    private readonly (string Name, string? Subtext) _split;
-    private readonly string? _themedGlyph;
+    // Recomputed by RefreshFrom only when the friendly name changes (a reused card surviving a
+    // rename), so the prefix scan stays off the hot binding path otherwise.
+    private (string Name, string? Subtext) _split;
+    private string? _themedGlyph;
 
     private static (string Name, string? Subtext) SplitFriendlyName(string friendly)
     {
@@ -246,12 +250,14 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     // A rule that forces UNMUTE still lets the user change the volume - they just can't
     // mute it back themselves.
     public bool IsVolumeEditable =>
-        !IsVolumeLockedByRule && !(IsMuteLockedByRule && RuleMutedTarget == true);
+        IsConnected && !IsVolumeLockedByRule && !(IsMuteLockedByRule && RuleMutedTarget == true);
 
-    /// <summary>Inverse of <see cref="IsVolumeEditable"/>: true when something (volume rule or
-    /// active mute-to-muted rule) is keeping the user from changing the level. Drives the
-    /// transparent overlay that captures clicks and shows the lock tooltip.</summary>
-    public bool IsVolumeLocked => !IsVolumeEditable;
+    /// <summary>True when a <i>rule</i> is keeping the user from changing the level (volume rule or
+    /// active mute-to-muted rule). Drives the transparent overlay that captures clicks and shows the
+    /// lock tooltip. Deliberately not just <c>!IsVolumeEditable</c>: a disconnected slider is simply
+    /// disabled, with no "locked by rule" messaging, so the overlay is gated on <see cref="IsConnected"/>.</summary>
+    public bool IsVolumeLocked =>
+        IsConnected && (IsVolumeLockedByRule || (IsMuteLockedByRule && RuleMutedTarget == true));
 
     /// <summary>If a rule is currently pinning this device's mute state, this is the target
     /// value (true = forced muted, false = forced unmuted). Null when no rule applies.</summary>
@@ -264,6 +270,66 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     /// <summary>The display name of the rule currently pinning the volume level, used for the
     /// locked-slider tooltip so the user knows which rule is in charge.</summary>
     public string? RuleVolumeSource { get; private set; }
+
+    // ---- Connection state ----
+
+    /// <summary>
+    /// Whether the device is currently a live endpoint. False for a persisted-but-absent device:
+    /// the card stays in its order / group slot, dimmed (see <see cref="CardOpacity"/>), with its
+    /// volume / mute / app-drop controls disabled (<see cref="IsVolumeEditable"/> /
+    /// <see cref="IsMuteToggleEnabled"/> / <see cref="CanAcceptAppDrop"/>), until it reconnects.
+    /// Driven by the device-arrival/removal event path via the in-place rebuild reconcile.
+    /// </summary>
+    [ObservableProperty]
+    public partial bool IsConnected { get; set; } = true;
+
+    partial void OnIsConnectedChanged(bool value)
+    {
+        OnPropertyChanged(nameof(CardOpacity));
+        OnPropertyChanged(nameof(IsVolumeEditable));
+        OnPropertyChanged(nameof(IsVolumeLocked));
+        OnPropertyChanged(nameof(IsMuteToggleEnabled));
+        OnPropertyChanged(nameof(CanAcceptAppDrop));
+        OnPropertyChanged(nameof(ShowDisconnectedBadge));
+        OnPropertyChanged(nameof(ShowVolumeLockOverlay));
+        OnPropertyChanged(nameof(BluetoothToggleGlyph));
+        OnPropertyChanged(nameof(BluetoothToggleTooltip));
+    }
+
+    /// <summary>Whether the "Disconnected" status pill shows on the card.</summary>
+    public bool ShowDisconnectedBadge => !IsConnected;
+
+    /// <summary>Whether an app chip can be dropped onto this card to route to it: only while connected
+    /// (a disconnected endpoint can't be a per-app default target).</summary>
+    public bool CanAcceptAppDrop => IsConnected;
+
+    // ---- Bluetooth ----
+
+    /// <summary>True when this is a Bluetooth device, so the card shows the connect/disconnect button
+    /// (top-right of the header). Intrinsic - resolved from the audio topology by the audio layer.</summary>
+    [ObservableProperty]
+    public partial bool IsBluetooth { get; set; }
+
+    partial void OnIsBluetoothChanged(bool value) => OnPropertyChanged(nameof(ShowBluetoothButton));
+
+    /// <summary>Whether the Bluetooth connect/disconnect button shows on this card.</summary>
+    public bool ShowBluetoothButton => IsBluetooth;
+
+    /// <summary>Bluetooth button glyph: the plain Bluetooth mark while connected (tap to disconnect),
+    /// the Sync (reconnect) arrows while disconnected (tap to reconnect). The disconnected state is
+    /// already signalled by the card dim + "Disconnected" pill, so this just invites the action.</summary>
+    public string BluetoothToggleGlyph => IsConnected
+        ? new string((char)0xE702, 1)   // Bluetooth
+        : new string((char)0xE895, 1);  // Sync (reconnect)
+
+    public string BluetoothToggleTooltip => IsConnected
+        ? "Disconnect this Bluetooth device"
+        : "Connect this Bluetooth device";
+
+    /// <summary>Connect (when disconnected) or disconnect (when connected) this Bluetooth device. The
+    /// actual link state settles from the device-arrival events, not this command's return.</summary>
+    [RelayCommand]
+    public void ToggleBluetooth() => _onBluetoothToggle?.Invoke(this);
 
     // ---- Persistence-bound state ----
 
@@ -348,7 +414,6 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
 
     partial void OnIsGroupMemberChanged(bool value)
     {
-        OnPropertyChanged(nameof(IsListed));
         OnPropertyChanged(nameof(CardOpacity));
     }
 
@@ -385,14 +450,23 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         }
     }
 
-    /// <summary>True when the card should render in the grid. A group member always renders
-    /// (membership pins it visible, overriding the auto-hide-no-rules rule); otherwise it's
-    /// visible-or-show-hidden.</summary>
-    public bool IsListed => IsGroupMember || _showHidden || !IsEffectivelyHidden;
-
-    /// <summary>Invisible while this card is the reorder drag source (its slot is the drop gap);
-    /// otherwise reduced when shown via the "show hidden" toggle (but a grouped card stays solid).</summary>
-    public double CardOpacity => IsBeingDragged ? 0.0 : (IsListed && IsEffectivelyHidden && !IsGroupMember ? 0.5 : 1.0);
+    /// <summary>
+    /// Card opacity, tiers in precedence order (highest first):
+    /// <list type="number">
+    /// <item>reorder drag source -> 0 (its slot is the drop gap);</item>
+    /// <item>disconnected (shown via "Show disconnected") -> dimmed - controls are also disabled;</item>
+    /// <item>hidden-but-shown (only in the grid because "Show hidden" is on) -> the ~0.5 dim;</item>
+    /// <item>normal -> 1.</item>
+    /// </list>
+    /// Every input is intrinsic to the card - the view-model owns the filter that decides whether the
+    /// card is in the grid at all - so there's no toggle state here, and the value is bound directly
+    /// (no implicit opacity animation on the recycled container, which would stick at 0).
+    /// </summary>
+    public double CardOpacity =>
+        IsBeingDragged ? 0.0
+        : !IsConnected ? DisconnectedOpacity
+        : (IsEffectivelyHidden && !IsGroupMember) ? HiddenShownOpacity
+        : 1.0;
 
     // ---- Volume ----
 
@@ -429,7 +503,7 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     [ObservableProperty]
     public partial bool IsMuteLockedByRule { get; set; }
 
-    public bool IsMuteToggleEnabled => !IsMuteLockedByRule;
+    public bool IsMuteToggleEnabled => IsConnected && !IsMuteLockedByRule;
 
     /// <summary>
     /// Bound directly to the rules <see cref="Microsoft.UI.Xaml.Controls.Expander.IsExpanded"/>.
@@ -562,97 +636,86 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         };
     }
 
-    // ---- Icon visuals ----
-
-    public string Glyph => _userGlyphOverride ?? AutoGlyph;
-
-    /// <summary>The glyph the card would show with no user override: the Wave Link mix glyph, then
-    /// the name-derived themed glyph, then the render/mute fallback. The customisation picker uses
-    /// this to preview an "Auto"/pending choice without mutating the card.</summary>
-    public string AutoGlyph
-    {
-        get
-        {
-            // A Wave Link mix exposes a named icon (no bitmap); we map that to the closest
-            // Fluent glyph and let it win over the device-name guess below.
-            if (_waveLinkGlyphOverride is not null) return _waveLinkGlyphOverride;
-
-            // Themed glyph (Game / Voice Chat / Music / ...) is resolved once at
-            // construction. It stays constant across mute state because the glyph foreground
-            // already paints the icon red when muted - swapping the glyph too would double
-            // the signal.
-            if (_themedGlyph is not null) return _themedGlyph;
-
-            return (IsRender, IsMuted) switch
-            {
-                (true, false) => new string((char)0xE15D, 1),   // Volume / speaker
-                (true, true) => new string((char)0xE74F, 1),    // Volume Mute
-                (false, false) => new string((char)0xE720, 1),  // Microphone
-                (false, true) => new string((char)0xF781, 1),   // MicOff
-            };
-        }
-    }
-
-    // ---- Wave Link channel theming (optional, driven by WaveLinkChannelStyle) ----
-    //
-    // All null unless the device maps to a Wave Link channel/mix and the user picked a style.
-    //  - Channel + Colours: _waveLinkAccent = the channel's bitmap-derived colour (tints tile).
-    //  - Channel + Icons:   _waveLinkIcon = the channel's bitmap (replaces the glyph).
-    //  - Mix (either style): _waveLinkAccent = white (mixes are monochrome, no colour) and
-    //    _waveLinkGlyphOverride = the Fluent glyph mapped from the mix's named icon.
-    // The accent tile (absolute colour) and the muted card tint live on separate XAML borders
-    // bound to ShowAccentTile / ShowDefaultTile so theme-dependent fills stay {ThemeResource}.
-    private Color? _waveLinkAccent;
-    private ImageSource? _waveLinkIcon;
-    private string? _waveLinkGlyphOverride;
-
-    // User overrides win over the Wave Link / themed visuals. Seeded from the persisted DeviceConfig
-    // at construction. The accent override is tri-state:
-    //   _userAccentNone=false, _userAccent=null  -> auto (Wave Link / deterministic id colour)
-    //   _userAccentNone=false, _userAccent=Color -> that explicit colour
-    //   _userAccentNone=true                      -> "None": force the plain default tile, no accent
-    private string? _userGlyphOverride;
-    private Color? _userAccent;
-    private bool _userAccentNone;
-
-    // Deterministic resting accent derived from the endpoint id (see constructor). The lowest
-    // priority in the accent chain: shown when neither a user override nor a Wave Link accent applies.
-    private readonly Color _autoAccent;
-
-    /// <summary>Applies (or clears) the Wave Link visual. Called on the UI thread by the Home
-    /// view-model after a rebuild or a style-setting change. The caller snaps an artwork-derived
-    /// accent to the nearest Fluent palette colour before passing it (the white mix tile is passed
-    /// as-is); a user override, applied separately, still wins over this.</summary>
-    public void SetWaveLinkVisual(Color? accent, ImageSource? icon, string? glyphOverride)
-    {
-        _waveLinkAccent = accent;
-        _waveLinkIcon = icon;
-        _waveLinkGlyphOverride = glyphOverride;
-        OnPropertyChanged(nameof(WaveLinkIconSource));
-        OnPropertyChanged(nameof(ShowWaveLinkIcon));
-        OnPropertyChanged(nameof(ShowGlyph));
-        OnPropertyChanged(nameof(ShowAccentTile));
-        OnPropertyChanged(nameof(ShowDefaultTile));
-        OnPropertyChanged(nameof(WaveLinkTileBrush));
-        OnPropertyChanged(nameof(GlyphContrastBrush));
-        OnPropertyChanged(nameof(GlyphOnAccent));
-        OnPropertyChanged(nameof(GlyphMutedThemed));
-        OnPropertyChanged(nameof(GlyphNormalThemed));
-        OnPropertyChanged(nameof(Glyph));
-    }
+    // ---- Commands & sync entry points ----
 
     /// <summary>
-    /// Applies (or clears) the user's customisation overrides and persists them via the host.
-    /// A null <paramref name="glyph"/> or <paramref name="accent"/> means "Auto" for that axis -
-    /// the card falls back to its derived glyph / Wave Link accent. Mirrors
-    /// <see cref="SetWaveLinkVisual"/> in the set of visual properties it refreshes.
+    /// Updates a <b>reused</b> card instance in place from a fresh snapshot (same
+    /// <see cref="DeviceKey"/>), re-raising every constructor-set binding so nothing renders stale.
+    /// This is what lets the rebuild reuse instances across a connect/disconnect (so the block slide
+    /// animates) instead of newing up cards. Runs on the UI thread. Does <b>not</b> write to the
+    /// device (volume/mute are display-only here) or fire the customisation persist callback.
     /// </summary>
-    public void SetUserCustomisation(string? glyph, Color? accent, bool accentNone = false)
+    public void RefreshFrom(DeviceCardSnapshot snapshot)
     {
-        _userGlyphOverride = glyph;
-        _userAccent = accentNone ? null : accent;
-        _userAccentNone = accentNone;
+        ArgumentNullException.ThrowIfNull(snapshot);
+
+        var nameChanged = !string.Equals(Endpoint.FriendlyName, snapshot.Endpoint.FriendlyName, StringComparison.Ordinal);
+        var descChanged = !string.Equals(Endpoint.DeviceDescription, snapshot.Endpoint.DeviceDescription, StringComparison.Ordinal);
+        Endpoint = snapshot.Endpoint;
+        if (nameChanged)
+        {
+            _split = SplitFriendlyName(snapshot.Endpoint.FriendlyName);
+            _themedGlyph = DeviceGlyphMapper.TryResolve(_split.Name);
+        }
+
+        IsConnected = snapshot.IsConnected;
+        IsBluetooth = snapshot.IsBluetooth;
+        RefreshVolumeMute(snapshot.Volume, snapshot.IsMuted);
+
+        IsVolumeLockedByRule = snapshot.VolumeLocked;
+        IsMuteLockedByRule = snapshot.MuteLocked;
+        RuleMutedTarget = snapshot.RuleMutedTarget;
+        RuleMutedSource = snapshot.RuleMutedSource;
+        RuleVolumeSource = snapshot.RuleVolumeSource;
+
+        Rules = snapshot.Rules;
+        AdditionalRules.Clear();
+        for (var i = 1; i < Rules.Count; i++) AdditionalRules.Add(Rules[i]);
+
+        IsHiddenByUser = snapshot.IsHiddenByUser;
+        IsPinnedByUser = snapshot.IsPinnedByUser;
+        IsVolumeControlsHiddenByUser = snapshot.IsVolumeControlsHiddenByUser;
+
+        // Customisation overrides without the persist callback (this is a refresh, not a user edit).
+        _userGlyphOverride = snapshot.UserGlyphOverride;
+        _userAccent = snapshot.UserAccentNone ? null : snapshot.UserAccent;
+        _userAccentNone = snapshot.UserAccentNone;
+
+        // Endpoint-derived bindings (defaults can shift, the id can change on reinstall). The
+        // observable setters above already raised their own dependents; these are the non-observable
+        // (Endpoint / RuleMuted* / customisation) ones, raised explicitly.
+        OnPropertyChanged(nameof(DisplayName));
+        OnPropertyChanged(nameof(Subtitle));
+        OnPropertyChanged(nameof(IsDefault));
+        OnPropertyChanged(nameof(IsDefaultCommunications));
+        OnPropertyChanged(nameof(ShowFlowLabel));
+        OnPropertyChanged(nameof(DefaultPillText));
+        OnPropertyChanged(nameof(CommunicationsPillText));
+        OnPropertyChanged(nameof(IsRender));
+        OnPropertyChanged(nameof(IsCapture));
+        OnPropertyChanged(nameof(FlowLabel));
+        if (nameChanged || descChanged)
+        {
+            OnPropertyChanged(nameof(DeviceNameOnly));
+            OnPropertyChanged(nameof(DeviceIdSubtext));
+            OnPropertyChanged(nameof(HasDeviceIdSubtext));
+        }
+        OnPropertyChanged(nameof(HasRules));
+        OnPropertyChanged(nameof(HasNoRules));
+        OnPropertyChanged(nameof(HasMultipleRules));
+        OnPropertyChanged(nameof(FirstRule));
+        OnPropertyChanged(nameof(AdditionalRulesLabel));
+        OnPropertyChanged(nameof(IsVolumeEditable));
+        OnPropertyChanged(nameof(IsVolumeLocked));
+        OnPropertyChanged(nameof(VolumeLockedTooltip));
+        OnPropertyChanged(nameof(MuteTooltip));
+        OnPropertyChanged(nameof(ShowVolumeLockIcon));
+        OnPropertyChanged(nameof(ShowVolumeLockOverlay));
+        OnPropertyChanged(nameof(CardOpacity));
+
+        // Glyph / accent visuals (mirrors SetUserCustomisation's refresh set).
         OnPropertyChanged(nameof(Glyph));
+        OnPropertyChanged(nameof(AutoGlyph));
         OnPropertyChanged(nameof(ShowAccentTile));
         OnPropertyChanged(nameof(ShowDefaultTile));
         OnPropertyChanged(nameof(WaveLinkTileBrush));
@@ -664,140 +727,16 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         OnPropertyChanged(nameof(CurrentAccent));
         OnPropertyChanged(nameof(CurrentEffectiveAccent));
         OnPropertyChanged(nameof(IsAccentNone));
-        _onCustomisationChanged?.Invoke(this);
     }
 
-    /// <summary>Current user glyph override (null = derive automatically).</summary>
-    public string? CurrentGlyphOverride => _userGlyphOverride;
-
-    /// <summary>Current explicit user accent colour (null when None or auto).</summary>
-    public Color? CurrentAccent => _userAccent;
-
-    /// <summary>True when the user chose "None" (force the plain default tile, no accent colour).</summary>
-    public bool IsAccentNone => _userAccentNone;
-
-    /// <summary>The accent actually shown on the tile right now (user override, Wave Link, or the
-    /// deterministic id colour); null while "None" or muted. The picker highlights the matching
-    /// swatch so the current colour reads as selected even when it's auto-derived.</summary>
-    public Color? CurrentEffectiveAccent => EffectiveAccent;
-
-    /// <summary>The accent override serialised for persistence: "none", an "#AARRGGBB" colour, or
-    /// null (auto - no entry).</summary>
-    public string? AccentOverrideHex => _userAccentNone
-        ? "none"
-        : _userAccent is { } c ? Controls.DeviceAccentPalette.ToHex(c) : null;
-
-    /// <summary>The accent painted on the tile, in priority order: "None" (no accent), then a user
-    /// colour, then the snapped Wave Link accent, then the deterministic id-derived accent.</summary>
-    private Color? EffectiveAccent => _userAccentNone ? null : _userAccent ?? _waveLinkAccent ?? _autoAccent;
-
-    /// <summary>The accent the card would show with no user override (Wave Link or the deterministic
-    /// id colour). The picker uses this to preview an "Auto"/pending colour without mutating the card.</summary>
-    public Color? AutoAccent => _waveLinkAccent ?? _autoAccent;
-
-    /// <summary>A legible (near-black / white) contrast brush for a glyph drawn on the given accent.</summary>
-    public static Brush ContrastBrushFor(Color accent) => new SolidColorBrush(ContrastingGlyph(accent));
-
-    public ImageSource? WaveLinkIconSource => _waveLinkIcon;
-
-    // A user accent override hides the Wave Link bitmap so the chosen tile colour + glyph show.
-    public bool ShowWaveLinkIcon => _waveLinkIcon is not null && _userAccent is null;
-    public bool ShowGlyph => !ShowWaveLinkIcon;
-
-    /// <summary>Absolute (theme-independent) accent fill for the icon tile: the user override, the
-    /// Wave Link channel colour, or white for a mix. Null when no tint applies.</summary>
-    public Brush? WaveLinkTileBrush => EffectiveAccent is Color c ? new SolidColorBrush(c) : null;
-
-    /// <summary>Show the absolute-colour accent tile: every device has an accent (user override,
-    /// Wave Link, or the deterministic id-derived colour), so this shows unless the device is muted
-    /// (the red muted card tint owns the tile) or showing a Wave Link bitmap. A mute-lock no longer
-    /// greys the tile - the disabled mute button + padlock signal the lock, and the card keeps its
-    /// identity colour.</summary>
-    public bool ShowAccentTile => EffectiveAccent.HasValue && !IsMuted && !ShowWaveLinkIcon;
-
-    /// <summary>Show the default theme tile ({ThemeResource} subtle fill): only when no accent tile
-    /// shows (i.e. while muted, where the red card tint sits over it) and there's no Wave Link bitmap.</summary>
-    public bool ShowDefaultTile => !ShowWaveLinkIcon && !ShowAccentTile;
-
-    // The glyph is drawn by one of three overlaid FontIcons in XAML, chosen by the bools below,
-    // so the two theme-dependent colours can stay {ThemeResource} (which a code-resolved brush
-    // can't - it snapshots one theme and shows the wrong variant after a light/dark switch).
-    //
-    //  - GlyphOnAccent    : on a coloured / white tile - an absolute contrast colour.
-    //  - GlyphMutedThemed : muted, default tile        - {ThemeResource} critical red.
-    //  - GlyphNormalThemed: otherwise                  - {ThemeResource} accent text.
-
-    /// <summary>Absolute contrast colour (near-black or white) for a glyph sitting on an accent
-    /// or white tile. Null when there's no tile colour.</summary>
-    public Brush? GlyphContrastBrush => EffectiveAccent is Color c ? new SolidColorBrush(ContrastingGlyph(c)) : null;
-
-    public bool GlyphOnAccent => ShowGlyph && ShowAccentTile;
-    public bool GlyphMutedThemed => ShowGlyph && !ShowAccentTile && IsMuted;
-    public bool GlyphNormalThemed => ShowGlyph && !ShowAccentTile && !IsMuted;
-
-    // Rec. 601 luma: bright tiles get a near-black glyph (matching Wave Link's own choice),
-    // dark / saturated ones get white. Keeps the Fluent glyph legible on any accent.
-    private static Color ContrastingGlyph(Color c)
+    /// <summary>Updates the slider / mute state to mirror the device without writing back to it
+    /// (used by <see cref="RefreshFrom"/>). Suppresses the slider's auto-mute-on-zero side effect.</summary>
+    private void RefreshVolumeMute(float volume, bool muted)
     {
-        var luma = (0.299 * c.R) + (0.587 * c.G) + (0.114 * c.B);
-        return luma >= 150 ? Color.FromArgb(255, 0x1A, 0x1A, 0x1A) : Colors.White;
-    }
-
-    public string MuteTooltip
-    {
-        get
-        {
-            if (IsMuteLockedByRule)
-            {
-                var verb = IsMuted ? "Mute" : "Unmute";
-                return string.IsNullOrEmpty(RuleMutedSource)
-                    ? $"{verb} locked by rule"
-                    : $"{verb} locked by rule '{RuleMutedSource}'";
-            }
-            return IsMuted
-                ? (IsRender ? "Unmute output" : "Unmute input")
-                : (IsRender ? "Mute output" : "Mute input");
-        }
-    }
-
-    public string VolumeLockedTooltip
-    {
-        get
-        {
-            if (IsVolumeLockedByRule)
-            {
-                return string.IsNullOrEmpty(RuleVolumeSource)
-                    ? "Volume locked by rule"
-                    : $"Volume locked by rule '{RuleVolumeSource}'";
-            }
-            if (IsMuteLockedByRule && RuleMutedTarget == true)
-            {
-                return string.IsNullOrEmpty(RuleMutedSource)
-                    ? "Volume disabled while a mute rule silences this device"
-                    : $"Volume disabled while mute rule '{RuleMutedSource}' silences this device";
-            }
-            return "Volume locked by rule";
-        }
-    }
-
-    public string MuteIconForegroundResource => IsMuted
-        ? "SystemFillColorCriticalBrush"
-        : "AccentTextFillColorPrimaryBrush";
-
-    public string HideToggleGlyph => IsEffectivelyHidden
-        ? new string((char)0xE7B3, 1)   // View
-        : new string((char)0xED1A, 1);  // Hide
-
-    public string HideToggleTooltip => IsEffectivelyHidden ? "Show this device" : "Hide this device";
-
-    // ---- Commands & sync entry points ----
-
-    /// <summary>Called by the page-level toggle so cards repaint visibility/opacity.</summary>
-    public void RefreshListed(bool showHidden)
-    {
-        _showHidden = showHidden;
-        OnPropertyChanged(nameof(IsListed));
-        OnPropertyChanged(nameof(CardOpacity));
+        _suppressVolumeWrite = true;
+        try { Volume = Math.Clamp(volume, 0f, 1f); }
+        finally { _suppressVolumeWrite = false; }
+        if (IsMuted != muted) IsMuted = muted;
     }
 
     [RelayCommand]
@@ -1027,7 +966,6 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     partial void OnIsHiddenByUserChanged(bool value)
     {
         OnPropertyChanged(nameof(IsEffectivelyHidden));
-        OnPropertyChanged(nameof(IsListed));
         OnPropertyChanged(nameof(CardOpacity));
         OnPropertyChanged(nameof(HideToggleGlyph));
         OnPropertyChanged(nameof(HideToggleTooltip));
@@ -1036,7 +974,6 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     partial void OnIsPinnedByUserChanged(bool value)
     {
         OnPropertyChanged(nameof(IsEffectivelyHidden));
-        OnPropertyChanged(nameof(IsListed));
         OnPropertyChanged(nameof(CardOpacity));
         OnPropertyChanged(nameof(HideToggleGlyph));
         OnPropertyChanged(nameof(HideToggleTooltip));

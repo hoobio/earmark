@@ -78,6 +78,17 @@
                                 <FontIcon Glyph="&#xE790;" />
                             </MenuFlyoutItem.Icon>
                         </MenuFlyoutItem>
+                        <!-- Forget device: only on a disconnected (remembered) card - drops its
+                             persisted row + order / group / config so it leaves the list. -->
+                        <MenuFlyoutItem Text="Forget device"
+                                        Click="OnForgetDeviceClicked"
+                                        Tag="{x:Bind}"
+                                        Visibility="{x:Bind ShowDisconnectedBadge, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                        ToolTipService.ToolTip="Stop remembering this disconnected device, clearing its saved order, group, and customisation. It returns as new if it reconnects.">
+                            <MenuFlyoutItem.Icon>
+                                <FontIcon Glyph="&#xE74D;" />
+                            </MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
                         <!-- Ungroup device (pull just this device out of its group) sits in its own
                              section between the device options above and the group-wide actions below,
                              all shown only for a grouped device. -->
@@ -125,11 +136,12 @@
                             CornerRadius="{StaticResource CardCornerRadius}"
                             Visibility="{x:Bind IsMuted, Mode=OneWay}" />
                 <StackPanel Spacing="{StaticResource SpacingMedium}" Margin="{StaticResource SectionPadding}">
-                    <!-- Header: mute toggle (icon) + name + chips -->
-                    <Grid ColumnSpacing="{StaticResource SpacingMedium}">
+                    <!-- Header: mute toggle (icon) + name + chips + (Bluetooth) connect/disconnect -->
+                    <Grid ColumnSpacing="{StaticResource SpacingSmall}">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
 
                         <!-- The Border wrapper carries ToolTipService.ToolTip so the lock-reason
@@ -201,17 +213,21 @@
                         </Border>
 
                         <StackPanel Grid.Column="1" Spacing="{StaticResource SpacingXXSmall}" VerticalAlignment="Center">
-                            <TextBlock Text="{x:Bind DeviceNameOnly}"
+                            <!-- These bindings are OneWay (not the x:Bind default OneTime) because a
+                                 card instance is now REUSED across a rebuild (persistence / instance
+                                 reuse), so name / subtitle / default pills / rules must refresh in
+                                 place rather than only on a fresh element. -->
+                            <TextBlock Text="{x:Bind DeviceNameOnly, Mode=OneWay}"
                                        Style="{StaticResource BodyStrongTextBlockStyle}"
                                        TextWrapping="NoWrap"
                                        TextTrimming="CharacterEllipsis"
-                                       ToolTipService.ToolTip="{x:Bind DisplayName}" />
-                            <TextBlock Text="{x:Bind DeviceIdSubtext}"
+                                       ToolTipService.ToolTip="{x:Bind DisplayName, Mode=OneWay}" />
+                            <TextBlock Text="{x:Bind DeviceIdSubtext, Mode=OneWay}"
                                        Style="{StaticResource CaptionTextBlockStyle}"
                                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                                        TextWrapping="NoWrap"
                                        TextTrimming="CharacterEllipsis"
-                                       Visibility="{x:Bind HasDeviceIdSubtext}" />
+                                       Visibility="{x:Bind HasDeviceIdSubtext, Mode=OneWay}" />
                             <!-- Negative left margin compensates for the ChipBorderStyle's 8px
                                  horizontal padding so pill text starts on the same x as the
                                  subtitle above it. Top margin gives the row a little breathing
@@ -221,23 +237,49 @@
                                         Margin="-8,4,0,0">
                                 <Border Padding="8,2"
                                         VerticalAlignment="Center"
-                                        Visibility="{x:Bind ShowFlowLabel}">
-                                    <TextBlock Text="{x:Bind FlowLabel}"
+                                        Visibility="{x:Bind ShowFlowLabel, Mode=OneWay}">
+                                    <TextBlock Text="{x:Bind FlowLabel, Mode=OneWay}"
                                                Style="{StaticResource CaptionTextBlockStyle}"
                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                 </Border>
                                 <Border Style="{StaticResource ChipBorderStyle}"
-                                        Visibility="{x:Bind IsDefault}">
-                                    <TextBlock Text="{x:Bind DefaultPillText}"
+                                        Visibility="{x:Bind IsDefault, Mode=OneWay}">
+                                    <TextBlock Text="{x:Bind DefaultPillText, Mode=OneWay}"
                                                Style="{StaticResource CaptionTextBlockStyle}" />
                                 </Border>
                                 <Border Style="{StaticResource ChipBorderStyle}"
-                                        Visibility="{x:Bind IsDefaultCommunications}">
-                                    <TextBlock Text="{x:Bind CommunicationsPillText}"
+                                        Visibility="{x:Bind IsDefaultCommunications, Mode=OneWay}">
+                                    <TextBlock Text="{x:Bind CommunicationsPillText, Mode=OneWay}"
                                                Style="{StaticResource CaptionTextBlockStyle}" />
+                                </Border>
+                                <!-- Disconnected affordance: a muted neutral pill (theme secondary
+                                     text, no one-off colour) shown only while the persisted device is
+                                     absent. The card-wide dim + disabled controls carry the rest. -->
+                                <Border Style="{StaticResource ChipBorderStyle}"
+                                        Visibility="{x:Bind ShowDisconnectedBadge, Mode=OneWay}"
+                                        ToolTipService.ToolTip="This device isn't connected right now. Its settings are remembered and it reactivates when it reconnects.">
+                                    <TextBlock Text="Disconnected"
+                                               Style="{StaticResource CaptionTextBlockStyle}"
+                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                 </Border>
                             </StackPanel>
                         </StackPanel>
+
+                        <!-- Bluetooth connect/disconnect: top-right of the header, sized to the name /
+                             id rows. The name / subtitle live in the * column, so they ellipsify to
+                             make room for this button. Shown only on Bluetooth devices. -->
+                        <Button Grid.Column="2"
+                                VerticalAlignment="Top"
+                                Width="32" Height="32"
+                                Padding="0"
+                                Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                                CornerRadius="{ThemeResource ControlCornerRadius}"
+                                Visibility="{x:Bind ShowBluetoothButton, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                Command="{x:Bind ToggleBluetoothCommand}"
+                                ToolTipService.ToolTip="{x:Bind BluetoothToggleTooltip, Mode=OneWay}"
+                                AutomationProperties.Name="{x:Bind BluetoothToggleTooltip, Mode=OneWay}">
+                            <FontIcon Glyph="{x:Bind BluetoothToggleGlyph, Mode=OneWay}" FontSize="16" />
+                        </Button>
                     </Grid>
 
                     <!-- Volume row. "Hide volume controls" hides the slider + readout + lock
@@ -388,7 +430,7 @@
                          multiple rules the chip has an inline chevron on the right that
                          toggles a panel beneath with the additional rules. Saves the
                          vertical space a separate "N more rules" Expander would consume. -->
-                    <StackPanel Spacing="{StaticResource SpacingXSmall}" Visibility="{x:Bind HasRules}">
+                    <StackPanel Spacing="{StaticResource SpacingXSmall}" Visibility="{x:Bind HasRules, Mode=OneWay}">
                         <TextBlock Text="Rules"
                                    Style="{StaticResource CaptionTextBlockStyle}"
                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
@@ -457,7 +499,7 @@
 
                     <TextBlock Text="No rules target this device."
                                Style="{StaticResource MutedCaptionTextStyle}"
-                               Visibility="{x:Bind HasNoRules}" />
+                               Visibility="{x:Bind HasNoRules, Mode=OneWay}" />
 
                     <!-- Divider between the rules block and the apps row; opt-in, shows only when the
                          apps row below it is present. -->
@@ -801,6 +843,7 @@
                         <ItemsRepeater Grid.Row="1"
                                        HorizontalAlignment="Left"
                                        ItemsSource="{x:Bind Members}"
+                                       ElementPrepared="OnBlockElementPrepared"
                                        ItemTemplate="{StaticResource DeviceCardTemplate}">
                             <ItemsRepeater.Layout>
                                 <controls:WrapByRowLayout MinItemWidth="320"
@@ -839,6 +882,7 @@
             <MenuFlyout>
                 <ToggleMenuFlyoutItem Text="Show title bar" IsChecked="{x:Bind ViewModel.ShowDevicesHeader, Mode=TwoWay}" />
                 <ToggleMenuFlyoutItem Text="Show hidden devices" IsChecked="{x:Bind ViewModel.ShowHiddenDevices, Mode=TwoWay}" />
+                <ToggleMenuFlyoutItem Text="Show disconnected devices" IsChecked="{x:Bind ViewModel.ShowDisconnectedDevices, Mode=TwoWay}" />
                 <ToggleMenuFlyoutItem Text="Lock layout" IsChecked="{x:Bind ViewModel.LockLayout, Mode=TwoWay}" />
             </MenuFlyout>
         </Grid.ContextFlyout>
@@ -860,7 +904,7 @@
                 </StackPanel>
             </Border>
 
-            <!-- Empty -->
+            <!-- Empty (genuine): no devices exist at all, live or remembered. -->
             <Border Style="{StaticResource SectionCardStyle}"
                     Padding="32"
                     Margin="{StaticResource DevicesPlaceholderMargin}"
@@ -869,13 +913,33 @@
                     <FontIcon Glyph="&#xE767;" FontSize="40"
                               Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                               HorizontalAlignment="Center" />
+                    <TextBlock Text="No audio devices"
+                               Style="{StaticResource SubtitleTextBlockStyle}"
+                               HorizontalAlignment="Center" />
+                    <TextBlock Style="{StaticResource MutedCaptionTextStyle}"
+                               HorizontalAlignment="Center"
+                               TextAlignment="Center"
+                               Text="Earmark couldn't find any audio devices on this PC." />
+                </StackPanel>
+            </Border>
+
+            <!-- Filtered-empty: devices DO exist but they're all hidden / disconnected with the
+                 matching toggle off. Point at the toggles rather than implying there are no devices. -->
+            <Border Style="{StaticResource SectionCardStyle}"
+                    Padding="32"
+                    Margin="{StaticResource DevicesPlaceholderMargin}"
+                    Visibility="{x:Bind ViewModel.ShowFilteredEmptyState, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
+                <StackPanel Spacing="{StaticResource SpacingMedium}" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="440">
+                    <FontIcon Glyph="&#xED1A;" FontSize="40"
+                              Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                              HorizontalAlignment="Center" />
                     <TextBlock Text="Nothing to show"
                                Style="{StaticResource SubtitleTextBlockStyle}"
                                HorizontalAlignment="Center" />
                     <TextBlock Style="{StaticResource MutedCaptionTextStyle}"
                                HorizontalAlignment="Center"
                                TextAlignment="Center"
-                               Text="No devices have rules associated with them yet. Add a rule, or flip 'Show hidden' to reveal everything." />
+                               Text="Every device is hidden or disconnected. Right-click (or use the ··· menu) and turn on Show hidden devices or Show disconnected devices to reveal them." />
                 </StackPanel>
             </Border>
 
@@ -953,6 +1017,7 @@
                 <MenuFlyout Opening="OnOverflowFlyoutOpening" Closed="OnOverflowFlyoutClosed">
                     <ToggleMenuFlyoutItem Text="Show title bar" IsChecked="{x:Bind ViewModel.ShowDevicesHeader, Mode=TwoWay}" />
                     <ToggleMenuFlyoutItem Text="Show hidden devices" IsChecked="{x:Bind ViewModel.ShowHiddenDevices, Mode=TwoWay}" />
+                    <ToggleMenuFlyoutItem Text="Show disconnected devices" IsChecked="{x:Bind ViewModel.ShowDisconnectedDevices, Mode=TwoWay}" />
                     <ToggleMenuFlyoutItem Text="Lock layout" IsChecked="{x:Bind ViewModel.LockLayout, Mode=TwoWay}" />
                 </MenuFlyout>
             </Button.Flyout>
