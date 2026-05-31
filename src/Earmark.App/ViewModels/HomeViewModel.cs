@@ -653,6 +653,8 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         _meterOptions.ShowAppIndicators = s.ShowAppIndicators;
         _meterOptions.ShowAppMeters = s.ShowAppPeakMeters;
         _meterOptions.AlwaysShowPinnedApps = s.AlwaysShowPinnedApps;
+        _meterOptions.CardHeight = s.CardHeight;
+        _meterOptions.ShowCardDividers = s.ShowCardDividers;
         foreach (var card in _allCards) card.NotifyMeterStyleChanged();
     }
 
@@ -1746,7 +1748,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         SyncBlocks();
     }
 
-    /// <summary>Disbands a group (context-menu "Ungroup all"): drops the group record and replaces
+    /// <summary>Disbands a group (context-menu "Delete group"): drops the group record and replaces
     /// its slot in the block order with its members, so they become lone blocks in place.</summary>
     public void UngroupAll(string groupId)
     {

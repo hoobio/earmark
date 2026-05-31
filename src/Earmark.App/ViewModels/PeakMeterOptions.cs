@@ -44,6 +44,17 @@ public partial class PeakMeterOptions : ObservableObject
     [ObservableProperty]
     public partial bool AlwaysShowPinnedApps { get; set; } = true;
 
+    /// <summary>How cards size their height within a row. Read by every card's
+    /// <see cref="DeviceCard.IsLayoutCustomSized"/>, which the wrap layouts consume to decide whether a
+    /// card stretches to its row baseline. Shared so a settings change re-lays-out every card live.</summary>
+    [ObservableProperty]
+    public partial CardHeightMode CardHeight { get; set; } = CardHeightMode.Balanced;
+
+    /// <summary>Whether device cards draw hairline separators between their sections. Default on.
+    /// Shared/observable so toggling the setting shows or hides every card's dividers live.</summary>
+    [ObservableProperty]
+    public partial bool ShowCardDividers { get; set; } = true;
+
     /// <summary>True unless the meter is switched off (the card then shows a plain volume slider).</summary>
     public bool ShowMeter => ColourMode != PeakMeterColourMode.Off;
 

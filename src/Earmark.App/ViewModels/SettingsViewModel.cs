@@ -80,6 +80,15 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     public partial double AppChipLingerSeconds { get; set; }
 
+    /// <summary>Card-height ComboBox index. Maps 1:1 to <see cref="CardHeightMode"/>
+    /// (Balanced=0, MatchRow=1, Dynamic=2).</summary>
+    [ObservableProperty]
+    public partial int CardHeightModeIndex { get; set; }
+
+    /// <summary>Whether device cards draw hairline separators between their sections. Default on.</summary>
+    [ObservableProperty]
+    public partial bool ShowCardDividers { get; set; }
+
     /// <summary>Bound to the theme ComboBox SelectedIndex. Maps 1:1 to <see cref="AppTheme"/>
     /// (System=0, Light=1, Dark=2).</summary>
     [ObservableProperty]
@@ -165,6 +174,8 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
             FilterAudioForwarders = _settings.Current.FilterAudioForwarders;
             AlwaysShowPinnedApps = _settings.Current.AlwaysShowPinnedApps;
             AppChipLingerSeconds = _settings.Current.AppChipLingerSeconds;
+            CardHeightModeIndex = (int)_settings.Current.CardHeight;
+            ShowCardDividers = _settings.Current.ShowCardDividers;
             AppThemeIndex = (int)_settings.Current.Theme;
             BackdropIndex = (int)_settings.Current.Backdrop;
             EnableWaveLink = _settings.Current.EnableWaveLink;
@@ -274,6 +285,8 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         var seconds = (int)Math.Clamp(Math.Round(value), 0, 600);
         Persist(s => s.AppChipLingerSeconds = seconds);
     }
+    partial void OnCardHeightModeIndexChanged(int value) => Persist(s => s.CardHeight = (CardHeightMode)value);
+    partial void OnShowCardDividersChanged(bool value) => Persist(s => s.ShowCardDividers = value);
     partial void OnAppThemeIndexChanged(int value) => Persist(s => s.Theme = (AppTheme)value);
     partial void OnBackdropIndexChanged(int value) => Persist(s => s.Backdrop = (BackdropMode)value);
     partial void OnEnableWaveLinkChanged(bool value) => Persist(s => s.EnableWaveLink = value);

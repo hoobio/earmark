@@ -43,14 +43,14 @@
         <TextBlock Text="Settings" Style="{StaticResource PageHeaderTextStyle}" Margin="0,12,0,16" />
 
         <ScrollViewer Grid.Row="1" Padding="0,0,16,0">
-            <StackPanel Spacing="{StaticResource SpacingSmall}" MaxWidth="720" HorizontalAlignment="Stretch">
+            <StackPanel Spacing="{StaticResource SpacingXSmall}" MaxWidth="720" HorizontalAlignment="Stretch">
 
                 <TextBlock Text="General" Style="{StaticResource BodyStrongTextBlockStyle}" />
                 <ctrl:SettingsCard Header="Launch on startup" Description="Start Earmark automatically when you sign in to Windows.">
                     <ToggleSwitch IsOn="{x:Bind ViewModel.LaunchOnStartup, Mode=TwoWay}" />
                 </ctrl:SettingsCard>
 
-                <TextBlock Text="Appearance" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,12,0,0" />
+                <TextBlock Text="Appearance" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,16,0,0" />
                 <ctrl:SettingsCard Header="Theme" Description="Choose a light or dark appearance, or follow the Windows setting.">
                     <ComboBox SelectedIndex="{x:Bind ViewModel.AppThemeIndex, Mode=TwoWay}" MinWidth="140">
                         <ComboBoxItem Content="System" />
@@ -66,7 +66,25 @@
                     </ComboBox>
                 </ctrl:SettingsCard>
 
-                <TextBlock Text="Devices" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,12,0,0" />
+                <TextBlock Text="Devices" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,16,0,0" />
+                <ctrl:SettingsCard Header="Card height"
+                                   Description="How tall device cards are within a row. Balanced matches every card in a row to the tallest, cards playing apps included, but lets a card with its rules expanded keep its own height; Match row matches every card, expanded ones included; Dynamic sizes each card to its own content.">
+                    <ctrl:SettingsCard.HeaderIcon>
+                        <FontIcon Glyph="&#xE8A9;" />
+                    </ctrl:SettingsCard.HeaderIcon>
+                    <ComboBox SelectedIndex="{x:Bind ViewModel.CardHeightModeIndex, Mode=TwoWay}" MinWidth="150">
+                        <ComboBoxItem Content="Balanced" />
+                        <ComboBoxItem Content="Match row" />
+                        <ComboBoxItem Content="Dynamic" />
+                    </ComboBox>
+                </ctrl:SettingsCard>
+                <ctrl:SettingsCard Header="Card dividers"
+                                   Description="Draw a thin separator line between each card's sections (volume, rules, apps), stacking them like a Windows Settings card. Off keeps the sections separated by spacing alone.">
+                    <ctrl:SettingsCard.HeaderIcon>
+                        <FontIcon Glyph="&#xE8A1;" />
+                    </ctrl:SettingsCard.HeaderIcon>
+                    <ToggleSwitch IsOn="{x:Bind ViewModel.ShowCardDividers, Mode=TwoWay}" />
+                </ctrl:SettingsCard>
                 <ctrl:SettingsExpander Header="App indicators"
                                        Description="Show a chip for each app playing through a device, on that device's card. Drag a chip onto another card to reroute the app."
                                        IsExpanded="{x:Bind ViewModel.ShowAppIndicators, Mode=OneWay}">
@@ -197,7 +215,7 @@
                     <Button Content="Reset to default" Click="OnResetDeviceLayout" />
                 </ctrl:SettingsCard>
 
-                <TextBlock Text="System tray" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,12,0,0" />
+                <TextBlock Text="System tray" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,16,0,0" />
                 <ctrl:SettingsExpander Header="Show tray icon"
                                        Description="Display the Earmark icon in the Windows notification area. The behaviours below need it on."
                                        IsExpanded="{x:Bind ViewModel.ShowTrayIcon, Mode=OneWay}">
@@ -221,7 +239,7 @@
                     </ctrl:SettingsExpander.Items>
                 </ctrl:SettingsExpander>
 
-                <TextBlock Text="Wave Link" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,12,0,0" />
+                <TextBlock Text="Wave Link" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,16,0,0" />
                 <ctrl:SettingsExpander Header="Wave Link integration"
                                        Description="Route Wave Link mix outputs from rules. Earmark connects to Wave Link's local WebSocket while the integration is on."
                                        IsExpanded="{x:Bind ViewModel.EnableWaveLink, Mode=OneWay}">
@@ -254,7 +272,7 @@
                     </ctrl:SettingsExpander.Items>
                 </ctrl:SettingsExpander>
 
-                <TextBlock Text="Diagnostics" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,12,0,0" />
+                <TextBlock Text="Diagnostics" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,16,0,0" />
                 <ctrl:SettingsCard Header="Verbose logging" Description="Write debug-level diagnostics to the log file. Leave off for normal use.">
                     <ToggleSwitch IsOn="{x:Bind ViewModel.VerboseLogging, Mode=TwoWay}" />
                 </ctrl:SettingsCard>
@@ -266,7 +284,7 @@
                     <Button Content="Open logs folder" Click="OnOpenLogsFolder" />
                 </ctrl:SettingsCard>
 
-                <TextBlock Text="Help &amp; feedback" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,12,0,0" />
+                <TextBlock Text="Help &amp; feedback" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,16,0,0" />
                 <ctrl:SettingsCard Header="Report a bug"
                                    Description="Open a pre-filled bug report on GitHub.">
                     <ctrl:SettingsCard.HeaderIcon>
@@ -289,7 +307,7 @@
                     <Button Content="View on GitHub" Click="OnOpenGitHub" />
                 </ctrl:SettingsCard>
 
-                <TextBlock Text="About" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,12,0,0" />
+                <TextBlock Text="About" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,16,0,0" />
                 <ctrl:SettingsCard Header="Earmark" Description="{x:Bind About.BuildInfo}">
                     <ctrl:SettingsCard.HeaderIcon>
                         <FontIcon Glyph="&#xE946;" />

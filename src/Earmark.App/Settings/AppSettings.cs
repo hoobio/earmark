@@ -87,6 +87,17 @@ public sealed class AppSettings
     /// shows them like any other app.</summary>
     public bool FilterAudioForwarders { get; set; } = true;
 
+    /// <summary>Whether each device card draws hairline separators between its sections (volume row /
+    /// rules / apps row), stacking them like a Windows Settings card. Default true; off separates the
+    /// sections by spacing alone.</summary>
+    public bool ShowCardDividers { get; set; } = true;
+
+    /// <summary>How device cards size their height within a row. <see cref="CardHeightMode.Balanced"/>
+    /// (default) aligns plain cards to the row's tallest plain card while letting a card with apps /
+    /// expanded rules keep its own height; <see cref="CardHeightMode.MatchRow"/> makes every card in a
+    /// row match the tallest; <see cref="CardHeightMode.Dynamic"/> sizes each card to its own content.</summary>
+    public CardHeightMode CardHeight { get; set; } = CardHeightMode.Balanced;
+
     /// <summary>Whether an app pinned by an <c>ApplicationOutput</c> rule always shows its chip on
     /// the pinned device (dimmed while silent), plus the rule-lock padlock badge. Default true
     /// (the original behaviour). Off makes a pinned app's chip appear only while it's actually
