@@ -31,6 +31,10 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     // Bounds for the user-configurable linger window (AppSettings.AppChipLingerSeconds).
     private const int MaxLingerSeconds = 600;
 
+    // Short linger for a chip the user deliberately closed / terminated: the request succeeded, so
+    // the dimmed chip shouldn't outstay the configurable window the user set for incidental exits.
+    private static readonly TimeSpan UserClosedLinger = TimeSpan.FromSeconds(3);
+
     private readonly IRulesService _rules;
     private readonly IAudioEndpointService _endpoints;
     private readonly IEndpointWriter _writer;
@@ -56,6 +60,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     /// from <see cref="AppSettings.HiddenApps"/> for O(1) lookups on the 20Hz tick.</summary>
     private readonly HashSet<string> _hiddenAppKeys = new(StringComparer.OrdinalIgnoreCase);
     private readonly INotificationService _notifications;
+    private readonly IProcessControlService _processControl;
     private readonly ILogger<HomeViewModel> _logger;
     private readonly Dictionary<string, DateTime> _lastReconcileToast = new(StringComparer.OrdinalIgnoreCase);
     private static readonly TimeSpan ToastRateLimit = TimeSpan.FromSeconds(15);
@@ -85,6 +90,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         IWaveLinkService waveLink,
         IWaveLinkVisualService waveLinkVisuals,
         INotificationService notifications,
+        IProcessControlService processControl,
         IDispatcherQueueProvider dispatcher,
         IDeviceDefaultsService deviceDefaults,
         ILogger<HomeViewModel> logger)
@@ -104,6 +110,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         _waveLink = waveLink ?? throw new ArgumentNullException(nameof(waveLink));
         _waveLinkVisuals = waveLinkVisuals ?? throw new ArgumentNullException(nameof(waveLinkVisuals));
         _notifications = notifications ?? throw new ArgumentNullException(nameof(notifications));
+        _processControl = processControl ?? throw new ArgumentNullException(nameof(processControl));
         _dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
         _deviceDefaults = deviceDefaults ?? throw new ArgumentNullException(nameof(deviceDefaults));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -282,7 +289,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     /// even a pinned chip ages out.</summary>
     private static bool ShouldPrune(AppChip chip, DateTime now, TimeSpan linger, bool alwaysShowPinned)
     {
-        if (chip.IsClosed) return now - chip.ClosedAt!.Value > linger;
+        if (chip.IsClosed) return now - chip.ClosedAt!.Value > (chip.UserClosed ? UserClosedLinger : linger);
         if (chip.RulePinnedHere && alwaysShowPinned) return false;
         if (chip.PlayingSince is not null) return false;            // still producing audio
         if (chip.LastStoppedAt is { } stopped) return now - stopped > linger;
@@ -370,12 +377,13 @@ public partial class HomeViewModel : ObservableObject, IDisposable
                         .Concat(_endpoints.GetEndpoints(EndpointFlow.Capture))
                         .ToList();
                     var match = _matcher.FindAppRoute(session, EndpointFlow.Render, rulesSnapshot, combinedEndpointsCache, sessionsSnapshot);
-                    var revivedChip = new AppChip(session, card.Endpoint.Id, _iconService, _meterOptions, match?.Rule, ownerCard: card, onHide: HideApp)
+                    var revivedChip = new AppChip(session, card.Endpoint.Id, _iconService, _meterOptions, match?.Rule, ownerCard: card, onHide: HideApp, onClose: CloseApp, onTerminate: TerminateApp, canControlProcess: _processControl.CanControl(session.ProcessId))
                     {
                         RulePinnedHere = match is not null &&
                             string.Equals(match.Endpoint.Id, card.Endpoint.Id, StringComparison.OrdinalIgnoreCase),
                     };
                     InsertChipSorted(card.Apps, revivedChip);
+                    SortCardApps(card);
                     card.NotifyAppsChanged();
                     seenAppsOnThisCard.Add(session.IdentityKey);
                     var sessionEndpointMatchesCard = string.Equals(session.CurrentEndpointId, card.Endpoint.Id, StringComparison.OrdinalIgnoreCase);
@@ -1031,7 +1039,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             {
                 // App reopened with a live audio session - re-adopt it (and its rule match).
                 routeByPid.TryGetValue(live.ProcessId, out var liveMatch);
-                chip.Revive(live, liveMatch?.Rule);
+                chip.Revive(live, liveMatch?.Rule, _processControl.CanControl(live.ProcessId));
             }
 
             // Never prune a chip that's audible right now: the run state can be stale here (the
@@ -1122,7 +1130,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         foreach (var add in additions.Values
             .OrderBy(a => a.Session.IsSystemSounds ? "System Sounds" : a.Session.DisplayName, StringComparer.OrdinalIgnoreCase))
         {
-            var chip = new AppChip(add.Session, card.Endpoint.Id, _iconService, _meterOptions, add.Rule, startsActive: add.Audible, ownerCard: card, onHide: HideApp)
+            var chip = new AppChip(add.Session, card.Endpoint.Id, _iconService, _meterOptions, add.Rule, startsActive: add.Audible, ownerCard: card, onHide: HideApp, onClose: CloseApp, onTerminate: TerminateApp, canControlProcess: _processControl.CanControl(add.Session.ProcessId))
             {
                 RulePinnedHere = add.PinnedHere,
             };
@@ -1223,38 +1231,37 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// Reorders a card's chips to <see cref="CompareChips"/> order using
-    /// <see cref="ObservableCollection{T}.Move"/>, so the apps row's <c>ReorderThemeTransition</c>
-    /// slides each chip to its new slot (the "swap" animation). Move is safe here because the apps
-    /// row is a plain ItemsControl + WrapPanel, not the ItemsRepeater + virtualizing layout that
-    /// ignored Move. Only positions actually out of place are touched (stable order is a no-op), and
-    /// chip instance identity is preserved so icons / bindings survive the reorder.
+    /// Assigns each chip its <see cref="AppChip.WrapOrder"/> rank in <see cref="CompareChips"/> order.
+    /// The apps-row <see cref="Controls.WrapPanel"/> arranges chips by that rank, NOT by collection
+    /// order, so a re-sort re-positions the SAME containers and each moved chip's implicit Offset
+    /// animation glides it to its new slot. We deliberately do NOT <see cref="ObservableCollection{T}.Move"/>
+    /// the collection: a Move makes the ItemsControl recreate the moved chip's container, which lands
+    /// fresh at its destination with no slide (only the chips that stayed would animate). The
+    /// collection keeps its arrival order; chip instance identity is preserved so icons / bindings survive.
     /// </summary>
     private void SortCardApps(DeviceCard card)
     {
         var chips = card.Apps;
-        if (chips.Count < 2) return;
+        if (chips.Count == 0) return;
 
         var desired = new List<AppChip>(chips);
         desired.Sort(CompareChips);
 
-        var moved = false;
+        var changed = false;
         for (var i = 0; i < desired.Count; i++)
         {
-            var target = desired[i];
-            var currentIndex = chips.IndexOf(target);
-            if (currentIndex != i)
+            if (desired[i].WrapOrder != i)
             {
-                chips.Move(currentIndex, i);
-                moved = true;
+                desired[i].WrapOrder = i;
+                changed = true;
             }
         }
 
-        if (moved)
+        if (changed)
         {
             _logger.LogInformation("Apps re-sorted on '{Card}': {Order}",
                 card.Endpoint.DisplayName,
-                string.Join(" > ", chips.Select(c => $"{c.DisplayLabel}[t{ChipTier(c)}]")));
+                string.Join(" > ", desired.Select(c => $"{c.DisplayLabel}[t{ChipTier(c)}]")));
         }
     }
 
@@ -1336,6 +1343,82 @@ public partial class HomeViewModel : ObservableObject, IDisposable
 
         _logger.LogInformation("App hidden from chip rows: key='{Key}'", key);
         QueueSettingsSave();
+    }
+
+    /// <summary>Gracefully closes an app from its chip's context menu (WM_CLOSE, the SIGTERM
+    /// equivalent - the app can save / prompt). On success the chip is flagged user-closed so it
+    /// prunes on the short window instead of the full linger; failures the disabled state couldn't
+    /// pre-empt (a controllable app with no window, or a race) surface as a toast.</summary>
+    public void CloseApp(AppChip chip)
+    {
+        ArgumentNullException.ThrowIfNull(chip);
+        var result = _processControl.Close(chip.Session.ProcessId);
+        _logger.LogInformation("Close requested: pid={Pid} name='{Name}' result={Result}",
+            chip.ProcessId, chip.DisplayLabel, result);
+
+        switch (result)
+        {
+            case ProcessActionResult.Success:
+                MarkUserClosed(chip);
+                break;
+            case ProcessActionResult.NoWindow:
+                _notifications.Show($"Couldn't close {chip.DisplayLabel}",
+                    "It has no window to close. Shift + right-click the app and choose Terminate to force it.");
+                break;
+            case ProcessActionResult.AccessDenied:
+                _notifications.Show($"Couldn't close {chip.DisplayLabel}",
+                    "It's running as administrator. Restart Earmark as administrator to close elevated apps.");
+                break;
+            case ProcessActionResult.NotFound:
+                break;   // already gone - the chip's close-detection catches up on its own
+            default:
+                _notifications.Show($"Couldn't close {chip.DisplayLabel}", "Something went wrong. See the log for details.");
+                break;
+        }
+    }
+
+    /// <summary>Force-terminates an app from its chip's shift-revealed context menu (TerminateProcess,
+    /// the SIGKILL equivalent - no save, no prompt). Same user-closed / toast handling as
+    /// <see cref="CloseApp"/>.</summary>
+    public void TerminateApp(AppChip chip)
+    {
+        ArgumentNullException.ThrowIfNull(chip);
+        var result = _processControl.Kill(chip.Session.ProcessId);
+        _logger.LogInformation("Terminate requested: pid={Pid} name='{Name}' result={Result}",
+            chip.ProcessId, chip.DisplayLabel, result);
+
+        switch (result)
+        {
+            case ProcessActionResult.Success:
+                MarkUserClosed(chip);
+                break;
+            case ProcessActionResult.AccessDenied:
+                _notifications.Show($"Couldn't terminate {chip.DisplayLabel}",
+                    "It's running as administrator. Restart Earmark as administrator to terminate elevated apps.");
+                break;
+            case ProcessActionResult.NotFound:
+                break;
+            default:
+                _notifications.Show($"Couldn't terminate {chip.DisplayLabel}", "Something went wrong. See the log for details.");
+                break;
+        }
+    }
+
+    /// <summary>Flags every chip of the just-closed app (it can sit on more than one card) so the
+    /// prune drops them on the short user-closed window once the process exits.</summary>
+    private void MarkUserClosed(AppChip chip)
+    {
+        var key = chip.Session.IdentityKey;
+        foreach (var card in _allCards)
+        {
+            foreach (var c in card.Apps)
+            {
+                if (string.Equals(c.Session.IdentityKey, key, StringComparison.OrdinalIgnoreCase))
+                {
+                    c.UserClosed = true;
+                }
+            }
+        }
     }
 
     private DeviceCard? FindCard(string endpointId) =>
