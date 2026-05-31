@@ -315,11 +315,12 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     /// <summary>Whether the Bluetooth connect/disconnect button shows on this card.</summary>
     public bool ShowBluetoothButton => IsBluetooth;
 
-    /// <summary>Bluetooth button glyph: a plain Bluetooth mark while connected (tap to disconnect),
-    /// the "searching" Bluetooth mark while disconnected (tap to connect).</summary>
+    /// <summary>Bluetooth button glyph: the plain Bluetooth mark while connected (tap to disconnect),
+    /// the Sync (reconnect) arrows while disconnected (tap to reconnect). The disconnected state is
+    /// already signalled by the card dim + "Disconnected" pill, so this just invites the action.</summary>
     public string BluetoothToggleGlyph => IsConnected
         ? new string((char)0xE702, 1)   // Bluetooth
-        : new string((char)0xE9CE, 1);  // Bluetooth searching / not connected
+        : new string((char)0xE895, 1);  // Sync (reconnect)
 
     public string BluetoothToggleTooltip => IsConnected
         ? "Disconnect this Bluetooth device"
