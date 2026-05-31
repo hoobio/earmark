@@ -72,7 +72,14 @@ public sealed partial class MainWindow : Window, IDisposable
         _dispatcher.Register(DispatcherQueue);
         _navigation.Register(ContentFrame);
 
-        NavView.Loaded += (_, _) => _ = EnsureInitialNavigationAsync();
+        // Restore the persisted pane expand/collapse state once the NavView is realised (setting it
+        // pre-load can be clobbered when Auto display-mode initialises). Done before the first nav so
+        // the focus fallback below sees the right pane state.
+        NavView.Loaded += (_, _) =>
+        {
+            NavView.IsPaneOpen = _settings.Current.NavigationPaneOpen;
+            _ = EnsureInitialNavigationAsync();
+        };
         // Belt-and-suspenders: NavView.Loaded can race or skip when the window starts hidden
         // (Launch-to-tray) and the visual tree isn't realised until the user opens it.
         // Activated fires every time the window is shown, so the first activation also
@@ -254,6 +261,10 @@ public sealed partial class MainWindow : Window, IDisposable
     private void OnPaneToggleClick(object sender, RoutedEventArgs e)
     {
         NavView.IsPaneOpen = !NavView.IsPaneOpen;
+        // Persist the explicit collapse/expand so it survives a relaunch. Fire-and-forget; the
+        // settings service serialises writes and logs failures (matches the window-size save path).
+        _settings.Current.NavigationPaneOpen = NavView.IsPaneOpen;
+        _ = _settings.SaveAsync();
     }
 
     // Reserve room for the system caption buttons so the update pill never slides under them.

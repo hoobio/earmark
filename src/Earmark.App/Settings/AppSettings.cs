@@ -143,6 +143,10 @@ public sealed class AppSettings
     /// at least once (so first launch picks the WinUI default).</summary>
     public int? WindowWidth { get; set; }
     public int? WindowHeight { get; set; }
+
+    /// <summary>Whether the navigation pane is expanded. Persisted so the collapse/expand state of the
+    /// left sidebar survives a relaunch. Default true (expanded), matching the WinUI default.</summary>
+    public bool NavigationPaneOpen { get; set; } = true;
 }
 
 /// <summary>
