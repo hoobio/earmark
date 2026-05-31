@@ -898,10 +898,12 @@
                  the window's bottom edge (no dead band that clips cards short mid-scroll). The trailing
                  breathing room lives on the list itself (DevicesRepeater.Margin) so only the last card
                  clears the bottom edge when fully scrolled. -->
-            <ScrollViewer Visibility="{x:Bind ViewModel.HasItems, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
+            <ScrollViewer x:Name="DevicesScroller"
+                          Visibility="{x:Bind ViewModel.HasItems, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
                           VerticalScrollBarVisibility="Auto"
                           HorizontalScrollBarVisibility="Disabled"
                           Padding="{StaticResource DevicesScrollPadding}"
+                          ViewChanging="OnDevicesViewChanging"
                           VerticalContentAlignment="Top">
                 <!-- Transparent drop surface around the repeater: block reorder is handled here (not
                      per-card) so the insertion point is computed from the layout's frozen no-gap

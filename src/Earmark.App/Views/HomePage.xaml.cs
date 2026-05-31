@@ -59,6 +59,7 @@ public sealed partial class HomePage : Page
         Loaded += (_, _) =>
         {
             _pageSettled = false;
+            _blockReflowArmed = false;   // a tab-return re-realises blocks; re-arm on the next reflow
             LayoutUpdated -= OnFirstLayoutSettled;   // no double-subscribe on a tab-return
             LayoutUpdated += OnFirstLayoutSettled;
         };
@@ -111,11 +112,13 @@ public sealed partial class HomePage : Page
     /// from the origin on appearance.</summary>
     private bool _pageSettled;
 
-    /// <summary>True while a one-shot block-reflow pulse is armed: the block Offset animations are
-    /// attached just for the layout pass an apps-row appear / disappear triggers (so the cards below
-    /// slide), then detached on the next <see cref="FrameworkElement.LayoutUpdated"/> so plain
-    /// scrolling never animates the blocks.</summary>
-    private bool _blockReflowPulse;
+    /// <summary>True while the block Offset animations are attached for apps-row reflow: an apps row
+    /// appearing / disappearing (or its chips wrapping to another line) changes a card's height, and
+    /// the cards below slide to their new spots instead of jumping. Armed on the first apps-row change
+    /// after the page settles and left attached so back-to-back reflows all glide; a scroll disarms it
+    /// (<see cref="OnDevicesViewChanging"/>) because virtualisation re-arranges realised blocks during
+    /// a scroll and the implicit Offset would make them lag behind it. Re-armed on the next reflow.</summary>
+    private bool _blockReflowArmed;
 
     /// <summary>The group's inner layout currently showing a member make-space gap (within-group
     /// reorder) or a phantom join slot, or null.</summary>
@@ -804,30 +807,32 @@ public sealed partial class HomePage : Page
         if (_reorderActive) ApplyReorderAnimation(args.Element, true);
     }
 
-    /// <summary>A chip was added to / removed from some card, so a card's height may have changed.
-    /// Arm the block Offset animation for the single layout pass that reflow triggers, so the cards
-    /// below slide to their new positions instead of jumping. Detached again on the next
-    /// <see cref="FrameworkElement.LayoutUpdated"/> (below) so plain scrolling never animates blocks.</summary>
+    /// <summary>A chip was added to / removed from some card, so a card's height may have changed and
+    /// the blocks below it reflow. Arm the block Offset animation so they slide to their new spots
+    /// instead of jumping. Left attached across reflows (re-applied each time, idempotent, so a block
+    /// realised since the last arm is covered too); a scroll detaches it again
+    /// (<see cref="OnDevicesViewChanging"/>) so virtualisation never animates blocks lagging the scroll.</summary>
     private void OnAppsRowChanged(object? sender, EventArgs e)
     {
-        if (!_pageSettled) return;     // initial fill / tab-return: place instantly, don't slide in
-        if (_reorderActive) return;    // a drag already owns the block animations
-        if (_blockReflowPulse) return; // already armed for this pass (several cards can change at once)
+        if (!_pageSettled) return;      // initial fill / tab-return: place instantly, don't slide in
+        if (_reorderActive) return;     // a drag already owns the block animations
 
-        _blockReflowPulse = true;
+        _blockReflowArmed = true;
         SetBlockReflowAnimations(true);
-        LayoutUpdated += OnReflowPulseSettled;
     }
 
-    private void OnReflowPulseSettled(object? sender, object e)
+    /// <summary>A scroll re-arranges realised blocks under virtualisation; with the implicit Offset
+    /// attached they'd slide to catch up and visibly lag the scroll. ViewChanging fires before the
+    /// scroll's re-arrange, so dropping the animation here keeps the scroll crisp. The next apps-row
+    /// change re-arms it - deliberately NOT gated on a "still scrolling" flag, because the scroll's
+    /// final ViewChanged isn't a reliable signal and a stuck flag would kill the animation for good.</summary>
+    private void OnDevicesViewChanging(object? sender, ScrollViewerViewChangingEventArgs e)
     {
-        // The reflow arrange has run, so the blocks' new Offsets are set and their slide animations
-        // have started (clearing the implicit collection now doesn't stop an in-flight slide). Detach
-        // so the next scroll's re-arranges don't animate.
-        LayoutUpdated -= OnReflowPulseSettled;
-        _blockReflowPulse = false;
-        if (_reorderActive) return;    // a drag started mid-pulse and now owns the animations
-        SetBlockReflowAnimations(false);
+        if (_blockReflowArmed && !_reorderActive)
+        {
+            _blockReflowArmed = false;
+            SetBlockReflowAnimations(false);
+        }
     }
 
     /// <summary>Attaches / detaches the implicit Offset animation on every realised block.</summary>
