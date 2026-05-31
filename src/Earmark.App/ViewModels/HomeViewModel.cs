@@ -691,19 +691,31 @@ public partial class HomeViewModel : ObservableObject, IDisposable
 
         if (ct.IsCancellationRequested) return;
 
+        // One-time pre-migration backup, AWAITED here (before any mutation) so it captures the
+        // pre-re-key settings - the recovery point the ADR promises. Doing it fire-and-forget from
+        // the dispatcher block would race the in-place re-key and could snapshot already-migrated data.
+        if (_settings.Current.SettingsSchemaVersion < AppSettings.DeviceKeySchemaVersion)
+        {
+            try { await _settings.SaveBackupAsync("backup.v0", ct).ConfigureAwait(false); }
+            catch { /* best-effort: a missing backup must never block the migration */ }
+            if (ct.IsCancellationRequested) return;
+        }
+
         _dispatcher.Enqueue(() =>
         {
             if (ct.IsCancellationRequested) return;
 
-            // 1. Re-key the persisted stores to device keys (one-time backup + convergent rewrite).
-            //    Runs before SyncBlocks so a first-launch-post-upgrade keeps the manual order.
+            // 1. Re-key the persisted stores to device keys (convergent rewrite; the one-time backup
+            //    already ran above). Runs before SyncBlocks so a first-launch-post-upgrade keeps order.
             MaybeMigrateDeviceKeys(idToKey);
 
             // 2. Persist the refreshed known-devices table (only when it materially changed, so the
-            //    per-rebuild last-seen touch doesn't churn the file).
+            //    per-rebuild last-seen touch doesn't churn the file), and drop the persisted order /
+            //    group / config footprint of any device the prune just forgot.
             if (built.KnownDevicesChanged)
             {
                 _settings.Current.KnownDevices = built.KnownDevices;
+                foreach (var prunedKey in built.PrunedKeys) PurgeDeviceKeyFromStores(prunedKey);
                 QueueSettingsSave();
             }
 
@@ -718,12 +730,14 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>Result of the background card-build pass: the ordered snapshot set (live +
-    /// persisted-absent), the refreshed known-devices table, and whether that table changed enough
-    /// to warrant a save.</summary>
+    /// persisted-absent), the refreshed known-devices table, whether that table changed enough to
+    /// warrant a save, and the device keys the prune dropped (so their order / group / config
+    /// footprint can be purged on the UI thread).</summary>
     private sealed record CardBuildResult(
         List<DeviceCardSnapshot> Snapshots,
         List<KnownDevice> KnownDevices,
-        bool KnownDevicesChanged);
+        bool KnownDevicesChanged,
+        List<string> PrunedKeys);
 
     private static KnownDevice CloneKnown(KnownDevice d) => new()
     {
@@ -746,12 +760,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     {
         var s = _settings.Current;
         var firstTime = s.SettingsSchemaVersion < AppSettings.DeviceKeySchemaVersion;
-
-        if (firstTime)
-        {
-            // Snapshot the pre-migration settings so an unresolved-id mishap is recoverable.
-            _ = _settings.SaveBackupAsync("backup.v0");
-        }
+        // The one-time pre-migration backup is taken (awaited) by RebuildAsync before this runs.
 
         var changed = false;
         changed |= DeviceKeyStore.ReKeyList(s.DeviceOrder, idToKey);
@@ -1103,7 +1112,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
 
         // Refresh the known-devices table from the live set, then build a disconnected snapshot for
         // every remembered device that isn't live right now.
-        var (refreshedKnown, knownChanged) = ReconcileKnownDevices(knownDevices, ordered, idToKey, now);
+        var (refreshedKnown, knownChanged, prunedKeys) = ReconcileKnownDevices(knownDevices, ordered, idToKey, now);
         foreach (var row in refreshedKnown
             .Where(r => !liveKeys.Contains(r.Key))
             .OrderBy(r => r.Flow)
@@ -1123,7 +1132,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             snapshots.Add(ToSnapshot(endpoint, row.Key, isConnected: false, volume: 0f, muted: false, summary, LookupConfig(deviceConfigs, row.Key, row.LastEndpointId)));
         }
 
-        return new CardBuildResult(snapshots, refreshedKnown, knownChanged);
+        return new CardBuildResult(snapshots, refreshedKnown, knownChanged, prunedKeys);
     }
 
     /// <summary>Per-device config lookup that works before and after the store re-key: by device key
@@ -1162,7 +1171,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     /// it changed materially enough to persist (a new / removed / re-id'd / renamed device, or a
     /// last-seen that advanced by more than a day - so a steady-state rebuild doesn't churn the file).
     /// </summary>
-    private (List<KnownDevice> Devices, bool Changed) ReconcileKnownDevices(
+    private (List<KnownDevice> Devices, bool Changed, List<string> PrunedKeys) ReconcileKnownDevices(
         List<KnownDevice> existing, IReadOnlyList<AudioEndpoint> liveActive,
         IReadOnlyDictionary<string, string> idToKey, DateTimeOffset now)
     {
@@ -1202,12 +1211,14 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         }
 
         var liveKeys = new HashSet<string>(idToKey.Values, StringComparer.OrdinalIgnoreCase);
+        var pruned = new List<string>();
         var kept = new List<KnownDevice>();
         foreach (var row in byKey.Values)
         {
             if (!liveKeys.Contains(row.Key) && now - row.LastSeenUtc > KnownDeviceMaxAge)
             {
                 _logger.LogInformation("Known device aged out (>{Days}d unseen): {Key} '{Name}'", KnownDeviceMaxAge.TotalDays, row.Key, row.FriendlyName);
+                pruned.Add(row.Key);
                 changed = true;
                 continue;
             }
@@ -1215,16 +1226,17 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         }
         if (kept.Count > MaxKnownDevices)
         {
-            kept = kept
+            var capped = kept
                 .OrderByDescending(r => liveKeys.Contains(r.Key))
                 .ThenByDescending(r => r.LastSeenUtc)
-                .Take(MaxKnownDevices)
                 .ToList();
+            pruned.AddRange(capped.Skip(MaxKnownDevices).Select(r => r.Key));
+            kept = capped.Take(MaxKnownDevices).ToList();
             changed = true;
             _logger.LogInformation("Known devices capped to {Cap} (oldest dropped)", MaxKnownDevices);
         }
 
-        return (kept, changed);
+        return (kept, changed, pruned);
     }
 
     /// <summary>
@@ -1779,8 +1791,9 @@ public partial class HomeViewModel : ObservableObject, IDisposable
 
     /// <summary>
     /// "Forget device" (context menu on a disconnected card): drops the persisted known-device row
-    /// and its order / group / config entries so it leaves the list. A no-op for a connected device
-    /// (it would just reappear on the next enumeration). Reversible via the layout undo.
+    /// and its order / group / config footprint so it leaves the list. A no-op for a connected device
+    /// (it would just reappear on the next enumeration). Deliberately NOT undoable - it's a "stop
+    /// remembering" action; the device returns as new if it ever reconnects.
     /// </summary>
     [RelayCommand]
     public void ForgetDevice(DeviceCard? card)
@@ -1788,16 +1801,24 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         if (card is null || card.IsConnected) return;
         var key = card.DeviceKey;
 
-        PushLayoutUndo();   // Ctrl+Z restores the layout (order / groups); see note below re the row
         _settings.Current.KnownDevices.RemoveAll(d => string.Equals(d.Key, key, StringComparison.OrdinalIgnoreCase));
-        _settings.Current.DeviceOrder.RemoveAll(id => string.Equals(id, key, StringComparison.OrdinalIgnoreCase));
-        RemoveMemberFromGroupRecord(key);
-        _settings.Current.Devices.Remove(key);
+        PurgeDeviceKeyFromStores(key);
 
         _allCards.RemoveAll(c => string.Equals(c.DeviceKey, key, StringComparison.OrdinalIgnoreCase));
         _logger.LogInformation("Forgot device: {Key} '{Name}'", key, card.Endpoint.FriendlyName);
         QueueSettingsSave();
         SyncBlocks();
+    }
+
+    /// <summary>Removes a device key's persisted footprint - its block-order slot, its per-device
+    /// config entry, and its group membership (disbanding the group if that drops it below two). Used
+    /// by "Forget device" and by the known-devices prune so a dropped device leaves no orphaned
+    /// entries behind.</summary>
+    private void PurgeDeviceKeyFromStores(string deviceKey)
+    {
+        _settings.Current.DeviceOrder.RemoveAll(id => string.Equals(id, deviceKey, StringComparison.OrdinalIgnoreCase));
+        _settings.Current.Devices.Remove(deviceKey);
+        RemoveMemberFromGroupRecord(deviceKey);
     }
 
     private void OnCardVisibilityToggled(DeviceCard card, DeviceCard.VisibilityState prev)

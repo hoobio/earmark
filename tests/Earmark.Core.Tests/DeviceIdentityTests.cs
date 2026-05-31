@@ -91,6 +91,23 @@ public class DeviceIdentityTests
     }
 
     [Fact]
+    public void Two_no_container_endpoints_with_the_same_name_and_flow_stay_distinct()
+    {
+        // e.g. two VB-Audio "CABLE Output" instances - both fall back to a name key, but must not
+        // collapse onto one key (which would drop one device's card).
+        var a = Endpoint("{0.0.0}.{cable-a}", "CABLE Output", EndpointFlow.Render, container: null);
+        var b = Endpoint("{0.0.0}.{cable-b}", "CABLE Output", EndpointFlow.Render, container: null);
+
+        var keys = DeviceIdentity.ComputeKeys([a, b]);
+
+        keys[a.Id].Should().NotBe(keys[b.Id]);
+        DeviceIdentity.IsNameFallback(keys[a.Id]).Should().BeTrue();
+        DeviceIdentity.IsNameFallback(keys[b.Id]).Should().BeTrue();
+        keys[a.Id].Should().Contain("cable-a");
+        keys[b.Id].Should().Contain("cable-b");
+    }
+
+    [Fact]
     public void Container_id_is_normalised_case_and_brace_insensitively()
     {
         var braced = Endpoint("{0.0.0}.{x}", "Speakers", EndpointFlow.Render, "{AABBCCDD-1111-2222-3333-444455556666}");
