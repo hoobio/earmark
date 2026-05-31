@@ -47,6 +47,10 @@ dotnet build src/Earmark.App/Earmark.App.csproj -c Debug -p:Platform=x64 --no-re
 
 If you only edited `Earmark.Core` or `Earmark.Audio` you can build those individually for fast iteration without killing the app, but a final `Earmark.App` build still requires the kill.
 
+## Working alongside other agents
+
+This repo is sometimes edited by more than one agent at once, so a build can go red on changes you never touched. Don't patch around another agent's work-in-progress, and don't treat their error as your blocker. Rebuild first (their tree may already be fixed between attempts), and if a failure clearly isn't from your edits, assume the owning agent will resolve it: wait and re-poll the build rather than "fixing" their half-written code. Only commit or push once the build is green. When asked to commit changes that mix your work with another agent's in the same file, stage the whole file rather than trying to surgically separate the hunks.
+
 ## Where state lives
 
 - Rules: `%UserProfile%\Documents\Hoobi\Earmark\rules.json`
