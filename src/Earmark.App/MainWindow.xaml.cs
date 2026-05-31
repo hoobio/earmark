@@ -21,17 +21,20 @@ public sealed partial class MainWindow : Window, IDisposable
     private readonly IDispatcherQueueProvider _dispatcher;
     private readonly ISettingsService _settings;
     private readonly IUpdateService _update;
+    private readonly IInAppNotificationService _inAppNotifications;
     private ISystemBackdropControllerWithTargets? _backdropController;
     private SystemBackdropConfiguration? _backdropConfig;
     private BackdropMode? _appliedBackdrop;
     private bool _initialNavComplete;
+    private DispatcherTimer? _toastTimer;
 
-    public MainWindow(INavigationService navigation, IDispatcherQueueProvider dispatcher, ISettingsService settings, IUpdateService update)
+    public MainWindow(INavigationService navigation, IDispatcherQueueProvider dispatcher, ISettingsService settings, IUpdateService update, IInAppNotificationService inAppNotifications)
     {
         _navigation = navigation;
         _dispatcher = dispatcher;
         _settings = settings;
         _update = update;
+        _inAppNotifications = inAppNotifications;
 
         InitializeComponent();
         ExtendsContentIntoTitleBar = true;
@@ -43,6 +46,8 @@ public sealed partial class MainWindow : Window, IDisposable
         RootGrid.Loaded += (_, _) => UpdateTitleBarInset();
         _update.StatusChanged += OnUpdateStatusChanged;
         OnUpdateStatusChanged(this, EventArgs.Empty);
+
+        _inAppNotifications.ToastRequested += OnToastRequested;
 
         // The backdrop configuration is shared across materials and used by UpdateThemeChrome to
         // push the resolved theme to whichever controller is active. Create it (and its activation
@@ -66,6 +71,8 @@ public sealed partial class MainWindow : Window, IDisposable
         {
             _settings.SettingsChanged -= OnSettingsChanged;
             _update.StatusChanged -= OnUpdateStatusChanged;
+            _inAppNotifications.ToastRequested -= OnToastRequested;
+            _toastTimer?.Stop();
             Dispose();
         };
 
@@ -85,6 +92,57 @@ public sealed partial class MainWindow : Window, IDisposable
         // Activated fires every time the window is shown, so the first activation also
         // triggers initial nav if it hasn't happened yet.
         Activated += (_, _) => _ = EnsureInitialNavigationAsync();
+    }
+
+    // ---- In-app toast ----
+
+    private void OnToastRequested(object? sender, string message) =>
+        DispatcherQueue.TryEnqueue(() => ShowToast(message));
+
+    /// <summary>Shows the bottom-centred toast with <paramref name="message"/>, sliding + fading it in,
+    /// and (re)arms the auto-dismiss timer. A second toast while one is up just swaps the text and
+    /// restarts the clock.</summary>
+    private void ShowToast(string message)
+    {
+        ToastText.Text = message;
+        ToastHost.Visibility = Visibility.Visible;
+        AnimateToast(toOpacity: 1.0, toY: 0.0);
+
+        _toastTimer ??= CreateToastTimer();
+        _toastTimer.Stop();
+        _toastTimer.Start();
+    }
+
+    private DispatcherTimer CreateToastTimer()
+    {
+        var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(4) };
+        timer.Tick += (_, _) =>
+        {
+            _toastTimer?.Stop();
+            var fadeOut = AnimateToast(toOpacity: 0.0, toY: 16.0);
+            fadeOut.Completed += (_, _) => ToastHost.Visibility = Visibility.Collapsed;
+        };
+        return timer;
+    }
+
+    private Storyboard AnimateToast(double toOpacity, double toY)
+    {
+        var duration = new Duration(TimeSpan.FromMilliseconds(200));
+        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+
+        var fade = new DoubleAnimation { To = toOpacity, Duration = duration, EasingFunction = ease };
+        Storyboard.SetTarget(fade, ToastHost);
+        Storyboard.SetTargetProperty(fade, "Opacity");
+
+        var slide = new DoubleAnimation { To = toY, Duration = duration, EasingFunction = ease };
+        Storyboard.SetTarget(slide, ToastTransform);
+        Storyboard.SetTargetProperty(slide, "Y");
+
+        var storyboard = new Storyboard();
+        storyboard.Children.Add(fade);
+        storyboard.Children.Add(slide);
+        storyboard.Begin();
+        return storyboard;
     }
 
     private async Task EnsureInitialNavigationAsync()

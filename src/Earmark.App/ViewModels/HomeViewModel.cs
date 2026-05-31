@@ -60,6 +60,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     /// from <see cref="AppSettings.HiddenApps"/> for O(1) lookups on the 20Hz tick.</summary>
     private readonly HashSet<string> _hiddenAppKeys = new(StringComparer.OrdinalIgnoreCase);
     private readonly INotificationService _notifications;
+    private readonly IInAppNotificationService _inAppNotifications;
     private readonly IProcessControlService _processControl;
     private readonly ILogger<HomeViewModel> _logger;
     private readonly Dictionary<string, DateTime> _lastReconcileToast = new(StringComparer.OrdinalIgnoreCase);
@@ -90,6 +91,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         IWaveLinkService waveLink,
         IWaveLinkVisualService waveLinkVisuals,
         INotificationService notifications,
+        IInAppNotificationService inAppNotifications,
         IProcessControlService processControl,
         IDispatcherQueueProvider dispatcher,
         IDeviceDefaultsService deviceDefaults,
@@ -110,6 +112,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         _waveLink = waveLink ?? throw new ArgumentNullException(nameof(waveLink));
         _waveLinkVisuals = waveLinkVisuals ?? throw new ArgumentNullException(nameof(waveLinkVisuals));
         _notifications = notifications ?? throw new ArgumentNullException(nameof(notifications));
+        _inAppNotifications = inAppNotifications ?? throw new ArgumentNullException(nameof(inAppNotifications));
         _processControl = processControl ?? throw new ArgumentNullException(nameof(processControl));
         _dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
         _deviceDefaults = deviceDefaults ?? throw new ArgumentNullException(nameof(deviceDefaults));
@@ -178,6 +181,19 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     private readonly List<DeviceCard> _visibleCards = new();
 
     public IReadOnlyList<DeviceCard> VisibleCards => _visibleCards;
+
+    /// <summary>Raised after a chip is added to / removed from any card, i.e. whenever a card's apps
+    /// row may have appeared, disappeared, or changed height. The page uses it to ease the resulting
+    /// block reflow (cards below sliding to their new spots) for just that layout pass.</summary>
+    public event EventHandler? AppsRowChanged;
+
+    /// <summary>Single chokepoint for "this card's apps changed": refreshes the card's HasApps-derived
+    /// bindings and signals the page so the reflow eases. Called wherever a chip is added / removed.</summary>
+    private void NotifyCardApps(DeviceCard card)
+    {
+        card.NotifyAppsChanged();
+        AppsRowChanged?.Invoke(this, EventArgs.Empty);
+    }
 
     /// <summary>Group container VMs by id, reused across rebuilds so an in-progress title edit and
     /// the member card instances survive.</summary>
@@ -377,14 +393,14 @@ public partial class HomeViewModel : ObservableObject, IDisposable
                         .Concat(_endpoints.GetEndpoints(EndpointFlow.Capture))
                         .ToList();
                     var match = _matcher.FindAppRoute(session, EndpointFlow.Render, rulesSnapshot, combinedEndpointsCache, sessionsSnapshot);
-                    var revivedChip = new AppChip(session, card.Endpoint.Id, _iconService, _meterOptions, match?.Rule, ownerCard: card, onHide: HideApp, onClose: CloseApp, onTerminate: TerminateApp, canControlProcess: _processControl.CanControl(session.ProcessId))
+                    var revivedChip = new AppChip(session, card.Endpoint.Id, _iconService, _meterOptions, match?.Rule, ownerCard: card, onHide: HideApp, onClose: CloseApp, onTerminate: TerminateApp, canControlProcess: _processControl.CanControl(session.ProcessId), canCloseProcess: _processControl.CanClose(session.ProcessId), isElevated: _processControl.IsElevated(session.ProcessId))
                     {
                         RulePinnedHere = match is not null &&
                             string.Equals(match.Endpoint.Id, card.Endpoint.Id, StringComparison.OrdinalIgnoreCase),
                     };
                     InsertChipSorted(card.Apps, revivedChip);
                     SortCardApps(card);
-                    card.NotifyAppsChanged();
+                    NotifyCardApps(card);
                     seenAppsOnThisCard.Add(session.IdentityKey);
                     var sessionEndpointMatchesCard = string.Equals(session.CurrentEndpointId, card.Endpoint.Id, StringComparison.OrdinalIgnoreCase);
                     _logger.LogInformation(
@@ -412,7 +428,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
                             if (otherPeak < AppChip.AudibleAmplitudeThreshold)
                             {
                                 otherCard.Apps.RemoveAt(oi);
-                                otherCard.NotifyAppsChanged();
+                                NotifyCardApps(otherCard);
                             }
                         }
                     }
@@ -431,7 +447,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
                     _logger.LogInformation("Chip prune: pid={Pid} closed={Closed} past linger",
                         card.Apps[i].ProcessId, card.Apps[i].IsClosed);
                     card.Apps.RemoveAt(i);
-                    card.NotifyAppsChanged();
+                    NotifyCardApps(card);
                 }
             }
         }
@@ -730,7 +746,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         {
             if (card.Apps.Count == 0) continue;
             card.Apps.Clear();
-            card.NotifyAppsChanged();
+            NotifyCardApps(card);
         }
     }
 
@@ -995,7 +1011,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             if (card.Apps.Count > 0)
             {
                 card.Apps.Clear();
-                card.NotifyAppsChanged();
+                NotifyCardApps(card);
             }
             return;
         }
@@ -1013,7 +1029,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
                     removedHidden = true;
                 }
             }
-            if (removedHidden) card.NotifyAppsChanged();
+            if (removedHidden) NotifyCardApps(card);
         }
 
         // Classify + age out existing chips. An app whose identity is on no live source (no audio
@@ -1039,7 +1055,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             {
                 // App reopened with a live audio session - re-adopt it (and its rule match).
                 routeByPid.TryGetValue(live.ProcessId, out var liveMatch);
-                chip.Revive(live, liveMatch?.Rule, _processControl.CanControl(live.ProcessId));
+                chip.Revive(live, liveMatch?.Rule, _processControl.CanControl(live.ProcessId), _processControl.CanClose(live.ProcessId), _processControl.IsElevated(live.ProcessId));
             }
 
             // Never prune a chip that's audible right now: the run state can be stale here (the
@@ -1050,7 +1066,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
                 _logger.LogInformation("Chip removed: pid={Pid} key='{Key}' card={Card} closed={Closed}",
                     chip.ProcessId, key, card.Endpoint.DisplayName, chip.IsClosed);
                 card.Apps.RemoveAt(i);
-                card.NotifyAppsChanged();
+                NotifyCardApps(card);
             }
         }
 
@@ -1130,7 +1146,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         foreach (var add in additions.Values
             .OrderBy(a => a.Session.IsSystemSounds ? "System Sounds" : a.Session.DisplayName, StringComparer.OrdinalIgnoreCase))
         {
-            var chip = new AppChip(add.Session, card.Endpoint.Id, _iconService, _meterOptions, add.Rule, startsActive: add.Audible, ownerCard: card, onHide: HideApp, onClose: CloseApp, onTerminate: TerminateApp, canControlProcess: _processControl.CanControl(add.Session.ProcessId))
+            var chip = new AppChip(add.Session, card.Endpoint.Id, _iconService, _meterOptions, add.Rule, startsActive: add.Audible, ownerCard: card, onHide: HideApp, onClose: CloseApp, onTerminate: TerminateApp, canControlProcess: _processControl.CanControl(add.Session.ProcessId), canCloseProcess: _processControl.CanClose(add.Session.ProcessId), isElevated: _processControl.IsElevated(add.Session.ProcessId))
             {
                 RulePinnedHere = add.PinnedHere,
             };
@@ -1157,7 +1173,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         // Pin / close state just changed for some chips - re-sort so the audio-activity order holds.
         SortCardApps(card);
 
-        card.NotifyAppsChanged();
+        NotifyCardApps(card);
     }
 
     /// <summary>Peak for the chip's app on an endpoint: the max live peak across every process of
@@ -1338,7 +1354,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
                     removed = true;
                 }
             }
-            if (removed) card.NotifyAppsChanged();
+            if (removed) NotifyCardApps(card);
         }
 
         _logger.LogInformation("App hidden from chip rows: key='{Key}'", key);
@@ -1362,17 +1378,17 @@ public partial class HomeViewModel : ObservableObject, IDisposable
                 MarkUserClosed(chip);
                 break;
             case ProcessActionResult.NoWindow:
-                _notifications.Show($"Couldn't close {chip.DisplayLabel}",
-                    "It has no window to close. Shift + right-click the app and choose Terminate to force it.");
+                _inAppNotifications.Show($"{chip.DisplayLabel} has no window to close. Shift + right-click it to Terminate.");
                 break;
             case ProcessActionResult.AccessDenied:
-                _notifications.Show($"Couldn't close {chip.DisplayLabel}",
-                    "It's running as administrator. Restart Earmark as administrator to close elevated apps.");
+                // We could terminate it (or the item would be disabled), but Windows refused the
+                // graceful WM_CLOSE - it runs at a higher privilege. Point at the action that works.
+                _inAppNotifications.Show($"Windows blocked closing {chip.DisplayLabel}. Shift + right-click it to Terminate.");
                 break;
             case ProcessActionResult.NotFound:
                 break;   // already gone - the chip's close-detection catches up on its own
             default:
-                _notifications.Show($"Couldn't close {chip.DisplayLabel}", "Something went wrong. See the log for details.");
+                _inAppNotifications.Show($"Couldn't close {chip.DisplayLabel}. See the log for details.");
                 break;
         }
     }
@@ -1393,13 +1409,12 @@ public partial class HomeViewModel : ObservableObject, IDisposable
                 MarkUserClosed(chip);
                 break;
             case ProcessActionResult.AccessDenied:
-                _notifications.Show($"Couldn't terminate {chip.DisplayLabel}",
-                    "It's running as administrator. Restart Earmark as administrator to terminate elevated apps.");
+                _inAppNotifications.Show($"Couldn't terminate {chip.DisplayLabel} - access denied.");
                 break;
             case ProcessActionResult.NotFound:
                 break;
             default:
-                _notifications.Show($"Couldn't terminate {chip.DisplayLabel}", "Something went wrong. See the log for details.");
+                _inAppNotifications.Show($"Couldn't terminate {chip.DisplayLabel}. See the log for details.");
                 break;
         }
     }

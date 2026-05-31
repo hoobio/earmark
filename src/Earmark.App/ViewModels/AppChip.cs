@@ -82,7 +82,7 @@ public partial class AppChip : ObservableObject, IWrapOrdered
     private readonly Action<AppChip>? _onClose;
     private readonly Action<AppChip>? _onTerminate;
 
-    public AppChip(AudioSession session, string placementEndpointId, ISessionIconService iconService, PeakMeterOptions meterOptions, RoutingRule? lockingRule, bool startsActive = true, DeviceCard? ownerCard = null, Action<AppChip>? onHide = null, Action<AppChip>? onClose = null, Action<AppChip>? onTerminate = null, bool canControlProcess = false)
+    public AppChip(AudioSession session, string placementEndpointId, ISessionIconService iconService, PeakMeterOptions meterOptions, RoutingRule? lockingRule, bool startsActive = true, DeviceCard? ownerCard = null, Action<AppChip>? onHide = null, Action<AppChip>? onClose = null, Action<AppChip>? onTerminate = null, bool canControlProcess = false, bool canCloseProcess = false, bool isElevated = false)
     {
         Session = session ?? throw new ArgumentNullException(nameof(session));
         PlacementEndpointId = placementEndpointId ?? throw new ArgumentNullException(nameof(placementEndpointId));
@@ -94,6 +94,8 @@ public partial class AppChip : ObservableObject, IWrapOrdered
         _onClose = onClose;
         _onTerminate = onTerminate;
         CanControlProcess = canControlProcess;
+        CanCloseProcess = canCloseProcess;
+        IsElevated = isElevated;
         // An audible chip is treated as having started its run the moment we first see it (we can't
         // know when it truly started before observing). A silent rule-pinned chip starts with both
         // timestamps null - "never produced audio" - so it sits in the back tier, dimmed, until it
@@ -204,18 +206,29 @@ public partial class AppChip : ObservableObject, IWrapOrdered
     [RelayCommand]
     private void Terminate() => _onTerminate?.Invoke(this);
 
-    /// <summary>True when Earmark can close / terminate this app's process (same-or-lower integrity).
-    /// False for an elevated / cross-user target a non-elevated Earmark can't reach - which disables
-    /// the close / terminate items and relabels them. Probed once when the chip is built (a process's
-    /// elevation can't change), refreshed on <see cref="Revive"/>.</summary>
+    /// <summary>True when Earmark can force-terminate this process (it holds PROCESS_TERMINATE access).
+    /// Drives the Terminate item. Separate from <see cref="CanCloseProcess"/>: terminate access and a
+    /// graceful WM_CLOSE are gated differently, so an elevated app can be terminable but not closeable.
+    /// Probed when the chip is built (elevation can't change for a live process), refreshed on
+    /// <see cref="Revive"/>.</summary>
     [ObservableProperty]
     public partial bool CanControlProcess { get; set; }
 
-    partial void OnCanControlProcessChanged(bool value)
-    {
-        OnPropertyChanged(nameof(CloseActionLabel));
-        OnPropertyChanged(nameof(TerminateActionLabel));
-    }
+    partial void OnCanControlProcessChanged(bool value) => OnPropertyChanged(nameof(TerminateActionLabel));
+
+    /// <summary>True when a graceful close would reach this app (its integrity level is at or below
+    /// Earmark's, so a WM_CLOSE isn't UIPI-blocked). Drives the Close item. False for an elevated
+    /// target from a medium Earmark - even when <see cref="CanControlProcess"/> (terminate) is true.</summary>
+    [ObservableProperty]
+    public partial bool CanCloseProcess { get; set; }
+
+    partial void OnCanCloseProcessChanged(bool value) => OnPropertyChanged(nameof(CloseActionLabel));
+
+    /// <summary>True when the app runs elevated (High integrity or above, i.e. as administrator). Drives
+    /// the chip's shield badge. Absolute (independent of Earmark's own elevation), matching the UAC
+    /// shield convention; it also explains at a glance why an elevated app's Close item is disabled.</summary>
+    [ObservableProperty]
+    public partial bool IsElevated { get; set; }
 
     /// <summary>The close / terminate items only make sense for a live, real process: hidden for
     /// System Sounds (no owning process) and for a closed chip (the process is gone and its pid may
@@ -224,7 +237,7 @@ public partial class AppChip : ObservableObject, IWrapOrdered
 
     /// <summary>Menu label for the graceful close, doubling as the disabled-state explanation when the
     /// app is elevated (a disabled MenuFlyoutItem can't show a tooltip, so the reason lives in the text).</summary>
-    public string CloseActionLabel => CanControlProcess ? "Close this app" : "Cannot close elevated app";
+    public string CloseActionLabel => CanCloseProcess ? "Close this app" : "Cannot close elevated app";
 
     /// <summary>Menu label for the force-terminate, with the same elevated-state relabel as
     /// <see cref="CloseActionLabel"/>.</summary>
@@ -382,7 +395,7 @@ public partial class AppChip : ObservableObject, IWrapOrdered
     /// <summary>Reverses <see cref="MarkClosed"/> when the app comes back within the linger window.
     /// Adopts the live session and rule match so metering and drag target the current process. The
     /// run stays stopped until the revived app's next audible tick starts a fresh run.</summary>
-    public void Revive(AudioSession session, RoutingRule? lockingRule, bool canControlProcess)
+    public void Revive(AudioSession session, RoutingRule? lockingRule, bool canControlProcess, bool canCloseProcess, bool isElevated)
     {
         Session = session ?? throw new ArgumentNullException(nameof(session));
         LockingRule = lockingRule;
@@ -390,6 +403,8 @@ public partial class AppChip : ObservableObject, IWrapOrdered
         // The revived chip adopts a fresh process, so re-probe its reachability and clear any
         // user-close intent carried over from the previous run.
         CanControlProcess = canControlProcess;
+        CanCloseProcess = canCloseProcess;
+        IsElevated = isElevated;
         UserClosed = false;
         if (Icon is null && !string.IsNullOrEmpty(session.ExecutablePath))
         {

@@ -6,6 +6,7 @@ using Earmark.App.ViewModels;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.UI.Composition;
+using Microsoft.UI.Input;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Hosting;
@@ -18,6 +19,7 @@ using Windows.Foundation;
 using Windows.Graphics.Imaging;
 using Windows.System;
 using Windows.UI;
+using Windows.UI.Core;
 
 namespace Earmark.App.Views;
 
@@ -48,6 +50,24 @@ public sealed partial class HomePage : Page
         // on other pages. Loaded/Unloaded fire on every Frame content swap.
         Loaded += (_, _) => ViewModel.ResumePeakPolling();
         Unloaded += (_, _) => ViewModel.PausePeakPolling();
+
+        // Ease the block reflow when a card's apps row appears / disappears (the cards below slide to
+        // their new spots). The pulse is armed only for the reflow's layout pass, so plain scrolling
+        // never animates the blocks; and it stays disarmed until the page's first layout settles, so
+        // the initial fill (and every tab-return) places cards instantly instead of sliding them in.
+        ViewModel.AppsRowChanged += OnAppsRowChanged;
+        Loaded += (_, _) =>
+        {
+            _pageSettled = false;
+            LayoutUpdated -= OnFirstLayoutSettled;   // no double-subscribe on a tab-return
+            LayoutUpdated += OnFirstLayoutSettled;
+        };
+    }
+
+    private void OnFirstLayoutSettled(object? sender, object e)
+    {
+        LayoutUpdated -= OnFirstLayoutSettled;
+        _pageSettled = true;
     }
 
     public HomeViewModel ViewModel { get; }
@@ -85,6 +105,17 @@ public sealed partial class HomePage : Page
     /// <summary>True between a reorder drag start and its completion; gates whether newly realised
     /// blocks get the implicit slide animation attached as they scroll into view.</summary>
     private bool _reorderActive;
+
+    /// <summary>True once the page's first layout has settled. Until then a chip sync (the initial
+    /// fill, or a tab-return) must NOT pulse the block reflow animation, or every block would slide in
+    /// from the origin on appearance.</summary>
+    private bool _pageSettled;
+
+    /// <summary>True while a one-shot block-reflow pulse is armed: the block Offset animations are
+    /// attached just for the layout pass an apps-row appear / disappear triggers (so the cards below
+    /// slide), then detached on the next <see cref="FrameworkElement.LayoutUpdated"/> so plain
+    /// scrolling never animates the blocks.</summary>
+    private bool _blockReflowPulse;
 
     /// <summary>The group's inner layout currently showing a member make-space gap (within-group
     /// reorder) or a phantom join slot, or null.</summary>
@@ -773,6 +804,44 @@ public sealed partial class HomePage : Page
         if (_reorderActive) ApplyReorderAnimation(args.Element, true);
     }
 
+    /// <summary>A chip was added to / removed from some card, so a card's height may have changed.
+    /// Arm the block Offset animation for the single layout pass that reflow triggers, so the cards
+    /// below slide to their new positions instead of jumping. Detached again on the next
+    /// <see cref="FrameworkElement.LayoutUpdated"/> (below) so plain scrolling never animates blocks.</summary>
+    private void OnAppsRowChanged(object? sender, EventArgs e)
+    {
+        if (!_pageSettled) return;     // initial fill / tab-return: place instantly, don't slide in
+        if (_reorderActive) return;    // a drag already owns the block animations
+        if (_blockReflowPulse) return; // already armed for this pass (several cards can change at once)
+
+        _blockReflowPulse = true;
+        SetBlockReflowAnimations(true);
+        LayoutUpdated += OnReflowPulseSettled;
+    }
+
+    private void OnReflowPulseSettled(object? sender, object e)
+    {
+        // The reflow arrange has run, so the blocks' new Offsets are set and their slide animations
+        // have started (clearing the implicit collection now doesn't stop an in-flight slide). Detach
+        // so the next scroll's re-arranges don't animate.
+        LayoutUpdated -= OnReflowPulseSettled;
+        _blockReflowPulse = false;
+        if (_reorderActive) return;    // a drag started mid-pulse and now owns the animations
+        SetBlockReflowAnimations(false);
+    }
+
+    /// <summary>Attaches / detaches the implicit Offset animation on every realised block.</summary>
+    private void SetBlockReflowAnimations(bool enable)
+    {
+        for (var i = 0; i < ViewModel.Blocks.Count; i++)
+        {
+            if (DevicesRepeater.TryGetElement(i) is UIElement element)
+            {
+                ApplyReorderAnimation(element, enable);
+            }
+        }
+    }
+
     /// <summary>Attaches a Composition implicit Offset animation to an app chip's container the first
     /// time it renders, so a re-sort (active/idle tiering) or a sibling appearing/leaving slides the
     /// chips to their new spots instead of popping. Offset ONLY - no opacity, so a recycled container
@@ -943,6 +1012,30 @@ public sealed partial class HomePage : Page
     {
         SetDragInProgress(false);
     }
+
+    /// <summary>Reveals the chip's "Terminate this app" item only while Shift is held as the context
+    /// menu opens - an Explorer-style hidden power action. The terminate item is the one carrying the
+    /// AppChip as its Tag; its base availability is gated by <see cref="AppChip.ShowProcessActions"/>
+    /// so a System Sounds or closed chip never exposes it even with Shift down. Shift state is read at
+    /// the current input message, which is the right-click that opened the menu.</summary>
+    // CA1822 suppressed: XAML event hookup requires an instance method even though the body is static.
+#pragma warning disable CA1822
+    private void OnAppChipFlyoutOpening(object sender, object e)
+    {
+        if (sender is not MenuFlyout flyout) return;
+        var shiftDown = InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift)
+            .HasFlag(CoreVirtualKeyStates.Down);
+        foreach (var item in flyout.Items)
+        {
+            if (item is MenuFlyoutItem { Tag: AppChip chip } terminate)
+            {
+                terminate.Visibility = shiftDown && chip.ShowProcessActions
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+            }
+        }
+    }
+#pragma warning restore CA1822
 
     /// <summary>Reveals every group container's dotted outline while a drag is in flight, so groups
     /// read as transparent at rest and show their bounds only while dragging.</summary>

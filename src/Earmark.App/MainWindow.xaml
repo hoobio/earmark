@@ -146,5 +146,41 @@
                 </Frame.ContentTransitions>
             </Frame>
         </NavigationView>
+
+        <!-- In-app toast: brief, bottom-centred feedback for an interactive action in this window
+             (e.g. "couldn't close that app"). Collapsed until ShowToast animates it in, then it
+             auto-dismisses. Windows notifications stay reserved for background events the user may
+             not be looking at - see INotificationService. -->
+        <Border x:Name="ToastHost"
+                Grid.Row="0"
+                Grid.RowSpan="2"
+                VerticalAlignment="Bottom"
+                HorizontalAlignment="Center"
+                Margin="0,0,0,32"
+                Padding="14,10"
+                MaxWidth="440"
+                CornerRadius="{StaticResource CardCornerRadius}"
+                Background="{ThemeResource SolidBackgroundFillColorSecondaryBrush}"
+                BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                Opacity="0"
+                IsHitTestVisible="False"
+                Visibility="Collapsed">
+            <Border.RenderTransform>
+                <TranslateTransform x:Name="ToastTransform" Y="16" />
+            </Border.RenderTransform>
+            <StackPanel Orientation="Horizontal" Spacing="10">
+                <FontIcon Glyph="&#xE7BA;"
+                          FontSize="16"
+                          VerticalAlignment="Top"
+                          Margin="0,1,0,0"
+                          Foreground="{ThemeResource SystemFillColorCautionBrush}" />
+                <TextBlock x:Name="ToastText"
+                           Style="{ThemeResource BodyTextBlockStyle}"
+                           TextWrapping="Wrap"
+                           MaxWidth="380"
+                           VerticalAlignment="Center" />
+            </StackPanel>
+        </Border>
     </Grid>
 </Window>

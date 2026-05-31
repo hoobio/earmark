@@ -523,7 +523,7 @@
                                                      and closed chips via ShowProcessActions. -->
                                                 <MenuFlyoutItem Text="{x:Bind CloseActionLabel, Mode=OneWay}"
                                                                 Command="{x:Bind CloseCommand}"
-                                                                IsEnabled="{x:Bind CanControlProcess, Mode=OneWay}"
+                                                                IsEnabled="{x:Bind CanCloseProcess, Mode=OneWay}"
                                                                 Visibility="{x:Bind ShowProcessActions, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
                                                                 ToolTipService.ToolTip="Ask this app to close, like clicking its X (it can save or prompt first).">
                                                     <MenuFlyoutItem.Icon>
@@ -674,6 +674,26 @@
                                                 <FontIcon Glyph="&#xE711;"
                                                           FontSize="9"
                                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                          HorizontalAlignment="Center"
+                                                          VerticalAlignment="Center" />
+                                            </Border>
+
+                                            <!-- Elevated badge: the app runs as administrator (High integrity or
+                                                 above). Bottom-right, the conventional UAC-shield overlay corner, so
+                                                 it never collides with the lock (top-right) or closed (top-left)
+                                                 badges. Also explains why an elevated app's Close item is disabled. -->
+                                            <Border Grid.Row="0"
+                                                    Background="{ThemeResource SmokeFillColorDefaultBrush}"
+                                                    CornerRadius="7"
+                                                    Width="14" Height="14"
+                                                    HorizontalAlignment="Right"
+                                                    VerticalAlignment="Bottom"
+                                                    Margin="0,0,-3,-3"
+                                                    ToolTipService.ToolTip="Running as administrator (elevated)"
+                                                    Visibility="{x:Bind IsElevated, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                <FontIcon Glyph="&#xEA18;"
+                                                          FontSize="9"
+                                                          Foreground="{ThemeResource SystemFillColorCautionBrush}"
                                                           HorizontalAlignment="Center"
                                                           VerticalAlignment="Center" />
                                             </Border>
