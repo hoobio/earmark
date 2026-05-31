@@ -14,10 +14,12 @@ namespace Earmark.App.ViewModels;
 /// </summary>
 /// <param name="DeviceKey">The stable <see cref="DeviceIdentity"/> key this card is reconciled by.</param>
 /// <param name="IsConnected">False for a persisted-but-absent (disconnected) device.</param>
+/// <param name="IsBluetooth">True when the card should show the Bluetooth connect/disconnect button.</param>
 public sealed record DeviceCardSnapshot(
     AudioEndpoint Endpoint,
     string DeviceKey,
     bool IsConnected,
+    bool IsBluetooth,
     float Volume,
     bool IsMuted,
     bool VolumeLocked,

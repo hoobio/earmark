@@ -57,6 +57,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     private readonly IWaveLinkVisualService _waveLinkVisuals;
     private readonly IDispatcherQueueProvider _dispatcher;
     private readonly IDeviceDefaultsService _deviceDefaults;
+    private readonly IBluetoothAudioControl _bluetoothControl;
     private WaveLinkChannelStyle? _lastAppliedStyle;
     private bool? _lastFilterForwarders;
     private bool? _lastShowAppIndicators;
@@ -106,6 +107,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         IProcessControlService processControl,
         IDispatcherQueueProvider dispatcher,
         IDeviceDefaultsService deviceDefaults,
+        IBluetoothAudioControl bluetoothControl,
         ILogger<HomeViewModel> logger)
     {
         _rules = rules ?? throw new ArgumentNullException(nameof(rules));
@@ -127,6 +129,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         _processControl = processControl ?? throw new ArgumentNullException(nameof(processControl));
         _dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
         _deviceDefaults = deviceDefaults ?? throw new ArgumentNullException(nameof(deviceDefaults));
+        _bluetoothControl = bluetoothControl ?? throw new ArgumentNullException(nameof(bluetoothControl));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
         // Show-hidden is session-only: defaults to off on every launch.
@@ -803,7 +806,8 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             {
                 card = new DeviceCard(
                     _endpoints, _writer, _meterOptions, snap,
-                    OnCardVisibilityToggled, OnCardVolumeControlsToggled, OnCardCustomisationChanged);
+                    OnCardVisibilityToggled, OnCardVolumeControlsToggled, OnCardCustomisationChanged,
+                    OnCardBluetoothToggle);
             }
             rebuilt.Add(card);
         }
@@ -1098,6 +1102,14 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             .ThenBy(e => e.FriendlyName, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
+        // Bluetooth detection per live render endpoint (topology walk, cached in the control). Only
+        // the render side carries the connect/disconnect button; capture endpoints are never flagged.
+        var btByEndpointId = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        foreach (var endpoint in ordered)
+        {
+            btByEndpointId[endpoint.Id] = endpoint.Flow == EndpointFlow.Render && _bluetoothControl.IsBluetooth(endpoint.Id);
+        }
+
         var snapshots = new List<DeviceCardSnapshot>(ordered.Count + knownDevices.Count);
         var liveKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var endpoint in ordered)
@@ -1107,12 +1119,13 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             var summary = DeviceRulesSummary.For(endpoint, rules, renderEndpoints, captureEndpoints, sessions, _matcher, _evaluator);
             var volume = _endpoints.GetVolume(endpoint.Id) ?? 0f;
             var muted = _endpoints.GetMuted(endpoint.Id) ?? false;
-            snapshots.Add(ToSnapshot(endpoint, key, isConnected: true, volume, muted, summary, LookupConfig(deviceConfigs, key, endpoint.Id)));
+            snapshots.Add(ToSnapshot(endpoint, key, isConnected: true, volume, muted, summary, LookupConfig(deviceConfigs, key, endpoint.Id), btByEndpointId[endpoint.Id]));
         }
 
-        // Refresh the known-devices table from the live set, then build a disconnected snapshot for
+        // Refresh the known-devices table from the live set (recording each device's Bluetooth flag so
+        // a disconnected BT device keeps its connect button), then build a disconnected snapshot for
         // every remembered device that isn't live right now.
-        var (refreshedKnown, knownChanged, prunedKeys) = ReconcileKnownDevices(knownDevices, ordered, idToKey, now);
+        var (refreshedKnown, knownChanged, prunedKeys) = ReconcileKnownDevices(knownDevices, ordered, idToKey, btByEndpointId, now);
         foreach (var row in refreshedKnown
             .Where(r => !liveKeys.Contains(r.Key))
             .OrderBy(r => r.Flow)
@@ -1129,7 +1142,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
                 ContainerId: row.ContainerId,
                 IsBluetooth: row.IsBluetooth);
             var summary = DeviceRulesSummary.For(endpoint, rules, renderEndpoints, captureEndpoints, sessions, _matcher, _evaluator);
-            snapshots.Add(ToSnapshot(endpoint, row.Key, isConnected: false, volume: 0f, muted: false, summary, LookupConfig(deviceConfigs, row.Key, row.LastEndpointId)));
+            snapshots.Add(ToSnapshot(endpoint, row.Key, isConnected: false, volume: 0f, muted: false, summary, LookupConfig(deviceConfigs, row.Key, row.LastEndpointId), row.IsBluetooth));
         }
 
         return new CardBuildResult(snapshots, refreshedKnown, knownChanged, prunedKeys);
@@ -1144,11 +1157,12 @@ public partial class HomeViewModel : ObservableObject, IDisposable
 
     private static DeviceCardSnapshot ToSnapshot(
         AudioEndpoint endpoint, string deviceKey, bool isConnected, float volume, bool muted,
-        DeviceRulesSummary.Result summary, DeviceConfig? cfg)
+        DeviceRulesSummary.Result summary, DeviceConfig? cfg, bool isBluetooth)
         => new(
             Endpoint: endpoint,
             DeviceKey: deviceKey,
             IsConnected: isConnected,
+            IsBluetooth: isBluetooth,
             Volume: volume,
             IsMuted: muted,
             VolumeLocked: summary.VolumeLocked,
@@ -1173,7 +1187,8 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     /// </summary>
     private (List<KnownDevice> Devices, bool Changed, List<string> PrunedKeys) ReconcileKnownDevices(
         List<KnownDevice> existing, IReadOnlyList<AudioEndpoint> liveActive,
-        IReadOnlyDictionary<string, string> idToKey, DateTimeOffset now)
+        IReadOnlyDictionary<string, string> idToKey, Dictionary<string, bool> btByEndpointId,
+        DateTimeOffset now)
     {
         var changed = false;
         var byKey = new Dictionary<string, KnownDevice>(StringComparer.OrdinalIgnoreCase);
@@ -1203,7 +1218,8 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             if (!string.Equals(row.DeviceDescription, endpoint.DeviceDescription, StringComparison.Ordinal)) { row.DeviceDescription = endpoint.DeviceDescription; changed = true; }
             if (row.Flow != endpoint.Flow) { row.Flow = endpoint.Flow; changed = true; }
             if (!string.Equals(row.ContainerId, endpoint.ContainerId, StringComparison.OrdinalIgnoreCase)) { row.ContainerId = endpoint.ContainerId; changed = true; }
-            if (row.IsBluetooth != endpoint.IsBluetooth) { row.IsBluetooth = endpoint.IsBluetooth; changed = true; }
+            var isBt = btByEndpointId.TryGetValue(endpoint.Id, out var bt) && bt;
+            if (row.IsBluetooth != isBt) { row.IsBluetooth = isBt; changed = true; }
             // Only treat a last-seen advance as "changed" past a day, so steady-state rebuilds don't
             // resave every device event - last-seen only feeds the 90-day age-out.
             if (now - row.LastSeenUtc > TimeSpan.FromDays(1)) changed = true;
@@ -1853,6 +1869,23 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         UpdateDeviceConfig(card);
         QueueSettingsSave();
         // No resync: glyph + accent are bound live on the existing card; visibility is unaffected.
+    }
+
+    /// <summary>
+    /// Bluetooth connect/disconnect from a card's button: connect when the device is currently
+    /// disconnected, disconnect when connected. The KS one-shot is fire-and-attempt and does COM, so
+    /// it runs off the UI thread; the card's connected state settles from the device-arrival events
+    /// (which trigger a rebuild), not from this call.
+    /// </summary>
+    private void OnCardBluetoothToggle(DeviceCard card)
+    {
+        var endpointId = card.Endpoint.Id;
+        var connected = card.IsConnected;
+        _ = Task.Run(() =>
+        {
+            if (connected) _bluetoothControl.RequestDisconnect(endpointId);
+            else _bluetoothControl.RequestConnect(endpointId);
+        });
     }
 
     /// <summary>Removes an endpoint from whichever group's persisted record holds it, disbanding the

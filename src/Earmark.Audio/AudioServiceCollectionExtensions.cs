@@ -19,6 +19,7 @@ public static class AudioServiceCollectionExtensions
         services.AddSingleton<IAudioPolicyService, AudioPolicyService>();
         services.AddSingleton<IRunningProcessProvider, RunningProcessProvider>();
         services.AddSingleton<IWaveLinkService, WaveLinkService>();
+        services.AddSingleton<IBluetoothAudioControl, BluetoothAudioControl>();
         return services;
     }
 }

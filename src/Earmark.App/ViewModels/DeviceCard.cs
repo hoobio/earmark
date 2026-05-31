@@ -41,6 +41,7 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     private readonly Action<DeviceCard, VisibilityState> _onVisibilityToggled;
     private readonly Action<DeviceCard> _onVolumeControlsToggled;
     private readonly Action<DeviceCard> _onCustomisationChanged;
+    private readonly Action<DeviceCard> _onBluetoothToggle;
     private bool _suppressVolumeWrite;
     private float _leftHold;
     private float _rightHold;
@@ -61,7 +62,8 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         DeviceCardSnapshot snapshot,
         Action<DeviceCard, VisibilityState> onUserVisibilityToggled,
         Action<DeviceCard> onVolumeControlsToggled,
-        Action<DeviceCard> onCustomisationChanged)
+        Action<DeviceCard> onCustomisationChanged,
+        Action<DeviceCard> onBluetoothToggle)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         _endpoints = endpoints;
@@ -69,6 +71,7 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         _onVisibilityToggled = onUserVisibilityToggled;
         _onVolumeControlsToggled = onVolumeControlsToggled;
         _onCustomisationChanged = onCustomisationChanged;
+        _onBluetoothToggle = onBluetoothToggle;
         _userGlyphOverride = snapshot.UserGlyphOverride;
         _userAccent = snapshot.UserAccent;
         _userAccentNone = snapshot.UserAccentNone;
@@ -76,6 +79,7 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         DeviceKey = snapshot.DeviceKey;
         Endpoint = snapshot.Endpoint;
         IsConnected = snapshot.IsConnected;
+        IsBluetooth = snapshot.IsBluetooth;
         // Deterministic resting accent for devices with no Wave Link colour: hash the stable
         // device key into the palette so a given device keeps the same tile colour across reboots
         // (and driver reinstalls) without persisting anything. A Wave Link accent or a user override
@@ -288,6 +292,8 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         OnPropertyChanged(nameof(CanAcceptAppDrop));
         OnPropertyChanged(nameof(ShowDisconnectedBadge));
         OnPropertyChanged(nameof(ShowVolumeLockOverlay));
+        OnPropertyChanged(nameof(BluetoothToggleGlyph));
+        OnPropertyChanged(nameof(BluetoothToggleTooltip));
     }
 
     /// <summary>Whether the "Disconnected" status pill shows on the card.</summary>
@@ -296,6 +302,33 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     /// <summary>Whether an app chip can be dropped onto this card to route to it: only while connected
     /// (a disconnected endpoint can't be a per-app default target).</summary>
     public bool CanAcceptAppDrop => IsConnected;
+
+    // ---- Bluetooth ----
+
+    /// <summary>True when this is a Bluetooth device, so the card shows the connect/disconnect button
+    /// (top-right of the header). Intrinsic - resolved from the audio topology by the audio layer.</summary>
+    [ObservableProperty]
+    public partial bool IsBluetooth { get; set; }
+
+    partial void OnIsBluetoothChanged(bool value) => OnPropertyChanged(nameof(ShowBluetoothButton));
+
+    /// <summary>Whether the Bluetooth connect/disconnect button shows on this card.</summary>
+    public bool ShowBluetoothButton => IsBluetooth;
+
+    /// <summary>Bluetooth button glyph: a plain Bluetooth mark while connected (tap to disconnect),
+    /// the "searching" Bluetooth mark while disconnected (tap to connect).</summary>
+    public string BluetoothToggleGlyph => IsConnected
+        ? new string((char)0xE702, 1)   // Bluetooth
+        : new string((char)0xE9CE, 1);  // Bluetooth searching / not connected
+
+    public string BluetoothToggleTooltip => IsConnected
+        ? "Disconnect this Bluetooth device"
+        : "Connect this Bluetooth device";
+
+    /// <summary>Connect (when disconnected) or disconnect (when connected) this Bluetooth device. The
+    /// actual link state settles from the device-arrival events, not this command's return.</summary>
+    [RelayCommand]
+    public void ToggleBluetooth() => _onBluetoothToggle?.Invoke(this);
 
     // ---- Persistence-bound state ----
 
@@ -625,6 +658,7 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         }
 
         IsConnected = snapshot.IsConnected;
+        IsBluetooth = snapshot.IsBluetooth;
         RefreshVolumeMute(snapshot.Volume, snapshot.IsMuted);
 
         IsVolumeLockedByRule = snapshot.VolumeLocked;

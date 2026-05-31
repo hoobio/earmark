@@ -1,0 +1,9 @@
+IMMDeviceEnumerator
+IMMDevice
+IDeviceTopology
+IConnector
+IPart
+IKsControl
+CoCreateInstance
+CoInitializeEx
+CLSCTX

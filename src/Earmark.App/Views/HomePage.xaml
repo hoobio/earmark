@@ -136,11 +136,12 @@
                             CornerRadius="{StaticResource CardCornerRadius}"
                             Visibility="{x:Bind IsMuted, Mode=OneWay}" />
                 <StackPanel Spacing="{StaticResource SpacingMedium}" Margin="{StaticResource SectionPadding}">
-                    <!-- Header: mute toggle (icon) + name + chips -->
-                    <Grid ColumnSpacing="{StaticResource SpacingMedium}">
+                    <!-- Header: mute toggle (icon) + name + chips + (Bluetooth) connect/disconnect -->
+                    <Grid ColumnSpacing="{StaticResource SpacingSmall}">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
 
                         <!-- The Border wrapper carries ToolTipService.ToolTip so the lock-reason
@@ -263,6 +264,22 @@
                                 </Border>
                             </StackPanel>
                         </StackPanel>
+
+                        <!-- Bluetooth connect/disconnect: top-right of the header, sized to the name /
+                             id rows. The name / subtitle live in the * column, so they ellipsify to
+                             make room for this button. Shown only on Bluetooth devices. -->
+                        <Button Grid.Column="2"
+                                VerticalAlignment="Top"
+                                Width="32" Height="32"
+                                Padding="0"
+                                Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                                CornerRadius="{ThemeResource ControlCornerRadius}"
+                                Visibility="{x:Bind ShowBluetoothButton, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                Command="{x:Bind ToggleBluetoothCommand}"
+                                ToolTipService.ToolTip="{x:Bind BluetoothToggleTooltip, Mode=OneWay}"
+                                AutomationProperties.Name="{x:Bind BluetoothToggleTooltip, Mode=OneWay}">
+                            <FontIcon Glyph="{x:Bind BluetoothToggleGlyph, Mode=OneWay}" FontSize="16" />
+                        </Button>
                     </Grid>
 
                     <!-- Volume row. "Hide volume controls" hides the slider + readout + lock
