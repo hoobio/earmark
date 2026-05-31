@@ -1,13 +1,5 @@
 namespace Earmark.App.ViewModels;
 
-/// <summary>One selectable glyph in the customisation picker. <see cref="Glyph"/> null = the
-/// "Auto" choice (fall back to the derived glyph).</summary>
-public sealed record GlyphChoice(string Label, string? Glyph)
-{
-    public bool IsAuto => Glyph is null;
-    public bool HasGlyph => Glyph is not null;
-}
-
 /// <summary>
 /// Maps an audio device's user-facing name to a thematic Segoe Fluent glyph so the device
 /// card icon reads at a glance instead of every endpoint sharing the speaker. Covers the
@@ -49,7 +41,6 @@ internal static class DeviceGlyphMapper
     private const string Bluetooth = "";  // Bluetooth
     private const string Wifi = "";       // Wifi (wireless / network audio)
     private const string Cast = "";       // Connect (cast to device)
-    private const string Project = "";    // MiracastLogoSmall (project / cast)
     private const string Usb = "";        // USB
     private const string Phone = "";      // Phone
     private const string Laptop = "";     // DeviceLaptopNoPic
@@ -77,17 +68,32 @@ internal static class DeviceGlyphMapper
         ("Bluetooth", Bluetooth),
         ("WiFi", Wifi),
         ("Cast", Cast),
-        ("Project", Project),
         ("USB", Usb),
         ("Phone", Phone),
         ("Laptop", Laptop),
     };
 
-    /// <summary>Picker model: an "Auto" choice followed by every curated glyph.</summary>
-    public static IReadOnlyList<GlyphChoice> GlyphChoices { get; } =
-        new[] { new GlyphChoice("Auto", null) }
-            .Concat(CuratedGlyphs.Select(g => new GlyphChoice(g.Label, g.Glyph)))
-            .ToList();
+    /// <summary>One glyph in the "Custom…" browser: the codepoint as a string, its friendly name,
+    /// and the 4-hex code (both searchable).</summary>
+    public sealed record GlyphEntry(string Glyph, string Name, string Hex);
+
+    /// <summary>The full Segoe Fluent Icons set offered by the "Custom…" glyph browser, sourced from
+    /// the generated <see cref="SegoeFluentCatalog"/> so every documented glyph is present (no blanks)
+    /// and searchable by name or hex.</summary>
+    public static IReadOnlyList<GlyphEntry> AllFluentGlyphs { get; } = BuildAllFluentGlyphs();
+
+    private static List<GlyphEntry> BuildAllFluentGlyphs()
+    {
+        var list = new List<GlyphEntry>(SegoeFluentCatalog.Entries.Length);
+        foreach (var (code, name) in SegoeFluentCatalog.Entries)
+        {
+            list.Add(new GlyphEntry(
+                char.ConvertFromUtf32(code),
+                name,
+                code.ToString("X4", System.Globalization.CultureInfo.InvariantCulture)));
+        }
+        return list;
+    }
 
     // Ordered: more-specific prefixes first so they win over broader ones.
     private static readonly (string Prefix, string Glyph)[] _patterns =

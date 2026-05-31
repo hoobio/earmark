@@ -3,61 +3,37 @@
     x:Class="Earmark.App.Controls.ColourSwatchPicker"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:ui="using:Windows.UI"
     xmlns:controls="using:Earmark.App.Controls"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d">
 
     <StackPanel Spacing="{StaticResource SpacingMedium}" Width="280">
-        <TextBlock Text="Accent colour"
-                   Style="{StaticResource CaptionTextBlockStyle}"
-                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+        <!-- Swatch grid (the bright Fluent accent palette). Built in code so the selected swatch
+             can show a check. -->
+        <controls:WrapPanel x:Name="SwatchHost" HorizontalSpacing="6" VerticalSpacing="6" />
 
-        <!-- Auto / off-palette state row: shown above the grid so the current selection reads
-             even when it isn't one of the swatches. -->
-        <Button x:Name="AutoButton"
-                Content="Auto"
-                Visibility="Collapsed"
-                Click="OnAutoClicked"
-                HorizontalAlignment="Left" />
-
-        <!-- Swatch grid (the full Windows accent palette). -->
-        <ItemsControl x:Name="SwatchHost">
-            <ItemsControl.ItemsPanel>
-                <ItemsPanelTemplate>
-                    <controls:WrapPanel HorizontalSpacing="6" VerticalSpacing="6" />
-                </ItemsPanelTemplate>
-            </ItemsControl.ItemsPanel>
-            <ItemsControl.ItemTemplate>
-                <DataTemplate x:DataType="ui:Color">
-                    <Button Width="28" Height="28"
-                            Padding="0"
-                            Click="OnSwatchClicked"
-                            Tag="{x:Bind}"
-                            HorizontalContentAlignment="Stretch"
-                            VerticalContentAlignment="Stretch">
-                        <Border CornerRadius="{ThemeResource ControlCornerRadius}"
-                                Background="{x:Bind Converter={StaticResource ColorToBrushConverter}}" />
-                    </Button>
-                </DataTemplate>
-            </ItemsControl.ItemTemplate>
-        </ItemsControl>
-
-        <!-- Custom colour: hidden behind a toggle so the default state is swatches-only. -->
-        <ToggleButton x:Name="CustomToggle"
-                      Content="Custom…"
-                      Checked="OnCustomToggled"
-                      Unchecked="OnCustomToggled"
-                      HorizontalAlignment="Left" />
-        <ColorPicker x:Name="WheelPicker"
-                     Visibility="Collapsed"
-                     ColorSpectrumShape="Ring"
-                     IsAlphaEnabled="False"
-                     IsMoreButtonVisible="True"
-                     IsColorSliderVisible="True"
-                     IsColorChannelTextInputVisible="False"
-                     IsHexInputVisible="True"
-                     ColorChanged="OnWheelColorChanged" />
+        <!-- Custom colour (wheel in a flyout so it doesn't crowd the host) + optional None. -->
+        <StackPanel Orientation="Horizontal" Spacing="{StaticResource SpacingSmall}">
+            <Button Content="Custom…">
+                <Button.Flyout>
+                    <Flyout>
+                        <ColorPicker x:Name="WheelPicker"
+                                     ColorSpectrumShape="Ring"
+                                     IsAlphaEnabled="False"
+                                     IsMoreButtonVisible="False"
+                                     IsColorSliderVisible="True"
+                                     IsColorChannelTextInputVisible="False"
+                                     IsHexInputVisible="True"
+                                     ColorChanged="OnWheelColorChanged" />
+                    </Flyout>
+                </Button.Flyout>
+            </Button>
+            <Button x:Name="NoneButton"
+                    Content="None"
+                    Visibility="Collapsed"
+                    Click="OnNoneClicked"
+                    ToolTipService.ToolTip="No accent - use the plain tile" />
+        </StackPanel>
     </StackPanel>
 </UserControl>

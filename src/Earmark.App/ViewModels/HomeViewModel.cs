@@ -169,6 +169,8 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         _deviceDefaults.DefaultsApplied += OnAnythingChanged;
         SyncMeterOptions();
         RefreshHiddenApps();
+        ShowDevicesHeader = _settings.Current.ShowDevicesPageHeader;
+        LockLayout = _settings.Current.LockDeviceLayout;
 
         IsInitializing = true;
         QueueRefresh();
@@ -228,6 +230,30 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             card.RefreshListed(value);
         }
         SyncBlocks();
+    }
+
+    /// <summary>Whether the Devices page header row (the "Devices" title) is shown. Persisted; toggled
+    /// from the page's "..." / right-click menu (the "..." stays visible either way).</summary>
+    [ObservableProperty]
+    public partial bool ShowDevicesHeader { get; set; }
+
+    partial void OnShowDevicesHeaderChanged(bool value)
+    {
+        if (_settings.Current.ShowDevicesPageHeader == value) return; // no-op (e.g. initial seed)
+        _settings.Current.ShowDevicesPageHeader = value;
+        QueueSettingsSave();
+    }
+
+    /// <summary>When true, cards / groups can't be dragged to reorder or regroup. Persisted; toggled
+    /// from the page's "..." / right-click menu.</summary>
+    [ObservableProperty]
+    public partial bool LockLayout { get; set; }
+
+    partial void OnLockLayoutChanged(bool value)
+    {
+        if (_settings.Current.LockDeviceLayout == value) return; // no-op (e.g. initial seed)
+        _settings.Current.LockDeviceLayout = value;
+        QueueSettingsSave();
     }
 
     /// <summary>
@@ -935,6 +961,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
                 cfg?.VolumeControlsHidden == true,
                 cfg?.Glyph,
                 Controls.DeviceAccentPalette.TryParseHex(cfg?.AccentColour),
+                Controls.DeviceAccentPalette.IsNoneSentinel(cfg?.AccentColour),
                 OnCardVisibilityToggled,
                 OnCardVolumeControlsToggled,
                 OnCardCustomisationChanged);
@@ -2159,7 +2186,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             Pinned = card.IsPinnedByUser ? true : null,
             VolumeControlsHidden = card.IsVolumeControlsHiddenByUser ? true : null,
             Glyph = card.CurrentGlyphOverride,
-            AccentColour = card.CurrentAccent is { } c ? Controls.DeviceAccentPalette.ToHex(c) : null,
+            AccentColour = card.AccentOverrideHex,
         };
         if (cfg.IsDefault) map.Remove(card.Endpoint.Id);
         else map[card.Endpoint.Id] = cfg;

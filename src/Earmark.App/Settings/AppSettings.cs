@@ -105,6 +105,16 @@ public sealed class AppSettings
     /// <see cref="ShowAppIndicators"/> is also on.</summary>
     public bool AlwaysShowPinnedApps { get; set; } = true;
 
+    /// <summary>Whether the Devices page shows its header row (the "Devices" title). Hidden via the
+    /// page's "..." / right-click menu for a cleaner look; the "..." stays visible either way.
+    /// Default true.</summary>
+    public bool ShowDevicesPageHeader { get; set; } = true;
+
+    /// <summary>When true, device cards and groups can't be dragged to reorder / regroup on the
+    /// Devices page (a guard against accidental rearrangement). Toggled from the page's "..." /
+    /// right-click menu. Default false.</summary>
+    public bool LockDeviceLayout { get; set; }
+
     /// <summary>
     /// Per-device configuration, keyed by endpoint id. Only devices that deviate from the
     /// defaults get an entry (all-default entries are pruned on save), so the map stays sparse.
