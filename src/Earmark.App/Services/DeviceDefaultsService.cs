@@ -203,7 +203,7 @@ public sealed class DeviceDefaultsService : IDeviceDefaultsService
                 Enabled = false,
                 Actions = defaultDevices.Select(e => new RuleAction
                 {
-                    Type = ActionType.SetDeviceVolume,
+                    Kind = ActionKind.DeviceVolume,
                     DevicePattern = $"^{Regex.Escape(e.FriendlyName)}$",
                     Volume = 1f,
                 }).ToList(),
@@ -221,7 +221,8 @@ public sealed class DeviceDefaultsService : IDeviceDefaultsService
                 {
                     new RuleAction
                     {
-                        Type = ActionType.SetApplicationOutput,
+                        Kind = ActionKind.ApplicationDevice,
+                        Flow = EndpointFlow.Render,
                         AppPattern = AppOutputAppPattern,
                         DevicePattern = AppOutputDevicePattern,
                     },

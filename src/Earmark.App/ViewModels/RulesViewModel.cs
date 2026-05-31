@@ -112,7 +112,7 @@ public partial class RulesViewModel : ObservableObject, IDisposable
         {
             Name = "New rule",
             Enabled = true,
-            Actions = { new RuleAction { Type = ActionType.SetApplicationOutput } },
+            Actions = { new RuleAction { Kind = ActionKind.ApplicationDevice, Flow = EndpointFlow.Render } },
         };
 
         await _rules.UpsertAsync(rule);

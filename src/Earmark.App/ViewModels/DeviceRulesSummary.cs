@@ -85,13 +85,19 @@ internal static class DeviceRulesSummary
             .OrderByDescending(s => s.Status == RuleStatus.Active)
             .ToList();
 
+        // Only a PINNED target locks the control or drives the Devices-page reconcile. A one-shot
+        // target (Pinned == false) is set once on its activation edge by the applier and then left
+        // alone, so here it must read as unlocked / no reconcile source.
+        var pinnedVolume = targets.Volume is { Pinned: true } ? targets.Volume : null;
+        var pinnedMute = targets.Muted is { Pinned: true } ? targets.Muted : null;
+
         return new Result(
             ordered,
-            targets.Volume.HasValue,
-            targets.Muted.HasValue,
-            targets.Muted,
-            targets.MuteSource,
-            targets.VolumeSource);
+            pinnedVolume.HasValue,
+            pinnedMute.HasValue,
+            pinnedMute?.Value,
+            pinnedMute?.SourceName,
+            pinnedVolume?.SourceName);
     }
 
     private static bool RuleTargetsEndpoint(RoutingRule rule, AudioEndpoint endpoint)
@@ -113,14 +119,13 @@ internal static class DeviceRulesSummary
         var pattern = action.DevicePattern;
         if (string.IsNullOrWhiteSpace(pattern)) return false;
 
-        var flowOk = action.Type switch
+        var flowOk = action.Kind switch
         {
-            ActionType.SetApplicationOutput or ActionType.SetDefaultOutput => endpoint.Flow == EndpointFlow.Render,
-            ActionType.SetApplicationInput or ActionType.SetDefaultInput => endpoint.Flow == EndpointFlow.Capture,
-            ActionType.SetDeviceVolume or ActionType.MuteDevice or ActionType.UnmuteDevice => true,
+            ActionKind.ApplicationDevice or ActionKind.DefaultDevice => endpoint.Flow == action.Flow,
+            // Volume / mute / rename target a device by name regardless of flow.
+            ActionKind.DeviceVolume or ActionKind.DeviceMute or ActionKind.RenameDevice => true,
             // Wave Link mixes route render outputs, so the named device is a render endpoint.
-            ActionType.AddWaveLinkMixOutput or ActionType.RemoveWaveLinkMixOutput or ActionType.SetWaveLinkMixOutput
-                => endpoint.Flow == EndpointFlow.Render,
+            ActionKind.WaveLinkMix => endpoint.Flow == EndpointFlow.Render,
             _ => false,
         };
         if (!flowOk) return false;
@@ -146,7 +151,7 @@ internal static class DeviceRulesSummary
         {
             if (!action.IsValid) continue;
 
-            if (action.Type is ActionType.SetApplicationOutput or ActionType.SetApplicationInput &&
+            if (action.IsApplicationAction &&
                 !string.IsNullOrWhiteSpace(action.AppPattern))
             {
                 foreach (var session in sessions)

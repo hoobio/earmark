@@ -14,10 +14,10 @@ namespace Earmark.App.ViewModels;
 
 public partial class RuleRow : ObservableObject, IDisposable
 {
-    // Explicit-save model: edits are buffered in the row and don't persist or apply until the
+    // Explicit-save model: field edits are buffered in the row and don't persist or apply until the
     // user clicks Save. This prevents a half-typed pattern (e.g. a lone ".") from matching every
-    // device/app the instant a debounce fired. The Enabled toggle is the one exception - it's a
-    // discrete, safe action that commits immediately (see OnEnabledChanged).
+    // device/app the instant a debounce fired. Two exceptions commit immediately: the Enabled toggle
+    // (see OnEnabledChanged) and a drag move (see PersistNowAsync) - both discrete, deliberate acts.
     private static readonly JsonSerializerOptions RuleJson = new();
 
     private readonly Func<RoutingRule, Task> _persistAsync;
@@ -146,11 +146,8 @@ public partial class RuleRow : ObservableObject, IDisposable
         _savedJson = Serialize(rule);
         IsDirty = false;
 
-        OnPropertyChanged(nameof(DisplayName));
-        OnPropertyChanged(nameof(HasConditions));
-        OnPropertyChanged(nameof(HasActions));
-        OnPropertyChanged(nameof(HasElseActions));
-        OnPropertyChanged(nameof(ShowElse));
+        NotifyConditionsChanged();
+        NotifyActionsChanged();
     }
 
     private static string Serialize(RoutingRule rule) => JsonSerializer.Serialize(rule, RuleJson);
@@ -273,8 +270,7 @@ public partial class RuleRow : ObservableObject, IDisposable
     {
         var row = new ConditionRow(new RuleCondition(), NotifyChildChanged);
         Conditions.Add(row);
-        OnPropertyChanged(nameof(HasConditions));
-        OnPropertyChanged(nameof(ShowElse));
+        NotifyConditionsChanged();
         RecomputeDirty();
     }
 
@@ -284,8 +280,18 @@ public partial class RuleRow : ObservableObject, IDisposable
         if (row is null) return;
         Conditions.Remove(row);
         row.Dispose();
-        OnPropertyChanged(nameof(HasConditions));
-        OnPropertyChanged(nameof(ShowElse));
+        NotifyConditionsChanged();
+        RecomputeDirty();
+    }
+
+    [RelayCommand]
+    private void DuplicateCondition(ConditionRow? row)
+    {
+        if (row is null) return;
+        var index = Conditions.IndexOf(row);
+        if (index < 0) return;
+        Conditions.Insert(index + 1, new ConditionRow(row.ToCondition(), NotifyChildChanged));
+        NotifyConditionsChanged();
         RecomputeDirty();
     }
 
@@ -294,8 +300,7 @@ public partial class RuleRow : ObservableObject, IDisposable
     {
         var row = new ActionRow(new RuleAction(), NotifyChildChanged);
         Actions.Add(row);
-        OnPropertyChanged(nameof(HasActions));
-        OnPropertyChanged(nameof(DisplayName));
+        NotifyActionsChanged();
         RecomputeDirty();
     }
 
@@ -305,8 +310,7 @@ public partial class RuleRow : ObservableObject, IDisposable
         if (row is null) return;
         Actions.Remove(row);
         row.Dispose();
-        OnPropertyChanged(nameof(HasActions));
-        OnPropertyChanged(nameof(DisplayName));
+        NotifyActionsChanged();
         RecomputeDirty();
     }
 
@@ -315,7 +319,7 @@ public partial class RuleRow : ObservableObject, IDisposable
     {
         var row = new ActionRow(new RuleAction(), NotifyChildChanged);
         ElseActions.Add(row);
-        OnPropertyChanged(nameof(HasElseActions));
+        NotifyActionsChanged();
         RecomputeDirty();
     }
 
@@ -325,7 +329,21 @@ public partial class RuleRow : ObservableObject, IDisposable
         if (row is null) return;
         ElseActions.Remove(row);
         row.Dispose();
-        OnPropertyChanged(nameof(HasElseActions));
+        NotifyActionsChanged();
+        RecomputeDirty();
+    }
+
+    /// <summary>Duplicate an action into whichever branch (main / otherwise) it currently lives in,
+    /// directly below the original.</summary>
+    [RelayCommand]
+    private void DuplicateAction(ActionRow? row)
+    {
+        if (row is null) return;
+        var list = ElseActions.Contains(row) ? ElseActions : Actions;
+        var index = list.IndexOf(row);
+        if (index < 0) return;
+        list.Insert(index + 1, new ActionRow(row.ToAction(), NotifyChildChanged));
+        NotifyActionsChanged();
         RecomputeDirty();
     }
 
@@ -357,6 +375,119 @@ public partial class RuleRow : ObservableObject, IDisposable
     {
         if (!IsDirty || _disposed) return;
         SyncFromRule(_savedRule);
+    }
+
+    // ---- Drag-and-drop primitives (commit-immediately) ----
+    //
+    // A drag move persists at once - like reordering the rule list - so it does NOT wait for Save.
+    // A cross-rule move persists BOTH affected rows. Same-rule moves relocate the existing row
+    // object (its NotifyChildChanged still points at this rule); cross-rule moves rebuild the row
+    // wired to the TARGET rule, so a later edit marks the right rule dirty.
+
+    /// <summary>Persist this row's current (live) state immediately and reset the dirty baseline.</summary>
+    public async Task PersistNowAsync()
+    {
+        if (_disposed) return;
+        var rule = ToRule();
+        await _persistAsync(rule);
+        _savedRule = rule;
+        _savedJson = Serialize(rule);
+        IsDirty = false;
+    }
+
+    /// <summary>Accept a condition dropped at <paramref name="index"/> (0..Count insertion point),
+    /// either reordered within this rule or moved in from <paramref name="source"/>.</summary>
+    public async Task AcceptConditionAsync(ConditionRow row, RuleRow source, int index)
+    {
+        if (ReferenceEquals(source, this))
+        {
+            var from = Conditions.IndexOf(row);
+            if (from < 0) return;
+            var to = Math.Clamp(from < index ? index - 1 : index, 0, Conditions.Count - 1);
+            if (to != from)
+            {
+                Conditions.Move(from, to);
+            }
+        }
+        else
+        {
+            var model = row.ToCondition();
+            source.RemoveConditionForMove(row);
+            Conditions.Insert(Math.Clamp(index, 0, Conditions.Count), new ConditionRow(model, NotifyChildChanged));
+        }
+
+        NotifyConditionsChanged();
+        await PersistNowAsync();
+        if (!ReferenceEquals(source, this)) await source.PersistNowAsync();
+    }
+
+    /// <summary>Accept an action dropped at <paramref name="index"/> into this rule's main or
+    /// otherwise list, reordering within a branch, moving between branches, or moving in from
+    /// <paramref name="source"/>.</summary>
+    public async Task AcceptActionAsync(ActionRow row, RuleRow source, bool sourceElse, bool targetElse, int index)
+    {
+        var target = targetElse ? ElseActions : Actions;
+
+        if (ReferenceEquals(source, this) && sourceElse == targetElse)
+        {
+            var from = target.IndexOf(row);
+            if (from < 0) return;
+            var to = Math.Clamp(from < index ? index - 1 : index, 0, target.Count - 1);
+            if (to != from)
+            {
+                target.Move(from, to);
+            }
+        }
+        else if (ReferenceEquals(source, this))
+        {
+            // Same rule, crossing branches: the row object's parent is still correct, so relocate it.
+            var src = sourceElse ? ElseActions : Actions;
+            src.Remove(row);
+            target.Insert(Math.Clamp(index, 0, target.Count), row);
+        }
+        else
+        {
+            var model = row.ToAction();
+            source.RemoveActionForMove(row, sourceElse);
+            target.Insert(Math.Clamp(index, 0, target.Count), new ActionRow(model, NotifyChildChanged));
+        }
+
+        NotifyActionsChanged();
+        await PersistNowAsync();
+        if (!ReferenceEquals(source, this)) await source.PersistNowAsync();
+    }
+
+    internal void RemoveConditionForMove(ConditionRow row)
+    {
+        if (Conditions.Remove(row))
+        {
+            row.Dispose();
+            NotifyConditionsChanged();
+        }
+    }
+
+    internal void RemoveActionForMove(ActionRow row, bool fromElse)
+    {
+        var list = fromElse ? ElseActions : Actions;
+        if (list.Remove(row))
+        {
+            row.Dispose();
+            NotifyActionsChanged();
+        }
+    }
+
+    private void NotifyConditionsChanged()
+    {
+        OnPropertyChanged(nameof(HasConditions));
+        OnPropertyChanged(nameof(ShowElse));
+        OnPropertyChanged(nameof(DisplayName));
+    }
+
+    private void NotifyActionsChanged()
+    {
+        OnPropertyChanged(nameof(HasActions));
+        OnPropertyChanged(nameof(HasElseActions));
+        OnPropertyChanged(nameof(DisplayName));
     }
 
     public void Dispose()
@@ -473,12 +604,17 @@ internal interface ISyncable<in TModel>
     void SyncFromModel(TModel model);
 }
 
-public sealed record ActionTypeOption(ActionType Value, string Label)
+public sealed record ActionKindOption(ActionKind Value, string Label)
 {
     public override string ToString() => Label;
 }
 
-public sealed record ConditionTypeOption(ConditionType Value, string Label)
+public sealed record MixMembershipOption(MixMembership Value, string Label)
+{
+    public override string ToString() => Label;
+}
+
+public sealed record ConditionKindOption(ConditionKind Value, string Label)
 {
     public override string ToString() => Label;
 }
@@ -500,30 +636,48 @@ public partial class ActionRow : ObservableObject, IDisposable, ISyncable<RuleAc
         SyncFromModel(action);
     }
 
-    public static IReadOnlyList<ActionTypeOption> TypeOptions { get; } = new[]
+    public static IReadOnlyList<ActionKindOption> KindOptions { get; } = new[]
     {
-        new ActionTypeOption(ActionType.SetApplicationOutput, "Set output device for app"),
-        new ActionTypeOption(ActionType.SetApplicationInput, "Set input device for app"),
-        new ActionTypeOption(ActionType.SetDefaultOutput, "Set system default output"),
-        new ActionTypeOption(ActionType.SetDefaultInput, "Set system default input"),
-        new ActionTypeOption(ActionType.AddWaveLinkMixOutput, "Add device to Wave Link mix"),
-        new ActionTypeOption(ActionType.RemoveWaveLinkMixOutput, "Remove device from Wave Link mix"),
-        new ActionTypeOption(ActionType.SetWaveLinkMixOutput, "Set Wave Link mix outputs (exact)"),
-        new ActionTypeOption(ActionType.SetDeviceVolume, "Pin device volume"),
-        new ActionTypeOption(ActionType.MuteDevice, "Mute device"),
-        new ActionTypeOption(ActionType.UnmuteDevice, "Unmute device"),
+        new ActionKindOption(ActionKind.ApplicationDevice, "Set device for app"),
+        new ActionKindOption(ActionKind.DefaultDevice, "Set system default device"),
+        new ActionKindOption(ActionKind.WaveLinkMix, "Wave Link mix"),
+        new ActionKindOption(ActionKind.DeviceVolume, "Pin device volume"),
+        new ActionKindOption(ActionKind.DeviceMute, "Mute device"),
         // RenameDevice is parked: it needs an elevated HKLM write (IPropertyStore is blocked even
         // when elevated) and can't ship to the Store, so it's hidden from the picker. The enum,
         // NewName field, and dormant ActionRow/XAML bits stay so existing rules still load and
         // reviving it later (with a registry writer) is a one-line re-add here.
     };
 
+    public static IReadOnlyList<MixMembershipOption> MembershipOptions { get; } = new[]
+    {
+        new MixMembershipOption(MixMembership.Include, "Add to / keep in mix"),
+        new MixMembershipOption(MixMembership.Exclude, "Remove from / keep out of mix"),
+        new MixMembershipOption(MixMembership.Exclusive, "Set as mix's only outputs"),
+    };
+
 #pragma warning disable CA1822
-    public IReadOnlyList<ActionTypeOption> AvailableTypeOptions => TypeOptions;
+    public IReadOnlyList<ActionKindOption> AvailableKindOptions => KindOptions;
+    public IReadOnlyList<MixMembershipOption> AvailableMembershipOptions => MembershipOptions;
 #pragma warning restore CA1822
 
     [ObservableProperty]
-    public partial ActionType Type { get; set; }
+    public partial ActionKind Kind { get; set; }
+
+    /// <summary>Output (Render) vs Input (Capture) for app / default-device actions.</summary>
+    [ObservableProperty]
+    public partial EndpointFlow Flow { get; set; } = EndpointFlow.Render;
+
+    [ObservableProperty]
+    public partial MixMembership Membership { get; set; } = MixMembership.Include;
+
+    /// <summary>DeviceMute target: true = mute, false = unmute.</summary>
+    [ObservableProperty]
+    public partial bool Muted { get; set; } = true;
+
+    /// <summary>Pinned (reconciled) vs one-shot (fired once on the condition edge).</summary>
+    [ObservableProperty]
+    public partial bool Pinned { get; set; } = true;
 
     [ObservableProperty]
     public partial string AppPattern { get; set; } = string.Empty;
@@ -573,51 +727,83 @@ public partial class ActionRow : ObservableObject, IDisposable, ISyncable<RuleAc
     public IReadOnlyList<string> DeviceCandidates { get; private set; } = Array.Empty<string>();
     public IReadOnlyList<string> MixCandidates { get; private set; } = Array.Empty<string>();
 
-    public bool RequiresAppPattern => Type is ActionType.SetApplicationOutput or ActionType.SetApplicationInput;
-    public bool IsDefaultAction => Type is ActionType.SetDefaultOutput or ActionType.SetDefaultInput;
-    public bool IsWaveLinkAction => Type is
-        ActionType.AddWaveLinkMixOutput or
-        ActionType.RemoveWaveLinkMixOutput or
-        ActionType.SetWaveLinkMixOutput;
-    public bool RequiresVolumeSlider => Type is ActionType.SetDeviceVolume;
-    public bool RequiresNewName => Type is ActionType.RenameDevice;
+    public bool RequiresAppPattern => Kind == ActionKind.ApplicationDevice;
+    public bool IsDefaultAction => Kind == ActionKind.DefaultDevice;
+    public bool IsWaveLinkAction => Kind == ActionKind.WaveLinkMix;
+    public bool RequiresVolumeSlider => Kind == ActionKind.DeviceVolume;
+    public bool RequiresNewName => Kind == ActionKind.RenameDevice;
+    public bool RequiresDevicePattern => Kind is not ActionKind.RenameDevice; // every live kind needs one
+
+    /// <summary>The Output/Input direction toggle applies to app + default-device actions.</summary>
+    public bool ShowDirection => Kind is ActionKind.ApplicationDevice or ActionKind.DefaultDevice;
+    public bool ShowMuteToggle => Kind == ActionKind.DeviceMute;
+    public bool ShowMembership => Kind == ActionKind.WaveLinkMix;
+
+    /// <summary>Two-way bridge for the Output/Input ToggleSwitch (on = Input/Capture).</summary>
+    public bool IsInput
+    {
+        get => Flow == EndpointFlow.Capture;
+        set
+        {
+            var target = value ? EndpointFlow.Capture : EndpointFlow.Render;
+            if (Flow != target) Flow = target;
+        }
+    }
+
     public bool HasAppMatches => AppMatchCount > 0;
     public bool HasDeviceMatch => !string.IsNullOrEmpty(DeviceMatchSummary);
     public bool HasMixMatch => !string.IsNullOrEmpty(MixMatchSummary);
     public bool HasDiagnostic => !string.IsNullOrEmpty(Diagnostic);
     public string AppMatchSummary => AppMatchCount == 1 ? "1 matching app" : $"{AppMatchCount} matching apps";
 
-    public string TypeLabel => Type switch
+    public string TypeLabel => Kind switch
     {
-        ActionType.SetApplicationOutput => "App output",
-        ActionType.SetApplicationInput => "App input",
-        ActionType.SetDefaultOutput => "Default output",
-        ActionType.SetDefaultInput => "Default input",
-        ActionType.AddWaveLinkMixOutput => "Add to mix",
-        ActionType.RemoveWaveLinkMixOutput => "Remove from mix",
-        ActionType.SetWaveLinkMixOutput => "Set mix outputs",
-        ActionType.SetDeviceVolume => "Pin volume",
-        ActionType.MuteDevice => "Mute",
-        ActionType.UnmuteDevice => "Unmute",
-        ActionType.RenameDevice => "Rename",
-        _ => Type.ToString(),
+        ActionKind.ApplicationDevice => Flow == EndpointFlow.Capture ? "App input" : "App output",
+        ActionKind.DefaultDevice => Flow == EndpointFlow.Capture ? "Default input" : "Default output",
+        ActionKind.WaveLinkMix => Membership switch
+        {
+            MixMembership.Include => "Add to mix",
+            MixMembership.Exclude => "Remove from mix",
+            MixMembership.Exclusive => "Set mix outputs",
+            _ => "Wave Link mix",
+        },
+        ActionKind.DeviceVolume => "Pin volume",
+        ActionKind.DeviceMute => Muted ? "Mute" : "Unmute",
+        ActionKind.RenameDevice => "Rename",
+        _ => Kind.ToString(),
     };
 
-    public ActionTypeOption SelectedTypeOption
+    public ActionKindOption SelectedKindOption
     {
-        get => TypeOptions.FirstOrDefault(o => o.Value == Type) ?? TypeOptions[0];
+        get => KindOptions.FirstOrDefault(o => o.Value == Kind) ?? KindOptions[0];
         set
         {
-            if (value is not null && Type != value.Value)
+            if (value is not null && Kind != value.Value)
             {
-                Type = value.Value;
+                Kind = value.Value;
+            }
+        }
+    }
+
+    public MixMembershipOption SelectedMembershipOption
+    {
+        get => MembershipOptions.FirstOrDefault(o => o.Value == Membership) ?? MembershipOptions[0];
+        set
+        {
+            if (value is not null && Membership != value.Value)
+            {
+                Membership = value.Value;
             }
         }
     }
 
     public RuleAction ToAction() => new()
     {
-        Type = Type,
+        Kind = Kind,
+        Flow = Flow,
+        Membership = Membership,
+        Muted = Muted,
+        Pinned = Pinned,
         AppPattern = AppPattern,
         DevicePattern = DevicePattern,
         MixPattern = MixPattern,
@@ -633,7 +819,11 @@ public partial class ActionRow : ObservableObject, IDisposable, ISyncable<RuleAc
         _suppress = true;
         try
         {
-            Type = action.Type;
+            Kind = action.Kind;
+            Flow = action.Flow;
+            Membership = action.Membership;
+            Muted = action.Muted;
+            Pinned = action.Pinned;
             AppPattern = action.AppPattern;
             DevicePattern = action.DevicePattern;
             MixPattern = action.MixPattern;
@@ -689,12 +879,12 @@ public partial class ActionRow : ObservableObject, IDisposable, ISyncable<RuleAc
         }
         else
         {
-            DeviceMatchSummary = ResolveDeviceNameAnyFlow(DevicePattern, EffectiveDeviceFlow(Type), endpoints);
+            DeviceMatchSummary = ResolveDeviceNameAnyFlow(DevicePattern, EffectiveDeviceFlow(), endpoints);
             MixMatchSummary = string.Empty;
             Diagnostic = ComputeNonWaveLinkDiagnostic();
 
             DeviceCandidates = endpoints
-                .Where(e => e.State == EndpointState.Active && DeviceMatchesType(e.Flow, Type))
+                .Where(e => e.State == EndpointState.Active && DeviceMatchesKind(e.Flow))
                 .Select(e => e.FriendlyName)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
@@ -724,17 +914,16 @@ public partial class ActionRow : ObservableObject, IDisposable, ISyncable<RuleAc
         return string.Empty;
     }
 
-    private static EndpointFlow? EffectiveDeviceFlow(ActionType type) => type switch
+    private EndpointFlow? EffectiveDeviceFlow() => Kind switch
     {
-        ActionType.SetApplicationOutput or ActionType.SetDefaultOutput => EndpointFlow.Render,
-        ActionType.SetApplicationInput or ActionType.SetDefaultInput => EndpointFlow.Capture,
-        ActionType.SetDeviceVolume or ActionType.MuteDevice or ActionType.UnmuteDevice or ActionType.RenameDevice => null,
+        ActionKind.ApplicationDevice or ActionKind.DefaultDevice => Flow,
+        ActionKind.DeviceVolume or ActionKind.DeviceMute or ActionKind.RenameDevice => null,
         _ => EndpointFlow.Render,
     };
 
-    private static bool DeviceMatchesType(EndpointFlow flow, ActionType type)
+    private bool DeviceMatchesKind(EndpointFlow flow)
     {
-        var required = EffectiveDeviceFlow(type);
+        var required = EffectiveDeviceFlow();
         return required is null || required == flow;
     }
 
@@ -885,7 +1074,7 @@ public partial class ActionRow : ObservableObject, IDisposable, ISyncable<RuleAc
 
     public void Dispose() => _disposed = true;
 
-    partial void OnTypeChanged(ActionType value)
+    partial void OnKindChanged(ActionKind value)
     {
         OnPropertyChanged(nameof(TypeLabel));
         OnPropertyChanged(nameof(RequiresAppPattern));
@@ -893,10 +1082,35 @@ public partial class ActionRow : ObservableObject, IDisposable, ISyncable<RuleAc
         OnPropertyChanged(nameof(IsWaveLinkAction));
         OnPropertyChanged(nameof(RequiresVolumeSlider));
         OnPropertyChanged(nameof(RequiresNewName));
-        OnPropertyChanged(nameof(SelectedTypeOption));
+        OnPropertyChanged(nameof(RequiresDevicePattern));
+        OnPropertyChanged(nameof(ShowDirection));
+        OnPropertyChanged(nameof(ShowMuteToggle));
+        OnPropertyChanged(nameof(ShowMembership));
+        OnPropertyChanged(nameof(SelectedKindOption));
         Notify();
     }
 
+    partial void OnFlowChanged(EndpointFlow value)
+    {
+        OnPropertyChanged(nameof(IsInput));
+        OnPropertyChanged(nameof(TypeLabel));
+        Notify();
+    }
+
+    partial void OnMembershipChanged(MixMembership value)
+    {
+        OnPropertyChanged(nameof(SelectedMembershipOption));
+        OnPropertyChanged(nameof(TypeLabel));
+        Notify();
+    }
+
+    partial void OnMutedChanged(bool value)
+    {
+        OnPropertyChanged(nameof(TypeLabel));
+        Notify();
+    }
+
+    partial void OnPinnedChanged(bool value) => Notify();
     partial void OnAppPatternChanged(string value) => Notify();
     partial void OnDevicePatternChanged(string value) => Notify();
     partial void OnMixPatternChanged(string value) => Notify();
@@ -935,12 +1149,11 @@ public partial class ConditionRow : ObservableObject, IDisposable, ISyncable<Rul
         SyncFromModel(condition);
     }
 
-    public static IReadOnlyList<ConditionTypeOption> TypeOptions { get; } = new[]
+    public static IReadOnlyList<ConditionKindOption> KindOptions { get; } = new[]
     {
-        new ConditionTypeOption(ConditionType.DevicePresent, "Device present"),
-        new ConditionTypeOption(ConditionType.DeviceMissing, "Device missing"),
-        new ConditionTypeOption(ConditionType.ApplicationRunning, "Application running"),
-        new ConditionTypeOption(ConditionType.ApplicationNotRunning, "Application not running"),
+        new ConditionKindOption(ConditionKind.Device, "Device"),
+        new ConditionKindOption(ConditionKind.DefaultDevice, "Default device"),
+        new ConditionKindOption(ConditionKind.Application, "Application"),
     };
 
     public static IReadOnlyList<ConditionFlowOption> FlowOptions { get; } = new[]
@@ -951,12 +1164,16 @@ public partial class ConditionRow : ObservableObject, IDisposable, ISyncable<Rul
     };
 
 #pragma warning disable CA1822
-    public IReadOnlyList<ConditionTypeOption> AvailableTypeOptions => TypeOptions;
+    public IReadOnlyList<ConditionKindOption> AvailableKindOptions => KindOptions;
     public IReadOnlyList<ConditionFlowOption> AvailableFlowOptions => FlowOptions;
 #pragma warning restore CA1822
 
     [ObservableProperty]
-    public partial ConditionType Type { get; set; }
+    public partial ConditionKind Kind { get; set; }
+
+    /// <summary>Inverts the test (missing / not-running / not-default).</summary>
+    [ObservableProperty]
+    public partial bool Negate { get; set; }
 
     [ObservableProperty]
     public partial ConditionFlow Flow { get; set; }
@@ -970,26 +1187,53 @@ public partial class ConditionRow : ObservableObject, IDisposable, ISyncable<Rul
     [ObservableProperty]
     public partial bool IsSatisfied { get; set; }
 
-    public bool IsApplicationCondition => Type is ConditionType.ApplicationRunning or ConditionType.ApplicationNotRunning;
+    public bool IsApplicationCondition => Kind == ConditionKind.Application;
+    /// <summary>Device + DefaultDevice both take a device pattern and a flow.</summary>
     public bool IsDeviceCondition => !IsApplicationCondition;
 
-    public string TypeLabel => Type switch
+    /// <summary>Two-way bridge for the polarity ToggleSwitch (on = the positive form).</summary>
+    public bool IsPositive
     {
-        ConditionType.DevicePresent => "Device present",
-        ConditionType.DeviceMissing => "Device missing",
-        ConditionType.ApplicationRunning => "Application running",
-        ConditionType.ApplicationNotRunning => "Application not running",
-        _ => Type.ToString(),
-    };
-
-    public ConditionTypeOption SelectedTypeOption
-    {
-        get => TypeOptions.FirstOrDefault(o => o.Value == Type) ?? TypeOptions[0];
+        get => !Negate;
         set
         {
-            if (value is not null && Type != value.Value)
+            var neg = !value;
+            if (Negate != neg) Negate = neg;
+        }
+    }
+
+    /// <summary>ToggleSwitch "on" label for the current kind (the positive form).</summary>
+    public string PositiveLabel => Kind switch
+    {
+        ConditionKind.Application => "Running",
+        ConditionKind.DefaultDevice => "Is default",
+        _ => "Present",
+    };
+
+    /// <summary>ToggleSwitch "off" label for the current kind (the negated form).</summary>
+    public string NegativeLabel => Kind switch
+    {
+        ConditionKind.Application => "Not running",
+        ConditionKind.DefaultDevice => "Not default",
+        _ => "Missing",
+    };
+
+    public string TypeLabel => Kind switch
+    {
+        ConditionKind.Device => Negate ? "Device missing" : "Device present",
+        ConditionKind.DefaultDevice => Negate ? "Not default device" : "Default device",
+        ConditionKind.Application => Negate ? "Application not running" : "Application running",
+        _ => Kind.ToString(),
+    };
+
+    public ConditionKindOption SelectedKindOption
+    {
+        get => KindOptions.FirstOrDefault(o => o.Value == Kind) ?? KindOptions[0];
+        set
+        {
+            if (value is not null && Kind != value.Value)
             {
-                Type = value.Value;
+                Kind = value.Value;
             }
         }
     }
@@ -1008,7 +1252,8 @@ public partial class ConditionRow : ObservableObject, IDisposable, ISyncable<Rul
 
     public RuleCondition ToCondition() => new()
     {
-        Type = Type,
+        Kind = Kind,
+        Negate = Negate,
         Flow = Flow,
         DevicePattern = DevicePattern,
         AppPattern = AppPattern,
@@ -1020,7 +1265,8 @@ public partial class ConditionRow : ObservableObject, IDisposable, ISyncable<Rul
         _suppress = true;
         try
         {
-            Type = condition.Type;
+            Kind = condition.Kind;
+            Negate = condition.Negate;
             Flow = condition.Flow;
             DevicePattern = condition.DevicePattern;
             AppPattern = condition.AppPattern;
@@ -1033,48 +1279,52 @@ public partial class ConditionRow : ObservableObject, IDisposable, ISyncable<Rul
 
     public void Recompute(IReadOnlyList<AudioEndpoint> endpoints, IReadOnlyList<AudioSession> sessions)
     {
+        bool positive;
         if (IsApplicationCondition)
         {
-            if (string.IsNullOrWhiteSpace(AppPattern))
-            {
-                IsSatisfied = Type == ConditionType.ApplicationNotRunning;
-                return;
-            }
-
-            var anyRunning = sessions.Any(s =>
+            positive = !string.IsNullOrWhiteSpace(AppPattern) && sessions.Any(s =>
                 RuleRow.MatchOrExact(AppPattern, s.ProcessName) ||
                 RuleRow.MatchOrExact(AppPattern, s.ExecutablePath));
-
-            IsSatisfied = Type == ConditionType.ApplicationRunning ? anyRunning : !anyRunning;
-            return;
         }
-
-        if (string.IsNullOrWhiteSpace(DevicePattern) || !RuleRow.TryCompile(DevicePattern, out var regex) || regex is null)
+        else if (string.IsNullOrWhiteSpace(DevicePattern) || !RuleRow.TryCompile(DevicePattern, out var regex) || regex is null)
         {
-            IsSatisfied = Type == ConditionType.DeviceMissing;
-            return;
+            positive = false;
+        }
+        else
+        {
+            var requireDefault = Kind == ConditionKind.DefaultDevice;
+            positive = endpoints.Any(e =>
+                e.State == EndpointState.Active &&
+                (Flow == ConditionFlow.Any
+                    || (Flow == ConditionFlow.Render && e.Flow == EndpointFlow.Render)
+                    || (Flow == ConditionFlow.Capture && e.Flow == EndpointFlow.Capture)) &&
+                (!requireDefault || e.IsDefault || e.IsDefaultCommunications) &&
+                (RuleRow.MatchSafe(regex, e.FriendlyName) || RuleRow.MatchSafe(regex, e.DisplayName)));
         }
 
-        var anyMatch = endpoints.Any(e =>
-            e.State == EndpointState.Active &&
-            (Flow == ConditionFlow.Any
-                || (Flow == ConditionFlow.Render && e.Flow == EndpointFlow.Render)
-                || (Flow == ConditionFlow.Capture && e.Flow == EndpointFlow.Capture)) &&
-            (RuleRow.MatchSafe(regex, e.FriendlyName) || RuleRow.MatchSafe(regex, e.DisplayName)));
-
-        IsSatisfied = Type == ConditionType.DevicePresent ? anyMatch : !anyMatch;
+        IsSatisfied = Negate ? !positive : positive;
     }
 
     public void Dispose() => _disposed = true;
 
-    partial void OnTypeChanged(ConditionType value)
+    partial void OnKindChanged(ConditionKind value)
     {
         OnPropertyChanged(nameof(TypeLabel));
-        OnPropertyChanged(nameof(SelectedTypeOption));
+        OnPropertyChanged(nameof(PositiveLabel));
+        OnPropertyChanged(nameof(NegativeLabel));
+        OnPropertyChanged(nameof(SelectedKindOption));
         OnPropertyChanged(nameof(IsApplicationCondition));
         OnPropertyChanged(nameof(IsDeviceCondition));
         Notify();
     }
+
+    partial void OnNegateChanged(bool value)
+    {
+        OnPropertyChanged(nameof(IsPositive));
+        OnPropertyChanged(nameof(TypeLabel));
+        Notify();
+    }
+
     partial void OnFlowChanged(ConditionFlow value)
     {
         OnPropertyChanged(nameof(SelectedFlowOption));

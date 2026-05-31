@@ -9,6 +9,9 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 
+using Windows.ApplicationModel.DataTransfer;
+using Windows.Foundation;
+
 namespace Earmark.App.Views;
 
 public sealed partial class RulesPage : Page
@@ -101,25 +104,36 @@ public sealed partial class RulesPage : Page
         }
     }
 
-    private void OnActionTypeChanged(object sender, SelectionChangedEventArgs e)
+    private void OnActionKindChanged(object sender, SelectionChangedEventArgs e)
     {
         if (sender is ComboBox combo &&
             combo.DataContext is ActionRow action &&
-            combo.SelectedItem is ActionTypeOption option &&
-            action.Type != option.Value)
+            combo.SelectedItem is ActionKindOption option &&
+            action.Kind != option.Value)
         {
-            action.Type = option.Value;
+            action.Kind = option.Value;
         }
     }
 
-    private void OnConditionTypeChanged(object sender, SelectionChangedEventArgs e)
+    private void OnActionMembershipChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (sender is ComboBox combo &&
+            combo.DataContext is ActionRow action &&
+            combo.SelectedItem is MixMembershipOption option &&
+            action.Membership != option.Value)
+        {
+            action.Membership = option.Value;
+        }
+    }
+
+    private void OnConditionKindChanged(object sender, SelectionChangedEventArgs e)
     {
         if (sender is ComboBox combo &&
             combo.DataContext is ConditionRow condition &&
-            combo.SelectedItem is ConditionTypeOption option &&
-            condition.Type != option.Value)
+            combo.SelectedItem is ConditionKindOption option &&
+            condition.Kind != option.Value)
         {
-            condition.Type = option.Value;
+            condition.Kind = option.Value;
         }
     }
 
@@ -152,6 +166,15 @@ public sealed partial class RulesPage : Page
         }
     }
 
+    private void OnDuplicateActionClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: ActionRow row } fe &&
+            FindAncestorRuleRow(fe) is RuleRow rule)
+        {
+            rule.DuplicateActionCommand.Execute(row);
+        }
+    }
+
     private void OnRemoveConditionClicked(object sender, RoutedEventArgs e)
     {
         if (sender is FrameworkElement fe && fe.Tag is ConditionRow row &&
@@ -159,6 +182,147 @@ public sealed partial class RulesPage : Page
         {
             rule.RemoveConditionCommand.Execute(row);
         }
+    }
+
+    private void OnDuplicateConditionClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: ConditionRow row } fe &&
+            FindAncestorRuleRow(fe) is RuleRow rule)
+        {
+            rule.DuplicateConditionCommand.Execute(row);
+        }
+    }
+
+    // ---- Drag-and-drop of conditions / actions ----
+    //
+    // Each inner list is its own drag source AND drop target. A condition may only land on a
+    // condition list, an action only on an action list (Actions or Otherwise) - the DragOver
+    // handler rejects a mismatch with a no-drop cursor. Moves persist immediately (RuleRow.Accept*),
+    // cross-rule moves rebuild the row wired to the target rule. The dragged object travels in this
+    // page field (an in-process drag); the DataPackage text only carries a kind tag so cross-list
+    // drops are accepted.
+
+    private enum ItemDragKind { Condition, Action }
+
+    private sealed record ItemDragContext(RuleRow SourceRule, object Row, ItemDragKind Kind, bool FromElse);
+
+    private ItemDragContext? _itemDrag;
+
+    private void OnConditionDragStarting(object sender, DragItemsStartingEventArgs e)
+    {
+        if (sender is not ListView list ||
+            e.Items.Count == 0 || e.Items[0] is not ConditionRow row ||
+            FindAncestorRuleRow(list) is not RuleRow rule)
+        {
+            e.Cancel = true;
+            return;
+        }
+
+        _itemDrag = new ItemDragContext(rule, row, ItemDragKind.Condition, FromElse: false);
+        e.Data.RequestedOperation = DataPackageOperation.Move;
+        e.Data.SetText("earmark:condition");
+    }
+
+    private void OnConditionDragOver(object sender, DragEventArgs e)
+    {
+        // Type enforcement: only a condition may land here.
+        e.AcceptedOperation = _itemDrag?.Kind == ItemDragKind.Condition
+            ? DataPackageOperation.Move
+            : DataPackageOperation.None;
+        e.Handled = true;
+    }
+
+    private async void OnConditionDrop(object sender, DragEventArgs e)
+    {
+        if (_itemDrag is not { Kind: ItemDragKind.Condition } ctx ||
+            sender is not ListView list ||
+            FindAncestorRuleRow(list) is not RuleRow target)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        var index = GetDropIndex(list, e);
+        _itemDrag = null;
+        try
+        {
+            await target.AcceptConditionAsync((ConditionRow)ctx.Row, ctx.SourceRule, index);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Condition drop failed");
+        }
+    }
+
+    private void OnActionDragStarting(object sender, DragItemsStartingEventArgs e)
+    {
+        if (sender is not ListView list ||
+            e.Items.Count == 0 || e.Items[0] is not ActionRow row ||
+            FindAncestorRuleRow(list) is not RuleRow rule)
+        {
+            e.Cancel = true;
+            return;
+        }
+
+        var fromElse = (string?)list.Tag == "Else";
+        _itemDrag = new ItemDragContext(rule, row, ItemDragKind.Action, fromElse);
+        e.Data.RequestedOperation = DataPackageOperation.Move;
+        e.Data.SetText("earmark:action");
+    }
+
+    private void OnActionDragOver(object sender, DragEventArgs e)
+    {
+        // Type enforcement: only an action may land here (either Actions or Otherwise).
+        e.AcceptedOperation = _itemDrag?.Kind == ItemDragKind.Action
+            ? DataPackageOperation.Move
+            : DataPackageOperation.None;
+        e.Handled = true;
+    }
+
+    private async void OnActionDrop(object sender, DragEventArgs e)
+    {
+        if (_itemDrag is not { Kind: ItemDragKind.Action } ctx ||
+            sender is not ListView list ||
+            FindAncestorRuleRow(list) is not RuleRow target)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        var toElse = (string?)list.Tag == "Else";
+        var index = GetDropIndex(list, e);
+        _itemDrag = null;
+        try
+        {
+            await target.AcceptActionAsync((ActionRow)ctx.Row, ctx.SourceRule, ctx.FromElse, toElse, index);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Action drop failed");
+        }
+    }
+
+    /// <summary>The insertion index (0..Count) for a pointer drop, by walking the realised
+    /// containers and finding the first whose vertical midpoint sits below the pointer.</summary>
+    private static int GetDropIndex(ListView list, DragEventArgs e)
+    {
+        var y = e.GetPosition(list).Y;
+        var count = list.Items.Count;
+        for (var i = 0; i < count; i++)
+        {
+            if (list.ContainerFromIndex(i) is not ListViewItem container)
+            {
+                continue;
+            }
+
+            var bounds = container.TransformToVisual(list)
+                .TransformBounds(new Rect(0, 0, container.ActualWidth, container.ActualHeight));
+            if (bounds.Top + (bounds.Height / 2) > y)
+            {
+                return i;
+            }
+        }
+        return count;
     }
 
     private static RuleRow? FindAncestorRuleRow(DependencyObject? element)

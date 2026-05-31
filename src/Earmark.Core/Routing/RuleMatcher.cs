@@ -12,11 +12,13 @@ public enum DefaultRoleKind
 
 public sealed record AppRouteMatch(RoutingRule Rule, RuleAction Action, AudioEndpoint Endpoint);
 
+public sealed record DefaultDeviceMatch(RoutingRule Rule, RuleAction Action, AudioEndpoint Endpoint);
+
 public interface IRuleMatcher
 {
     AppRouteMatch? FindAppRoute(AudioSession session, EndpointFlow flow, IReadOnlyList<RoutingRule> rules, IReadOnlyList<AudioEndpoint> endpoints, IReadOnlyList<AudioSession> sessions);
 
-    AudioEndpoint? FindDefaultDevice(EndpointFlow flow, DefaultRoleKind roleKind, IReadOnlyList<RoutingRule> rules, IReadOnlyList<AudioEndpoint> endpoints, IReadOnlyList<AudioSession> sessions);
+    DefaultDeviceMatch? FindDefaultDevice(EndpointFlow flow, DefaultRoleKind roleKind, IReadOnlyList<RoutingRule> rules, IReadOnlyList<AudioEndpoint> endpoints, IReadOnlyList<AudioSession> sessions);
 
     bool ConditionsMet(RoutingRule rule, IReadOnlyList<AudioEndpoint> endpoints, IReadOnlyList<AudioSession> sessions);
 }
@@ -30,10 +32,6 @@ public sealed class RuleMatcher : IRuleMatcher
         ArgumentNullException.ThrowIfNull(endpoints);
         ArgumentNullException.ThrowIfNull(sessions);
 
-        var requiredType = flow == EndpointFlow.Render
-            ? ActionType.SetApplicationOutput
-            : ActionType.SetApplicationInput;
-
         foreach (var rule in rules)
         {
             if (!rule.Enabled)
@@ -44,7 +42,7 @@ public sealed class RuleMatcher : IRuleMatcher
             var met = ConditionsMet(rule, endpoints, sessions);
             foreach (var action in rule.ActiveActions(met))
             {
-                if (action.Type != requiredType || !action.IsValid)
+                if (action.Kind != ActionKind.ApplicationDevice || action.Flow != flow || !action.IsValid)
                 {
                     continue;
                 }
@@ -65,15 +63,11 @@ public sealed class RuleMatcher : IRuleMatcher
         return null;
     }
 
-    public AudioEndpoint? FindDefaultDevice(EndpointFlow flow, DefaultRoleKind roleKind, IReadOnlyList<RoutingRule> rules, IReadOnlyList<AudioEndpoint> endpoints, IReadOnlyList<AudioSession> sessions)
+    public DefaultDeviceMatch? FindDefaultDevice(EndpointFlow flow, DefaultRoleKind roleKind, IReadOnlyList<RoutingRule> rules, IReadOnlyList<AudioEndpoint> endpoints, IReadOnlyList<AudioSession> sessions)
     {
         ArgumentNullException.ThrowIfNull(rules);
         ArgumentNullException.ThrowIfNull(endpoints);
         ArgumentNullException.ThrowIfNull(sessions);
-
-        var requiredType = flow == EndpointFlow.Render
-            ? ActionType.SetDefaultOutput
-            : ActionType.SetDefaultInput;
 
         foreach (var rule in rules)
         {
@@ -85,7 +79,7 @@ public sealed class RuleMatcher : IRuleMatcher
             var met = ConditionsMet(rule, endpoints, sessions);
             foreach (var action in rule.ActiveActions(met))
             {
-                if (action.Type != requiredType || !action.IsValid)
+                if (action.Kind != ActionKind.DefaultDevice || action.Flow != flow || !action.IsValid)
                 {
                     continue;
                 }
@@ -101,7 +95,7 @@ public sealed class RuleMatcher : IRuleMatcher
                 var endpoint = MatchEndpoint(action.DevicePattern, flow, endpoints);
                 if (endpoint is not null)
                 {
-                    return endpoint;
+                    return new DefaultDeviceMatch(rule, action, endpoint);
                 }
             }
         }
@@ -128,25 +122,17 @@ public sealed class RuleMatcher : IRuleMatcher
                 return false;
             }
 
-            bool ok;
-            switch (condition.Type)
+            // Each condition computes its "positive" form, then Negate inverts it - so present/missing
+            // (or running/not-running) is one code path with a single flip at the end.
+            var positive = condition.Kind switch
             {
-                case ConditionType.DevicePresent:
-                    ok = AnyEndpointMatches(condition.DevicePattern, condition.Flow, endpoints);
-                    break;
-                case ConditionType.DeviceMissing:
-                    ok = !AnyEndpointMatches(condition.DevicePattern, condition.Flow, endpoints);
-                    break;
-                case ConditionType.ApplicationRunning:
-                    ok = AnySessionMatches(condition.AppPattern, sessions);
-                    break;
-                case ConditionType.ApplicationNotRunning:
-                    ok = !AnySessionMatches(condition.AppPattern, sessions);
-                    break;
-                default:
-                    ok = false;
-                    break;
-            }
+                ConditionKind.Device => AnyEndpointMatches(condition.DevicePattern, condition.Flow, endpoints),
+                ConditionKind.DefaultDevice => AnyDefaultMatches(condition.DevicePattern, condition.Flow, endpoints),
+                ConditionKind.Application => AnySessionMatches(condition.AppPattern, sessions),
+                _ => false,
+            };
+
+            var ok = condition.Negate ? !positive : positive;
             if (!ok)
             {
                 return false;
@@ -181,11 +167,7 @@ public sealed class RuleMatcher : IRuleMatcher
                 continue;
             }
 
-            if (flow == ConditionFlow.Render && endpoint.Flow != EndpointFlow.Render)
-            {
-                continue;
-            }
-            if (flow == ConditionFlow.Capture && endpoint.Flow != EndpointFlow.Capture)
+            if (!FlowMatches(flow, endpoint.Flow))
             {
                 continue;
             }
@@ -199,6 +181,46 @@ public sealed class RuleMatcher : IRuleMatcher
 
         return false;
     }
+
+    private static bool AnyDefaultMatches(string pattern, ConditionFlow flow, IReadOnlyList<AudioEndpoint> endpoints)
+    {
+        var regex = TryCompile(pattern);
+
+        foreach (var endpoint in endpoints)
+        {
+            if (endpoint.State != EndpointState.Active)
+            {
+                continue;
+            }
+
+            if (!FlowMatches(flow, endpoint.Flow))
+            {
+                continue;
+            }
+
+            // "Is the system default": the multimedia/console default or the communications default
+            // for its flow. Either role counts so a comms-only default still satisfies the condition.
+            if (!endpoint.IsDefault && !endpoint.IsDefaultCommunications)
+            {
+                continue;
+            }
+
+            if (PatternMatcher.Matches(pattern, regex, endpoint.FriendlyName) ||
+                PatternMatcher.Matches(pattern, regex, endpoint.DisplayName))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool FlowMatches(ConditionFlow flow, EndpointFlow endpointFlow) => flow switch
+    {
+        ConditionFlow.Render => endpointFlow == EndpointFlow.Render,
+        ConditionFlow.Capture => endpointFlow == EndpointFlow.Capture,
+        _ => true,
+    };
 
     private static bool MatchesApp(string pattern, AudioSession session)
     {
