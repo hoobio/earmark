@@ -122,7 +122,25 @@ public sealed class RunningProcessProvider : IRunningProcessProvider, IDisposabl
                         continue;
                     }
 
-                    var rp = new RunningProcess(pid, name, ProcessPath.TryGet(pid));
+                    var appPid = ProcessOwnership.ResolveAppProcessId(pid);
+                    var appPath = ProcessPath.TryGet(appPid);
+                    if (appPid != pid)
+                    {
+                        try
+                        {
+                            using var appProcess = Process.GetProcessById((int)appPid);
+                            name = appProcess.ProcessName;
+                        }
+                        catch
+                        {
+                            if (!string.IsNullOrEmpty(appPath))
+                            {
+                                name = System.IO.Path.GetFileNameWithoutExtension(appPath);
+                            }
+                        }
+                    }
+
+                    var rp = new RunningProcess(pid, name, appPath);
                     current[pid] = rp;
                     (started ??= new List<RunningProcess>()).Add(rp);
                 }
