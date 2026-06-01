@@ -36,6 +36,7 @@ public sealed partial class QuickControlsWindow : Window
     private readonly ILogger<QuickControlsWindow> _logger;
     private readonly ISettingsService _settings;
     private readonly nint _hwnd;
+    private readonly Dictionary<FrameworkElement, long> _hiddenElementCallbacks = new();
     private ISystemBackdropControllerWithTargets? _backdropController;
     private readonly SystemBackdropConfiguration _backdropConfig = new() { IsInputActive = true };
     private BackdropMode? _appliedBackdrop;
@@ -160,7 +161,7 @@ public sealed partial class QuickControlsWindow : Window
         DispatcherQueue.TryEnqueue(() => CollapseQuickControlsOnlyElements(args.Element));
     }
 
-    private static int CollapseQuickControlsOnlyElements(DependencyObject root)
+    private int CollapseQuickControlsOnlyElements(DependencyObject root)
     {
         var collapsed = 0;
         var count = VisualTreeHelper.GetChildrenCount(root);
@@ -169,7 +170,7 @@ public sealed partial class QuickControlsWindow : Window
             var child = VisualTreeHelper.GetChild(root, i);
             if (child is FrameworkElement element && QuickControlsHiddenElementNames.Contains(element.Name))
             {
-                element.Visibility = Visibility.Collapsed;
+                HideQuickControlsOnlyElement(element);
                 collapsed++;
             }
 
@@ -177,6 +178,26 @@ public sealed partial class QuickControlsWindow : Window
         }
 
         return collapsed;
+    }
+
+    private void HideQuickControlsOnlyElement(FrameworkElement element)
+    {
+        if (!_hiddenElementCallbacks.ContainsKey(element))
+        {
+            var token = element.RegisterPropertyChangedCallback(UIElement.VisibilityProperty, (_, _) =>
+            {
+                if (element.Visibility != Visibility.Collapsed)
+                {
+                    element.Visibility = Visibility.Collapsed;
+                }
+            });
+            _hiddenElementCallbacks[element] = token;
+        }
+
+        if (element.Visibility != Visibility.Collapsed)
+        {
+            element.Visibility = Visibility.Collapsed;
+        }
     }
 
     public void ShowPrepared()
