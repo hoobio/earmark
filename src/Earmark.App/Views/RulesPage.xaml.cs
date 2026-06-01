@@ -193,6 +193,10 @@ public sealed partial class RulesPage : Page
     private ListViewItem? _dragSourceContainer;
     private double _dragGapHeight;
     private ListViewItem? _gapContainer;
+    // The gap container's own margin before we widened it, so clearing the gap restores the
+    // ItemContainerStyle baseline (the rule list uses Margin="0,4" for inter-card spacing) instead
+    // of flattening it to zero.
+    private Thickness _gapOriginalMargin;
 
     // ---- Rule (outer list) drag ----
 
@@ -376,6 +380,104 @@ public sealed partial class RulesPage : Page
         ResetDragVisuals();
     }
 
+    // ---- Title / empty-list drop hotspots (insert at index 0) ----
+    //
+    // A section title ("Conditions" / "Actions" / "Otherwise") and the empty-list placeholder are
+    // drop targets that land the row at the top of that section's list. The placeholder is the only
+    // target when a rule has none of that kind yet; the title gives a clear "drop at the top" zone
+    // otherwise. The element's Tag ("Condition" / "Action") gates the type; the sibling ListView in
+    // the same section is the target.
+
+    private void OnSectionHeaderDragOver(object sender, DragEventArgs e)
+    {
+        if (sender is not FrameworkElement header || !HeaderAcceptsDrag(header))
+        {
+            e.AcceptedOperation = DataPackageOperation.None;
+            e.Handled = true;
+            return;
+        }
+        e.AcceptedOperation = DataPackageOperation.Move;
+        e.Handled = true;
+        if (FindSectionList(header) is ListView list)
+        {
+            ShowGap(list, 0);
+        }
+    }
+
+    private async void OnSectionHeaderDrop(object sender, DragEventArgs e)
+    {
+        if (sender is not FrameworkElement header || _itemDrag is not { } ctx ||
+            !HeaderAcceptsDrag(header) ||
+            FindSectionList(header) is not ListView list ||
+            FindAncestorRuleRow(header) is not RuleRow target)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        _itemDrag = null;
+        ResetDragVisuals();
+        try
+        {
+            if (ctx.Kind == ItemDragKind.Condition)
+            {
+                await target.AcceptConditionAsync((ConditionRow)ctx.Row, ctx.SourceRule, 0);
+            }
+            else
+            {
+                await target.AcceptActionAsync((ActionRow)ctx.Row, ctx.SourceRule, ctx.FromElse, (string?)list.Tag == "Else", 0);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Header drop failed");
+        }
+    }
+
+    private bool HeaderAcceptsDrag(FrameworkElement header) => (string?)header.Tag switch
+    {
+        "Condition" => _itemDrag?.Kind == ItemDragKind.Condition,
+        "Action" => _itemDrag?.Kind == ItemDragKind.Action,
+        _ => false,
+    };
+
+    private static ListView? FindSectionList(FrameworkElement header) =>
+        VisualTreeHelper.GetParent(header) is DependencyObject section ? FindDescendant<ListView>(section) : null;
+
+    private static T? FindDescendant<T>(DependencyObject root) where T : DependencyObject
+    {
+        var count = VisualTreeHelper.GetChildrenCount(root);
+        for (var i = 0; i < count; i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is T match) return match;
+            if (FindDescendant<T>(child) is { } nested) return nested;
+        }
+        return null;
+    }
+
+    private void OnRulesHeaderDragOver(object sender, DragEventArgs e)
+    {
+        if (!_ruleDragging)
+        {
+            e.AcceptedOperation = DataPackageOperation.None;
+            return;
+        }
+        e.AcceptedOperation = DataPackageOperation.Move;
+        e.Handled = true;
+        ShowGap(RulesList, 0);
+    }
+
+    private void OnRulesHeaderDrop(object sender, DragEventArgs e)
+    {
+        if (!_ruleDragging) return;
+        e.Handled = true;
+        var src = _dragSourceIndex;
+        ResetDragVisuals();
+        if (src < 0 || src >= ViewModel.Items.Count) return;
+        if (src != 0) ViewModel.Items.Move(src, 0);
+    }
+
     // ---- Phantom-slot gap + glide ----
 
     /// <summary>Picks an item up: remember the source list/index, capture the slot height, and (once
@@ -412,27 +514,31 @@ public sealed partial class RulesPage : Page
         {
             return; // dropping back where it started - no gap
         }
+        if (count == 0)
+        {
+            return; // empty list: the drop still inserts at 0, there's just no row to push aside
+        }
 
-        if (gapIndex >= count)
+        var bottom = gapIndex >= count;
+        if ((bottom ? list.ContainerFromIndex(count - 1) : list.ContainerFromIndex(gapIndex)) is not ListViewItem target)
         {
-            if (list.ContainerFromIndex(count - 1) is ListViewItem last)
-            {
-                last.Margin = new Thickness(0, 0, 0, _dragGapHeight);
-                _gapContainer = last;
-            }
+            return;
         }
-        else if (list.ContainerFromIndex(gapIndex) is ListViewItem target)
-        {
-            target.Margin = new Thickness(0, _dragGapHeight, 0, 0);
-            _gapContainer = target;
-        }
+
+        // Widen the existing margin rather than replacing it, so clearing restores the container's
+        // ItemContainerStyle baseline (the rule list spaces cards with Margin="0,4").
+        _gapContainer = target;
+        _gapOriginalMargin = target.Margin;
+        target.Margin = bottom
+            ? new Thickness(_gapOriginalMargin.Left, _gapOriginalMargin.Top, _gapOriginalMargin.Right, _gapOriginalMargin.Bottom + _dragGapHeight)
+            : new Thickness(_gapOriginalMargin.Left, _gapOriginalMargin.Top + _dragGapHeight, _gapOriginalMargin.Right, _gapOriginalMargin.Bottom);
     }
 
     private void ClearGapMargin()
     {
         if (_gapContainer is not null)
         {
-            _gapContainer.Margin = new Thickness(0);
+            _gapContainer.Margin = _gapOriginalMargin;
             _gapContainer = null;
         }
     }
@@ -444,8 +550,8 @@ public sealed partial class RulesPage : Page
         ClearGapMargin();
         if (_dragSourceContainer is not null)
         {
+            // Only its Visibility was changed (collapsed); leave Margin alone so the baseline survives.
             _dragSourceContainer.Visibility = Visibility.Visible;
-            _dragSourceContainer.Margin = new Thickness(0);
             _dragSourceContainer = null;
         }
         _dragSourceList = null;

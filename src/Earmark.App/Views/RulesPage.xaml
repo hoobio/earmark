@@ -310,12 +310,16 @@
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
 
-            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="{StaticResource SpacingSmall}" VerticalAlignment="Center">
+            <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="{StaticResource SpacingSmall}" VerticalAlignment="Center"
+                        Background="Transparent"
+                        AllowDrop="True"
+                        DragOver="OnRulesHeaderDragOver"
+                        Drop="OnRulesHeaderDrop">
                 <TextBlock Text="Rules" Style="{StaticResource PageHeaderTextStyle}" />
                 <FontIcon Glyph="&#xE946;" FontSize="14"
                           Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                           VerticalAlignment="Center"
-                          ToolTipService.ToolTip="Drag to reorder. Topmost matching rule wins. Click to edit. Dimmed rules are off, shadowed, or have unmet conditions." />
+                          ToolTipService.ToolTip="Drag to reorder. Topmost matching rule wins. Drag onto this title to move to the top. Click to edit." />
             </StackPanel>
 
             <Button Grid.Column="1"
@@ -508,7 +512,12 @@
 
                                 <!-- Conditions -->
                                 <StackPanel Spacing="{StaticResource SpacingSmall}">
-                                    <Grid>
+                                    <!-- The title is a drop target that lands a dragged condition at
+                                         the top of the list (index 0) - the only target when the rule
+                                         has no conditions yet, and a "drop at the top" zone otherwise. -->
+                                    <Grid Background="Transparent"
+                                          AllowDrop="True" Tag="Condition"
+                                          DragOver="OnSectionHeaderDragOver" Drop="OnSectionHeaderDrop">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="Auto" />
@@ -554,11 +563,29 @@
                                             </Style>
                                         </ListView.ItemContainerStyle>
                                     </ListView>
+
+                                    <!-- Empty-state drop zone: also the index-0 target so a condition
+                                         can be dragged into a rule that has none yet. -->
+                                    <Grid Visibility="{x:Bind HasNoConditions, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                          Background="Transparent" Margin="0,4,0,0"
+                                          AllowDrop="True" Tag="Condition"
+                                          DragOver="OnSectionHeaderDragOver" Drop="OnSectionHeaderDrop">
+                                        <Rectangle RadiusX="4" RadiusY="4"
+                                                   Stroke="{ThemeResource CardStrokeColorDefaultBrush}"
+                                                   StrokeThickness="1" StrokeDashArray="3,3"
+                                                   IsHitTestVisible="False" />
+                                        <TextBlock Text="No conditions - drag one here, or use Add condition. The rule always runs."
+                                                   Style="{StaticResource MutedCaptionTextStyle}"
+                                                   HorizontalAlignment="Center" Margin="12,10"
+                                                   TextWrapping="Wrap" TextAlignment="Center" />
+                                    </Grid>
                                 </StackPanel>
 
                                 <!-- Actions -->
                                 <StackPanel Spacing="{StaticResource SpacingSmall}">
-                                    <Grid>
+                                    <Grid Background="Transparent"
+                                          AllowDrop="True" Tag="Action"
+                                          DragOver="OnSectionHeaderDragOver" Drop="OnSectionHeaderDrop">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="Auto" />
@@ -606,6 +633,20 @@
                                             </Style>
                                         </ListView.ItemContainerStyle>
                                     </ListView>
+
+                                    <Grid Visibility="{x:Bind HasNoActions, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                          Background="Transparent" Margin="0,4,0,0"
+                                          AllowDrop="True" Tag="Action"
+                                          DragOver="OnSectionHeaderDragOver" Drop="OnSectionHeaderDrop">
+                                        <Rectangle RadiusX="4" RadiusY="4"
+                                                   Stroke="{ThemeResource CardStrokeColorDefaultBrush}"
+                                                   StrokeThickness="1" StrokeDashArray="3,3"
+                                                   IsHitTestVisible="False" />
+                                        <TextBlock Text="No actions - drag one here, or use Add action."
+                                                   Style="{StaticResource MutedCaptionTextStyle}"
+                                                   HorizontalAlignment="Center" Margin="12,10"
+                                                   TextWrapping="Wrap" TextAlignment="Center" />
+                                    </Grid>
                                 </StackPanel>
 
                                 <!-- Otherwise (else) branch: actions that run when the rule's
@@ -613,7 +654,9 @@
                                      conditions. Reuses the shared ActionRowTemplate. -->
                                 <StackPanel Spacing="{StaticResource SpacingSmall}"
                                             Visibility="{x:Bind ShowElse, Mode=OneWay}">
-                                    <Grid>
+                                    <Grid Background="Transparent"
+                                          AllowDrop="True" Tag="Action"
+                                          DragOver="OnSectionHeaderDragOver" Drop="OnSectionHeaderDrop">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="Auto" />
@@ -660,6 +703,20 @@
                                             </Style>
                                         </ListView.ItemContainerStyle>
                                     </ListView>
+
+                                    <Grid Visibility="{x:Bind HasNoElseActions, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                          Background="Transparent" Margin="0,4,0,0"
+                                          AllowDrop="True" Tag="Action"
+                                          DragOver="OnSectionHeaderDragOver" Drop="OnSectionHeaderDrop">
+                                        <Rectangle RadiusX="4" RadiusY="4"
+                                                   Stroke="{ThemeResource CardStrokeColorDefaultBrush}"
+                                                   StrokeThickness="1" StrokeDashArray="3,3"
+                                                   IsHitTestVisible="False" />
+                                        <TextBlock Text="No 'otherwise' actions - drag one here, or use Add action."
+                                                   Style="{StaticResource MutedCaptionTextStyle}"
+                                                   HorizontalAlignment="Center" Margin="12,10"
+                                                   TextWrapping="Wrap" TextAlignment="Center" />
+                                    </Grid>
                                 </StackPanel>
 
                                 <!-- Footer: Save / Discard appear only when the row has unsaved

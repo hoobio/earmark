@@ -83,6 +83,11 @@ public partial class RuleRow : ObservableObject, IDisposable
     public bool HasConditions => Conditions.Count > 0;
     public bool HasActions => Actions.Count > 0;
     public bool HasElseActions => ElseActions.Count > 0;
+    // Inverse flags drive the empty-list "drop here" placeholders (which double as the index-0
+    // drop target so a row can be dragged into a rule that currently has none).
+    public bool HasNoConditions => Conditions.Count == 0;
+    public bool HasNoActions => Actions.Count == 0;
+    public bool HasNoElseActions => ElseActions.Count == 0;
     /// <summary>The "otherwise" branch only makes sense when the rule has conditions to fail.</summary>
     public bool ShowElse => HasConditions;
     public bool HasStatusMessage => !string.IsNullOrEmpty(StatusMessage);
@@ -479,6 +484,7 @@ public partial class RuleRow : ObservableObject, IDisposable
     private void NotifyConditionsChanged()
     {
         OnPropertyChanged(nameof(HasConditions));
+        OnPropertyChanged(nameof(HasNoConditions));
         OnPropertyChanged(nameof(ShowElse));
         OnPropertyChanged(nameof(DisplayName));
     }
@@ -486,7 +492,9 @@ public partial class RuleRow : ObservableObject, IDisposable
     private void NotifyActionsChanged()
     {
         OnPropertyChanged(nameof(HasActions));
+        OnPropertyChanged(nameof(HasNoActions));
         OnPropertyChanged(nameof(HasElseActions));
+        OnPropertyChanged(nameof(HasNoElseActions));
         OnPropertyChanged(nameof(DisplayName));
     }
 
