@@ -300,17 +300,18 @@ public sealed class AudioSessionService : IAudioSessionService, IDisposable
 
         return ProcessInfoCache.GetOrAdd(pid, static p =>
         {
-            var path = ProcessPath.TryGet(p);
+            var appPid = ProcessOwnership.ResolveAppProcessId(p);
+            var path = ProcessPath.TryGet(appPid);
             string name;
             try
             {
-                using var process = Process.GetProcessById((int)p);
+                using var process = Process.GetProcessById((int)appPid);
                 name = process.ProcessName;
             }
             catch
             {
                 name = string.IsNullOrEmpty(path)
-                    ? p.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                    ? appPid.ToString(System.Globalization.CultureInfo.InvariantCulture)
                     : System.IO.Path.GetFileNameWithoutExtension(path);
             }
 
