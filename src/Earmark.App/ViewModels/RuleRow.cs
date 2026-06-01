@@ -694,6 +694,24 @@ public sealed record ConditionFlowOption(ConditionFlow Value, string Label)
     public override string ToString() => Label;
 }
 
+/// <summary>A choice in a pattern field's match-mode dropdown. The Exact option's label is the
+/// field's own word ("Device" / "App" / "Mix"), since in that mode the field becomes a picker.</summary>
+public sealed record PatternModeOption(PatternMatchMode Value, string Label)
+{
+    public override string ToString() => Label;
+
+    public static IReadOnlyList<PatternModeOption> For(string exactLabel) => new[]
+    {
+        new PatternModeOption(PatternMatchMode.Regex, "Regex"),
+        new PatternModeOption(PatternMatchMode.Wildcard, "Wildcard"),
+        new PatternModeOption(PatternMatchMode.Exact, exactLabel),
+    };
+
+    public static readonly IReadOnlyList<PatternModeOption> Device = For("Device");
+    public static readonly IReadOnlyList<PatternModeOption> App = For("App");
+    public static readonly IReadOnlyList<PatternModeOption> Mix = For("Mix");
+}
+
 public partial class ActionRow : ObservableObject, IDisposable, ISyncable<RuleAction>
 {
     private readonly Action _notifyParent;
@@ -800,8 +818,53 @@ public partial class ActionRow : ObservableObject, IDisposable, ISyncable<RuleAc
     [ObservableProperty]
     public partial bool IsShadowed { get; set; }
 
+    [ObservableProperty]
+    public partial PatternMatchMode AppMatchMode { get; set; }
+
+    [ObservableProperty]
+    public partial PatternMatchMode DeviceMatchMode { get; set; }
+
+    [ObservableProperty]
+    public partial PatternMatchMode MixMatchMode { get; set; }
+
+    // Candidates for the Exact-mode pickers. Device candidates are the full display names
+    // ("Friendly (Hardware)"), flow-filtered for the action; app candidates are running process
+    // names; mix candidates are Wave Link mix names.
     public IReadOnlyList<string> DeviceCandidates { get; private set; } = Array.Empty<string>();
+    public IReadOnlyList<string> AppCandidates { get; private set; } = Array.Empty<string>();
     public IReadOnlyList<string> MixCandidates { get; private set; } = Array.Empty<string>();
+
+#pragma warning disable CA1822
+    public IReadOnlyList<PatternModeOption> DeviceModeOptions => PatternModeOption.Device;
+    public IReadOnlyList<PatternModeOption> AppModeOptions => PatternModeOption.App;
+    public IReadOnlyList<PatternModeOption> MixModeOptions => PatternModeOption.Mix;
+#pragma warning restore CA1822
+
+    public PatternModeOption SelectedAppMode
+    {
+        get => PatternModeOption.App.FirstOrDefault(o => o.Value == AppMatchMode) ?? PatternModeOption.App[0];
+        set { if (value is not null && AppMatchMode != value.Value) AppMatchMode = value.Value; }
+    }
+
+    public PatternModeOption SelectedDeviceMode
+    {
+        get => PatternModeOption.Device.FirstOrDefault(o => o.Value == DeviceMatchMode) ?? PatternModeOption.Device[0];
+        set { if (value is not null && DeviceMatchMode != value.Value) DeviceMatchMode = value.Value; }
+    }
+
+    public PatternModeOption SelectedMixMode
+    {
+        get => PatternModeOption.Mix.FirstOrDefault(o => o.Value == MixMatchMode) ?? PatternModeOption.Mix[0];
+        set { if (value is not null && MixMatchMode != value.Value) MixMatchMode = value.Value; }
+    }
+
+    // In Exact mode the field is a picker; otherwise a free-text pattern box.
+    public bool AppPatternIsPick => AppMatchMode == PatternMatchMode.Exact;
+    public bool AppPatternIsText => !AppPatternIsPick;
+    public bool DevicePatternIsPick => DeviceMatchMode == PatternMatchMode.Exact;
+    public bool DevicePatternIsText => !DevicePatternIsPick;
+    public bool MixPatternIsPick => MixMatchMode == PatternMatchMode.Exact;
+    public bool MixPatternIsText => !MixPatternIsPick;
 
     public bool RequiresAppPattern => Kind == ActionKind.ApplicationDevice;
     public bool IsDefaultAction => Kind == ActionKind.DefaultDevice;
@@ -881,8 +944,11 @@ public partial class ActionRow : ObservableObject, IDisposable, ISyncable<RuleAc
         Muted = Muted,
         Pinned = Pinned,
         AppPattern = AppPattern,
+        AppMatchMode = AppMatchMode,
         DevicePattern = DevicePattern,
+        DeviceMatchMode = DeviceMatchMode,
         MixPattern = MixPattern,
+        MixMatchMode = MixMatchMode,
         Volume = Volume,
         NewName = NewName,
         SetsDefault = SetsDefault,
@@ -901,8 +967,11 @@ public partial class ActionRow : ObservableObject, IDisposable, ISyncable<RuleAc
             Muted = action.Muted;
             Pinned = action.Pinned;
             AppPattern = action.AppPattern;
+            AppMatchMode = action.AppMatchMode;
             DevicePattern = action.DevicePattern;
+            DeviceMatchMode = action.DeviceMatchMode;
             MixPattern = action.MixPattern;
+            MixMatchMode = action.MixMatchMode;
             Volume = action.Volume;
             NewName = action.NewName;
             SetsDefault = action.SetsDefault;
@@ -920,9 +989,10 @@ public partial class ActionRow : ObservableObject, IDisposable, ISyncable<RuleAc
         WaveLinkSnapshot? waveLinkSnapshot,
         WaveLinkConnectionState waveLinkState)
     {
-        IsAppPatternValid = string.IsNullOrWhiteSpace(AppPattern) || RuleRow.TryCompile(AppPattern, out _);
-        IsDevicePatternValid = string.IsNullOrWhiteSpace(DevicePattern) || RuleRow.TryCompile(DevicePattern, out _);
-        IsMixPatternValid = string.IsNullOrWhiteSpace(MixPattern) || RuleRow.TryCompile(MixPattern, out _);
+        // Regex validity only matters in Regex mode; wildcard always compiles and exact is literal.
+        IsAppPatternValid = AppMatchMode != PatternMatchMode.Regex || string.IsNullOrWhiteSpace(AppPattern) || RuleRow.TryCompile(AppPattern, out _);
+        IsDevicePatternValid = DeviceMatchMode != PatternMatchMode.Regex || string.IsNullOrWhiteSpace(DevicePattern) || RuleRow.TryCompile(DevicePattern, out _);
+        IsMixPatternValid = MixMatchMode != PatternMatchMode.Regex || string.IsNullOrWhiteSpace(MixPattern) || RuleRow.TryCompile(MixPattern, out _);
 
         if (RequiresAppPattern)
         {
@@ -934,10 +1004,18 @@ public partial class ActionRow : ObservableObject, IDisposable, ISyncable<RuleAc
             AppMatchNames = string.Empty;
         }
 
+        // App picker candidates: distinct running process names.
+        AppCandidates = sessions
+            .Select(s => s.ProcessName)
+            .Where(n => !string.IsNullOrEmpty(n))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
         if (IsWaveLinkAction)
         {
-            DeviceMatchSummary = ResolveWaveLinkDeviceName(DevicePattern, waveLinkSnapshot);
-            MixMatchSummary = ResolveWaveLinkMixName(MixPattern, waveLinkSnapshot);
+            DeviceMatchSummary = ResolveWaveLinkDeviceName(DevicePattern, DeviceMatchMode, waveLinkSnapshot);
+            MixMatchSummary = ResolveWaveLinkMixName(MixPattern, MixMatchMode, waveLinkSnapshot);
             Diagnostic = ComputeWaveLinkDiagnostic(waveLinkState, waveLinkSnapshot);
 
             DeviceCandidates = waveLinkSnapshot?.OutputDevices
@@ -955,13 +1033,15 @@ public partial class ActionRow : ObservableObject, IDisposable, ISyncable<RuleAc
         }
         else
         {
-            DeviceMatchSummary = ResolveDeviceNameAnyFlow(DevicePattern, EffectiveDeviceFlow(), endpoints);
+            DeviceMatchSummary = ResolveDeviceNameAnyFlow(DevicePattern, DeviceMatchMode, EffectiveDeviceFlow(), endpoints);
             MixMatchSummary = string.Empty;
             Diagnostic = ComputeNonWaveLinkDiagnostic();
 
+            // Picker candidates are full display names ("Friendly (Hardware)"), which is what Exact
+            // mode stores and matches.
             DeviceCandidates = endpoints
                 .Where(e => e.State == EndpointState.Active && DeviceMatchesKind(e.Flow))
-                .Select(e => e.FriendlyName)
+                .Select(e => e.DisplayName)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
                 .ToArray();
@@ -970,6 +1050,7 @@ public partial class ActionRow : ObservableObject, IDisposable, ISyncable<RuleAc
         }
 
         OnPropertyChanged(nameof(DeviceCandidates));
+        OnPropertyChanged(nameof(AppCandidates));
         OnPropertyChanged(nameof(MixCandidates));
     }
 
@@ -1021,11 +1102,11 @@ public partial class ActionRow : ObservableObject, IDisposable, ISyncable<RuleAc
         {
             return "Device pattern is empty";
         }
-        if (!RuleRow.TryCompile(MixPattern, out _))
+        if (MixMatchMode == PatternMatchMode.Regex && !RuleRow.TryCompile(MixPattern, out _))
         {
             return $"Mix pattern '{MixPattern}' is not valid regex";
         }
-        if (!RuleRow.TryCompile(DevicePattern, out _))
+        if (DeviceMatchMode == PatternMatchMode.Regex && !RuleRow.TryCompile(DevicePattern, out _))
         {
             return $"Device pattern '{DevicePattern}' is not valid regex";
         }
@@ -1050,7 +1131,7 @@ public partial class ActionRow : ObservableObject, IDisposable, ISyncable<RuleAc
         return string.Empty;
     }
 
-    private static string ResolveWaveLinkMixName(string pattern, WaveLinkSnapshot? snapshot)
+    private static string ResolveWaveLinkMixName(string pattern, PatternMatchMode mode, WaveLinkSnapshot? snapshot)
     {
         if (snapshot is null || string.IsNullOrWhiteSpace(pattern))
         {
@@ -1058,7 +1139,7 @@ public partial class ActionRow : ObservableObject, IDisposable, ISyncable<RuleAc
         }
 
         var matched = snapshot.Mixes
-            .Where(m => RuleRow.MatchOrExact(pattern, m.Name))
+            .Where(m => PatternMatcher.Matches(mode, pattern, m.Name))
             .Select(m => m.Name)
             .ToList();
 
@@ -1070,7 +1151,7 @@ public partial class ActionRow : ObservableObject, IDisposable, ISyncable<RuleAc
         };
     }
 
-    private static string ResolveWaveLinkDeviceName(string pattern, WaveLinkSnapshot? snapshot)
+    private static string ResolveWaveLinkDeviceName(string pattern, PatternMatchMode mode, WaveLinkSnapshot? snapshot)
     {
         if (snapshot is null || string.IsNullOrWhiteSpace(pattern))
         {
@@ -1078,7 +1159,7 @@ public partial class ActionRow : ObservableObject, IDisposable, ISyncable<RuleAc
         }
 
         var matched = snapshot.OutputDevices
-            .Where(o => RuleRow.MatchOrExact(pattern, o.DeviceName))
+            .Where(o => PatternMatcher.Matches(mode, pattern, o.DeviceName))
             .Select(o => o.DeviceName)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -1107,8 +1188,8 @@ public partial class ActionRow : ObservableObject, IDisposable, ISyncable<RuleAc
         var names = new List<string>();
         foreach (var session in sessions)
         {
-            if (!RuleRow.MatchOrExact(AppPattern, session.ProcessName) &&
-                !RuleRow.MatchOrExact(AppPattern, session.ExecutablePath))
+            if (!PatternMatcher.Matches(AppMatchMode, AppPattern, session.ProcessName) &&
+                !PatternMatcher.Matches(AppMatchMode, AppPattern, session.ExecutablePath))
             {
                 continue;
             }
@@ -1126,7 +1207,7 @@ public partial class ActionRow : ObservableObject, IDisposable, ISyncable<RuleAc
         AppMatchNames = names.Count == 0 ? string.Empty : string.Join("\n", names);
     }
 
-    private static string ResolveDeviceNameAnyFlow(string pattern, EndpointFlow? flow, IReadOnlyList<AudioEndpoint> endpoints)
+    private static string ResolveDeviceNameAnyFlow(string pattern, PatternMatchMode mode, EndpointFlow? flow, IReadOnlyList<AudioEndpoint> endpoints)
     {
         if (string.IsNullOrWhiteSpace(pattern))
         {
@@ -1135,7 +1216,7 @@ public partial class ActionRow : ObservableObject, IDisposable, ISyncable<RuleAc
 
         var matched = endpoints
             .Where(e => e.State == EndpointState.Active && (flow is null || e.Flow == flow))
-            .Where(e => RuleRow.MatchOrExact(pattern, e.FriendlyName) || RuleRow.MatchOrExact(pattern, e.DisplayName))
+            .Where(e => PatternMatcher.Matches(mode, pattern, e.FriendlyName) || PatternMatcher.Matches(mode, pattern, e.DisplayName))
             .Select(e => e.FriendlyName)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -1190,6 +1271,27 @@ public partial class ActionRow : ObservableObject, IDisposable, ISyncable<RuleAc
     partial void OnAppPatternChanged(string value) => Notify();
     partial void OnDevicePatternChanged(string value) => Notify();
     partial void OnMixPatternChanged(string value) => Notify();
+    partial void OnAppMatchModeChanged(PatternMatchMode value)
+    {
+        OnPropertyChanged(nameof(SelectedAppMode));
+        OnPropertyChanged(nameof(AppPatternIsPick));
+        OnPropertyChanged(nameof(AppPatternIsText));
+        Notify();
+    }
+    partial void OnDeviceMatchModeChanged(PatternMatchMode value)
+    {
+        OnPropertyChanged(nameof(SelectedDeviceMode));
+        OnPropertyChanged(nameof(DevicePatternIsPick));
+        OnPropertyChanged(nameof(DevicePatternIsText));
+        Notify();
+    }
+    partial void OnMixMatchModeChanged(PatternMatchMode value)
+    {
+        OnPropertyChanged(nameof(SelectedMixMode));
+        OnPropertyChanged(nameof(MixPatternIsPick));
+        OnPropertyChanged(nameof(MixPatternIsText));
+        Notify();
+    }
     partial void OnVolumeChanged(float value) => Notify();
     partial void OnNewNameChanged(string value) => Notify();
     partial void OnSetsDefaultChanged(bool value) => Notify();
@@ -1272,6 +1374,37 @@ public partial class ConditionRow : ObservableObject, IDisposable, ISyncable<Rul
     [ObservableProperty]
     public partial string AppMatchNames { get; set; } = string.Empty;
 
+    [ObservableProperty]
+    public partial PatternMatchMode DeviceMatchMode { get; set; }
+
+    [ObservableProperty]
+    public partial PatternMatchMode AppMatchMode { get; set; }
+
+    public IReadOnlyList<string> DeviceCandidates { get; private set; } = Array.Empty<string>();
+    public IReadOnlyList<string> AppCandidates { get; private set; } = Array.Empty<string>();
+
+#pragma warning disable CA1822
+    public IReadOnlyList<PatternModeOption> DeviceModeOptions => PatternModeOption.Device;
+    public IReadOnlyList<PatternModeOption> AppModeOptions => PatternModeOption.App;
+#pragma warning restore CA1822
+
+    public PatternModeOption SelectedDeviceMode
+    {
+        get => PatternModeOption.Device.FirstOrDefault(o => o.Value == DeviceMatchMode) ?? PatternModeOption.Device[0];
+        set { if (value is not null && DeviceMatchMode != value.Value) DeviceMatchMode = value.Value; }
+    }
+
+    public PatternModeOption SelectedAppMode
+    {
+        get => PatternModeOption.App.FirstOrDefault(o => o.Value == AppMatchMode) ?? PatternModeOption.App[0];
+        set { if (value is not null && AppMatchMode != value.Value) AppMatchMode = value.Value; }
+    }
+
+    public bool DevicePatternIsPick => DeviceMatchMode == PatternMatchMode.Exact;
+    public bool DevicePatternIsText => !DevicePatternIsPick;
+    public bool AppPatternIsPick => AppMatchMode == PatternMatchMode.Exact;
+    public bool AppPatternIsText => !AppPatternIsPick;
+
     public bool HasDeviceMatch => !string.IsNullOrEmpty(DeviceMatchSummary);
     public bool HasAppMatches => AppMatchCount > 0;
     public string AppMatchSummary => AppMatchCount == 1 ? "1 matching app" : $"{AppMatchCount} matching apps";
@@ -1345,7 +1478,9 @@ public partial class ConditionRow : ObservableObject, IDisposable, ISyncable<Rul
         Negate = Negate,
         Flow = Flow,
         DevicePattern = DevicePattern,
+        DeviceMatchMode = DeviceMatchMode,
         AppPattern = AppPattern,
+        AppMatchMode = AppMatchMode,
     };
 
     public void SyncFromModel(RuleCondition condition)
@@ -1358,7 +1493,9 @@ public partial class ConditionRow : ObservableObject, IDisposable, ISyncable<Rul
             Negate = condition.Negate;
             Flow = condition.Flow;
             DevicePattern = condition.DevicePattern;
+            DeviceMatchMode = condition.DeviceMatchMode;
             AppPattern = condition.AppPattern;
+            AppMatchMode = condition.AppMatchMode;
         }
         finally
         {
@@ -1389,6 +1526,26 @@ public partial class ConditionRow : ObservableObject, IDisposable, ISyncable<Rul
             positive = matched.Count > 0;
         }
 
+        // Picker candidates: full device display names (flow-filtered) and running process names.
+        DeviceCandidates = endpoints
+            .Where(e => e.State == EndpointState.Active &&
+                (Flow == ConditionFlow.Any
+                    || (Flow == ConditionFlow.Render && e.Flow == EndpointFlow.Render)
+                    || (Flow == ConditionFlow.Capture && e.Flow == EndpointFlow.Capture)) &&
+                (Kind != ConditionKind.DefaultDevice || e.IsDefault || e.IsDefaultCommunications))
+            .Select(e => e.DisplayName)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        AppCandidates = sessions
+            .Select(s => s.ProcessName)
+            .Where(n => !string.IsNullOrEmpty(n))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        OnPropertyChanged(nameof(DeviceCandidates));
+        OnPropertyChanged(nameof(AppCandidates));
+
         IsSatisfied = Negate ? !positive : positive;
     }
 
@@ -1407,7 +1564,8 @@ public partial class ConditionRow : ObservableObject, IDisposable, ISyncable<Rul
         var names = new List<string>();
         foreach (var s in sessions)
         {
-            if (!RuleRow.MatchOrExact(AppPattern, s.ProcessName) && !RuleRow.MatchOrExact(AppPattern, s.ExecutablePath))
+            if (!PatternMatcher.Matches(AppMatchMode, AppPattern, s.ProcessName) &&
+                !PatternMatcher.Matches(AppMatchMode, AppPattern, s.ExecutablePath))
             {
                 continue;
             }
@@ -1426,7 +1584,7 @@ public partial class ConditionRow : ObservableObject, IDisposable, ISyncable<Rul
 
     private List<string> MatchedDeviceNames(IReadOnlyList<AudioEndpoint> endpoints)
     {
-        if (string.IsNullOrWhiteSpace(DevicePattern) || !RuleRow.TryCompile(DevicePattern, out var regex) || regex is null)
+        if (string.IsNullOrWhiteSpace(DevicePattern))
         {
             return new List<string>();
         }
@@ -1438,7 +1596,8 @@ public partial class ConditionRow : ObservableObject, IDisposable, ISyncable<Rul
                     || (Flow == ConditionFlow.Render && e.Flow == EndpointFlow.Render)
                     || (Flow == ConditionFlow.Capture && e.Flow == EndpointFlow.Capture)) &&
                 (!requireDefault || e.IsDefault || e.IsDefaultCommunications) &&
-                (RuleRow.MatchSafe(regex, e.FriendlyName) || RuleRow.MatchSafe(regex, e.DisplayName)))
+                (PatternMatcher.Matches(DeviceMatchMode, DevicePattern, e.FriendlyName) ||
+                 PatternMatcher.Matches(DeviceMatchMode, DevicePattern, e.DisplayName)))
             .Select(e => e.FriendlyName)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -1476,6 +1635,20 @@ public partial class ConditionRow : ObservableObject, IDisposable, ISyncable<Rul
     {
         OnPropertyChanged(nameof(HasAppMatches));
         OnPropertyChanged(nameof(AppMatchSummary));
+    }
+    partial void OnDeviceMatchModeChanged(PatternMatchMode value)
+    {
+        OnPropertyChanged(nameof(SelectedDeviceMode));
+        OnPropertyChanged(nameof(DevicePatternIsPick));
+        OnPropertyChanged(nameof(DevicePatternIsText));
+        Notify();
+    }
+    partial void OnAppMatchModeChanged(PatternMatchMode value)
+    {
+        OnPropertyChanged(nameof(SelectedAppMode));
+        OnPropertyChanged(nameof(AppPatternIsPick));
+        OnPropertyChanged(nameof(AppPatternIsText));
+        Notify();
     }
 
     private void Notify()

@@ -130,8 +130,8 @@ internal static class DeviceRulesSummary
         };
         if (!flowOk) return false;
 
-        return RuleRow.MatchOrExact(pattern, endpoint.FriendlyName)
-            || RuleRow.MatchOrExact(pattern, endpoint.DisplayName);
+        return PatternMatcher.Matches(action.DeviceMatchMode, pattern, endpoint.FriendlyName)
+            || PatternMatcher.Matches(action.DeviceMatchMode, pattern, endpoint.DisplayName);
     }
 
     /// <summary>
@@ -156,8 +156,8 @@ internal static class DeviceRulesSummary
             {
                 foreach (var session in sessions)
                 {
-                    if (RuleRow.MatchOrExact(action.AppPattern, session.ProcessName) ||
-                        RuleRow.MatchOrExact(action.AppPattern, session.ExecutablePath))
+                    if (PatternMatcher.Matches(action.AppMatchMode, action.AppPattern, session.ProcessName) ||
+                        PatternMatcher.Matches(action.AppMatchMode, action.AppPattern, session.ExecutablePath))
                     {
                         seenApps.Add(session.IdentityKey);
                     }
@@ -167,8 +167,8 @@ internal static class DeviceRulesSummary
             if (!string.IsNullOrWhiteSpace(action.DevicePattern))
             {
                 var hits = endpoints.Any(e => e.State == EndpointState.Active &&
-                    (RuleRow.MatchOrExact(action.DevicePattern, e.FriendlyName) ||
-                     RuleRow.MatchOrExact(action.DevicePattern, e.DisplayName)));
+                    (PatternMatcher.Matches(action.DeviceMatchMode, action.DevicePattern, e.FriendlyName) ||
+                     PatternMatcher.Matches(action.DeviceMatchMode, action.DevicePattern, e.DisplayName)));
                 if (hits) deviceMatchActions++;
             }
         }

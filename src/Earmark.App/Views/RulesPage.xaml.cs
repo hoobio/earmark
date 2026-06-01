@@ -641,54 +641,110 @@ public sealed partial class RulesPage : Page
     // CA1822 suppressed: XAML event hookup requires instance methods even when the body
     // doesn't touch instance state.
 #pragma warning disable CA1822
+    // The pattern AutoSuggestBoxes serve both as free-text inputs (Regex/Wildcard) and as the
+    // searchable picker (Exact mode); they live on both ActionRow and ConditionRow, so the candidate
+    // lookups are DataContext-agnostic.
     private void OnDevicePatternTextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
     {
         if (args.Reason != AutoSuggestionBoxTextChangeReason.UserInput) return;
-        if (sender.DataContext is not ActionRow row) return;
-        sender.ItemsSource = FilterCandidates(row.DeviceCandidates, sender.Text);
+        sender.ItemsSource = FilterCandidates(DeviceCandidatesOf(sender.DataContext), sender.Text);
     }
 
     private void OnDevicePatternGotFocus(object sender, RoutedEventArgs e)
     {
-        if (sender is AutoSuggestBox box && box.DataContext is ActionRow row)
+        if (sender is AutoSuggestBox box)
         {
-            box.ItemsSource = FilterCandidates(row.DeviceCandidates, box.Text);
+            box.ItemsSource = FilterCandidates(DeviceCandidatesOf(box.DataContext), box.Text);
         }
     }
 
     private void OnDeviceSuggestionChosen(AutoSuggestBox sender, AutoSuggestBoxSuggestionChosenEventArgs args)
     {
-        if (args.SelectedItem is string name)
+        if (args.SelectedItem is string name) sender.Text = name;
+    }
+
+    private void OnAppPatternTextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
+    {
+        if (args.Reason != AutoSuggestionBoxTextChangeReason.UserInput) return;
+        sender.ItemsSource = FilterCandidates(AppCandidatesOf(sender.DataContext), sender.Text);
+    }
+
+    private void OnAppPatternGotFocus(object sender, RoutedEventArgs e)
+    {
+        if (sender is AutoSuggestBox box)
         {
-            // Insert the literal name. PatternMatcher.Matches treats an exact-name pattern
-            // as a string equality match without compiling, so no regex escaping needed.
-            sender.Text = name;
+            box.ItemsSource = FilterCandidates(AppCandidatesOf(box.DataContext), box.Text);
         }
+    }
+
+    private void OnAppSuggestionChosen(AutoSuggestBox sender, AutoSuggestBoxSuggestionChosenEventArgs args)
+    {
+        if (args.SelectedItem is string name) sender.Text = name;
     }
 
     private void OnMixPatternTextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
     {
         if (args.Reason != AutoSuggestionBoxTextChangeReason.UserInput) return;
-        if (sender.DataContext is not ActionRow row) return;
-        sender.ItemsSource = FilterCandidates(row.MixCandidates, sender.Text);
+        sender.ItemsSource = FilterCandidates(MixCandidatesOf(sender.DataContext), sender.Text);
     }
 
     private void OnMixPatternGotFocus(object sender, RoutedEventArgs e)
     {
-        if (sender is AutoSuggestBox box && box.DataContext is ActionRow row)
+        if (sender is AutoSuggestBox box)
         {
-            box.ItemsSource = FilterCandidates(row.MixCandidates, box.Text);
+            box.ItemsSource = FilterCandidates(MixCandidatesOf(box.DataContext), box.Text);
         }
     }
 
     private void OnMixSuggestionChosen(AutoSuggestBox sender, AutoSuggestBoxSuggestionChosenEventArgs args)
     {
-        if (args.SelectedItem is string name)
+        if (args.SelectedItem is string name) sender.Text = name;
+    }
+
+    // Match-mode dropdowns. Each lives on an ActionRow or a ConditionRow; route by DataContext.
+    private void OnDeviceModeChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (sender is not ComboBox combo || combo.SelectedItem is not PatternModeOption opt) return;
+        if (combo.DataContext is ActionRow a && a.DeviceMatchMode != opt.Value) a.DeviceMatchMode = opt.Value;
+        else if (combo.DataContext is ConditionRow c && c.DeviceMatchMode != opt.Value) c.DeviceMatchMode = opt.Value;
+    }
+
+    private void OnAppModeChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (sender is not ComboBox combo || combo.SelectedItem is not PatternModeOption opt) return;
+        if (combo.DataContext is ActionRow a && a.AppMatchMode != opt.Value) a.AppMatchMode = opt.Value;
+        else if (combo.DataContext is ConditionRow c && c.AppMatchMode != opt.Value) c.AppMatchMode = opt.Value;
+    }
+
+    private void OnMixModeChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (sender is ComboBox { SelectedItem: PatternModeOption opt } combo &&
+            combo.DataContext is ActionRow a && a.MixMatchMode != opt.Value)
         {
-            sender.Text = name;
+            a.MixMatchMode = opt.Value;
         }
     }
 #pragma warning restore CA1822
+
+    private static IReadOnlyList<string> DeviceCandidatesOf(object? dc) => dc switch
+    {
+        ActionRow a => a.DeviceCandidates,
+        ConditionRow c => c.DeviceCandidates,
+        _ => Array.Empty<string>(),
+    };
+
+    private static IReadOnlyList<string> AppCandidatesOf(object? dc) => dc switch
+    {
+        ActionRow a => a.AppCandidates,
+        ConditionRow c => c.AppCandidates,
+        _ => Array.Empty<string>(),
+    };
+
+    private static IReadOnlyList<string> MixCandidatesOf(object? dc) => dc switch
+    {
+        ActionRow a => a.MixCandidates,
+        _ => Array.Empty<string>(),
+    };
 
     private static List<string> FilterCandidates(IReadOnlyList<string> candidates, string? text)
     {
