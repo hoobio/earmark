@@ -101,6 +101,7 @@ public partial class App : Application
 
             var chrome = _host.Services.GetRequiredService<IWindowChromeManager>();
             chrome.Attach(_window);
+            _host.Services.GetRequiredService<IQuickControlsService>().Start();
 
             var settings = _host.Services.GetRequiredService<ISettingsService>().Current;
             var startHidden = LaunchToTrayRequested || settings.LaunchToTray;

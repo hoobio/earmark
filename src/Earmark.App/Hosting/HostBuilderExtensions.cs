@@ -47,6 +47,8 @@ internal static class HostBuilderExtensions
         builder.Services.AddSingleton<IInAppNotificationService, InAppNotificationService>();
         builder.Services.AddSingleton<IProcessControlService, ProcessControlService>();
         builder.Services.AddSingleton<IUpdateService, UpdateService>();
+        builder.Services.AddSingleton<IGlobalHotkeyService, GlobalHotkeyService>();
+        builder.Services.AddSingleton<IQuickControlsService, QuickControlsService>();
         builder.Services.AddSingleton<IEndpointWriter, EndpointWriter>();
         builder.Services.AddSingleton<ISessionIconService, SessionIconService>();
         builder.Services.AddSingleton<IWaveLinkNameReconciler, WaveLinkNameReconciler>();
@@ -55,6 +57,7 @@ internal static class HostBuilderExtensions
         builder.Services.AddSingleton<StartupSettingsApplier>();
 
         builder.Services.AddSingleton<MainWindow>();
+        builder.Services.AddSingleton<QuickControlsWindow>();
         builder.Services.AddSingleton<ShellViewModel>();
         builder.Services.AddSingleton<HomeViewModel>();
         builder.Services.AddSingleton<RulesViewModel>();

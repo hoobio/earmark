@@ -39,6 +39,7 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     private readonly IAudioEndpointService _endpoints;
     private readonly IEndpointWriter _writer;
     private readonly Action<DeviceCard, VisibilityState> _onVisibilityToggled;
+    private readonly Action<DeviceCard> _onQuickPinToggled;
     private readonly Action<DeviceCard> _onVolumeControlsToggled;
     private readonly Action<DeviceCard> _onCustomisationChanged;
     private readonly Action<DeviceCard> _onBluetoothToggle;
@@ -61,6 +62,7 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         PeakMeterOptions meterOptions,
         DeviceCardSnapshot snapshot,
         Action<DeviceCard, VisibilityState> onUserVisibilityToggled,
+        Action<DeviceCard> onQuickPinToggled,
         Action<DeviceCard> onVolumeControlsToggled,
         Action<DeviceCard> onCustomisationChanged,
         Action<DeviceCard> onBluetoothToggle)
@@ -69,6 +71,7 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         _endpoints = endpoints;
         _writer = writer;
         _onVisibilityToggled = onUserVisibilityToggled;
+        _onQuickPinToggled = onQuickPinToggled;
         _onVolumeControlsToggled = onVolumeControlsToggled;
         _onCustomisationChanged = onCustomisationChanged;
         _onBluetoothToggle = onBluetoothToggle;
@@ -108,6 +111,7 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         }
         IsHiddenByUser = snapshot.IsHiddenByUser;
         IsPinnedByUser = snapshot.IsPinnedByUser;
+        IsQuickPinned = snapshot.IsQuickPinned;
         IsVolumeControlsHiddenByUser = snapshot.IsVolumeControlsHiddenByUser;
     }
 
@@ -369,6 +373,18 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     [ObservableProperty]
     public partial bool IsPinnedByUser { get; set; }
 
+    [ObservableProperty]
+    public partial bool IsQuickPinned { get; set; }
+
+    public bool CanQuickPin => IsQuickPinned || !IsEffectivelyHidden;
+    public string QuickPinToggleLabel => IsQuickPinned ? "Unpin from Quick Controls" : "Pin to Quick Controls";
+    public string QuickPinToggleGlyph => IsQuickPinned ? new string((char)0xE840, 1) : new string((char)0xE718, 1);
+
+    [ObservableProperty]
+    public partial bool IsPointerOver { get; set; }
+
+    public bool ShowQuickPinAffordance => IsPointerOver && CanQuickPin;
+
     /// <summary>User has hidden the volume slider + mute toggle for this device (the card itself
     /// stays visible). For endpoints whose volume/mute don't affect output - e.g. a USB DAC/amp
     /// with an analog volume knob - Windows still reports a normal, writable control, so this is a
@@ -442,6 +458,8 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     partial void OnIsGroupMemberChanged(bool value)
     {
         OnPropertyChanged(nameof(CardOpacity));
+        OnPropertyChanged(nameof(CanQuickPin));
+        OnPropertyChanged(nameof(ShowQuickPinAffordance));
     }
 
     /// <summary>True while a drag is hovering this card's centre with intent to group onto it.
@@ -471,6 +489,7 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         get
         {
             if (IsHiddenByUser) return true;
+            if (IsQuickPinned) return false;
             if (IsPinnedByUser) return false;
             if (IsDefault || IsDefaultCommunications) return false;
             return HasNoRules;
@@ -701,6 +720,7 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
 
         IsHiddenByUser = snapshot.IsHiddenByUser;
         IsPinnedByUser = snapshot.IsPinnedByUser;
+        IsQuickPinned = snapshot.IsQuickPinned;
         IsVolumeControlsHiddenByUser = snapshot.IsVolumeControlsHiddenByUser;
 
         // Customisation overrides without the persist callback (this is a refresh, not a user edit).
@@ -789,6 +809,28 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         }
 
         _onVisibilityToggled?.Invoke(this, prev);
+    }
+
+    [RelayCommand]
+    public void ToggleQuickPin()
+    {
+        if (!CanQuickPin) return;
+        IsQuickPinned = !IsQuickPinned;
+        if (IsQuickPinned)
+        {
+            IsHiddenByUser = false;
+        }
+        _onQuickPinToggled?.Invoke(this);
+    }
+
+    public void SetQuickPin(bool pinned)
+    {
+        IsQuickPinned = pinned;
+        if (pinned)
+        {
+            IsHiddenByUser = false;
+        }
+        _onQuickPinToggled?.Invoke(this);
     }
 
     /// <summary>Toggles whether this device's volume slider + mute control are shown. Persisted by
@@ -998,12 +1040,30 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         OnPropertyChanged(nameof(CardOpacity));
         OnPropertyChanged(nameof(HideToggleGlyph));
         OnPropertyChanged(nameof(HideToggleTooltip));
+        OnPropertyChanged(nameof(CanQuickPin));
+        OnPropertyChanged(nameof(ShowQuickPinAffordance));
     }
 
     partial void OnIsPinnedByUserChanged(bool value)
     {
         OnPropertyChanged(nameof(IsEffectivelyHidden));
         OnPropertyChanged(nameof(CardOpacity));
+        OnPropertyChanged(nameof(HideToggleGlyph));
+        OnPropertyChanged(nameof(HideToggleTooltip));
+        OnPropertyChanged(nameof(CanQuickPin));
+        OnPropertyChanged(nameof(ShowQuickPinAffordance));
+    }
+
+    partial void OnIsPointerOverChanged(bool value) => OnPropertyChanged(nameof(ShowQuickPinAffordance));
+
+    partial void OnIsQuickPinnedChanged(bool value)
+    {
+        OnPropertyChanged(nameof(IsEffectivelyHidden));
+        OnPropertyChanged(nameof(CardOpacity));
+        OnPropertyChanged(nameof(CanQuickPin));
+        OnPropertyChanged(nameof(QuickPinToggleLabel));
+        OnPropertyChanged(nameof(QuickPinToggleGlyph));
+        OnPropertyChanged(nameof(ShowQuickPinAffordance));
         OnPropertyChanged(nameof(HideToggleGlyph));
         OnPropertyChanged(nameof(HideToggleTooltip));
     }

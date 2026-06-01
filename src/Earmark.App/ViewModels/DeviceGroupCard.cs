@@ -54,6 +54,17 @@ public partial class DeviceGroupCard : ObservableObject, IBlockLayoutInfo
     [ObservableProperty]
     public partial string Title { get; set; }
 
+    [ObservableProperty]
+    public partial bool IsQuickPinned { get; set; }
+
+    public string QuickPinToggleLabel => IsQuickPinned ? "Unpin from Quick Controls" : "Pin to Quick Controls";
+    public string QuickPinToggleGlyph => IsQuickPinned ? new string((char)0xE840, 1) : new string((char)0xE718, 1);
+
+    [ObservableProperty]
+    public partial bool IsPointerOver { get; set; }
+
+    public bool ShowQuickPinAffordance => IsPointerOver && !IsEditingTitle;
+
     /// <summary>True while the title is being edited (double-tap / Rename): the read-only label swaps
     /// to a text box. The label is the group's drag handle, so editing is entered explicitly.</summary>
     [ObservableProperty]
@@ -61,7 +72,13 @@ public partial class DeviceGroupCard : ObservableObject, IBlockLayoutInfo
 
     public bool ShowTitleLabel => !IsEditingTitle;
 
-    partial void OnIsEditingTitleChanged(bool value) => OnPropertyChanged(nameof(ShowTitleLabel));
+    partial void OnIsEditingTitleChanged(bool value)
+    {
+        OnPropertyChanged(nameof(ShowTitleLabel));
+        OnPropertyChanged(nameof(ShowQuickPinAffordance));
+    }
+
+    partial void OnIsPointerOverChanged(bool value) => OnPropertyChanged(nameof(ShowQuickPinAffordance));
 
     /// <summary>Shows the container's dotted outline. The page flips this on every group while a drag
     /// is in flight, so groups read as transparent at rest and reveal their bounds only while dragging.</summary>
@@ -98,15 +115,23 @@ public partial class DeviceGroupCard : ObservableObject, IBlockLayoutInfo
 
     /// <summary>Refreshes the title from the persisted record without firing the change callback
     /// (used when reconciling existing group cards on a rebuild).</summary>
-    public void SyncFrom(string title)
+    public void SyncFrom(string title, bool isQuickPinned)
     {
         _suppressChanged = true;
         Title = title;
+        IsQuickPinned = isQuickPinned;
         _suppressChanged = false;
     }
 
     partial void OnTitleChanged(string value)
     {
+        if (!_suppressChanged) _onChanged?.Invoke(this);
+    }
+
+    partial void OnIsQuickPinnedChanged(bool value)
+    {
+        OnPropertyChanged(nameof(QuickPinToggleLabel));
+        OnPropertyChanged(nameof(QuickPinToggleGlyph));
         if (!_suppressChanged) _onChanged?.Invoke(this);
     }
 }

@@ -16,18 +16,21 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     private readonly IWaveLinkService _waveLink;
     private readonly IDispatcherQueueProvider _dispatcher;
     private readonly IDeviceDefaultsService _defaults;
+    private readonly IGlobalHotkeyService _hotkey;
     private bool _suppress;
 
     public SettingsViewModel(
         ISettingsService settings,
         IWaveLinkService waveLink,
         IDispatcherQueueProvider dispatcher,
-        IDeviceDefaultsService defaults)
+        IDeviceDefaultsService defaults,
+        IGlobalHotkeyService hotkey)
     {
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
         _waveLink = waveLink ?? throw new ArgumentNullException(nameof(waveLink));
         _dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
         _defaults = defaults ?? throw new ArgumentNullException(nameof(defaults));
+        _hotkey = hotkey ?? throw new ArgumentNullException(nameof(hotkey));
         _waveLink.StateChanged += OnWaveLinkStateChanged;
         SyncFromSettings();
         SyncFromWaveLink();
@@ -51,6 +54,19 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
 
     [ObservableProperty]
     public partial bool LaunchToTray { get; set; }
+
+    [ObservableProperty]
+    public partial bool QuickControlsEnabled { get; set; }
+
+    [ObservableProperty]
+    public partial string QuickControlsHotkey { get; set; } = string.Empty;
+
+    [ObservableProperty]
+    public partial int QuickControlsBackdropIndex { get; set; }
+
+    public string QuickControlsHotkeyStatus => _hotkey.IsRegistered
+        ? $"Global shortcut: {QuickControlsHotkey}"
+        : _hotkey.RegistrationError ?? $"Global shortcut: {QuickControlsHotkey}";
 
     [ObservableProperty]
     public partial bool VerboseLogging { get; set; }
@@ -172,6 +188,9 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
             MinimizeToTray = _settings.Current.MinimizeToTray;
             CloseToTray = _settings.Current.CloseToTray;
             LaunchToTray = _settings.Current.LaunchToTray;
+            QuickControlsEnabled = _settings.Current.QuickControlsEnabled;
+            QuickControlsHotkey = _settings.Current.QuickControlsHotkey;
+            QuickControlsBackdropIndex = (int)_settings.Current.QuickControlsBackdrop;
             VerboseLogging = _settings.Current.VerboseLogging;
             ShowAppIndicators = _settings.Current.ShowAppIndicators;
             ShowAppPeakMeters = _settings.Current.ShowAppPeakMeters;
@@ -207,7 +226,31 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     partial void OnMinimizeToTrayChanged(bool value) => Persist(s => s.MinimizeToTray = value);
     partial void OnCloseToTrayChanged(bool value) => Persist(s => s.CloseToTray = value);
     partial void OnLaunchToTrayChanged(bool value) => Persist(s => s.LaunchToTray = value);
+    partial void OnQuickControlsEnabledChanged(bool value)
+    {
+        Persist(s => s.QuickControlsEnabled = value);
+        _hotkey.TryRegister(_settings.Current.QuickControlsHotkey);
+        OnPropertyChanged(nameof(QuickControlsHotkeyStatus));
+    }
     partial void OnVerboseLoggingChanged(bool value) => Persist(s => s.VerboseLogging = value);
+    partial void OnQuickControlsBackdropIndexChanged(int value) => Persist(s => s.QuickControlsBackdrop = (QuickControlsBackdropMode)value);
+
+    public bool TrySetQuickControlsHotkey(string hotkey)
+    {
+        if (!HotkeyGesture.TryParse(hotkey, out var gesture) || !gesture.HasPreferredModifier)
+        {
+            return false;
+        }
+        if (!_hotkey.TryRegister(gesture.ToString()))
+        {
+            OnPropertyChanged(nameof(QuickControlsHotkeyStatus));
+            return false;
+        }
+        QuickControlsHotkey = gesture.ToString();
+        Persist(s => s.QuickControlsHotkey = QuickControlsHotkey);
+        OnPropertyChanged(nameof(QuickControlsHotkeyStatus));
+        return true;
+    }
 
     partial void OnShowAppIndicatorsChanged(bool value)
     {

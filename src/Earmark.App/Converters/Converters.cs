@@ -40,6 +40,13 @@ public sealed class NullableToVisibilityConverter : IValueConverter
         throw new NotSupportedException();
 }
 
+public sealed class EnumToStringConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, string language) => value?.ToString() ?? string.Empty;
+
+    public object ConvertBack(object value, Type targetType, object parameter, string language) => throw new NotSupportedException();
+}
+
 public sealed class SatisfiedGlyphConverter : IValueConverter
 {
     // Segoe MDL2 Assets: CheckMark (E73E), Cancel (E711).
@@ -74,6 +81,22 @@ public sealed class SatisfiedTooltipConverter : IValueConverter
 
     public object ConvertBack(object value, Type targetType, object parameter, string language) =>
         throw new NotSupportedException();
+}
+
+public sealed class QuickPinBrushConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, string language)
+    {
+        var key = value is bool b && b ? "AccentTextFillColorPrimaryBrush" : "TextFillColorTertiaryBrush";
+        if (Application.Current.Resources.TryGetValue(key, out var brush) && brush is Brush resolved)
+        {
+            return resolved;
+        }
+
+        return new SolidColorBrush(Microsoft.UI.Colors.Gray);
+    }
+
+    public object ConvertBack(object value, Type targetType, object parameter, string language) => throw new NotSupportedException();
 }
 
 public sealed class WaveLinkStateBrushConverter : IValueConverter
@@ -215,20 +238,4 @@ public sealed class ColorToBrushConverter : IValueConverter
 
     public object ConvertBack(object value, Type targetType, object parameter, string language) =>
         value is SolidColorBrush b ? b.Color : Microsoft.UI.Colors.Transparent;
-}
-
-public sealed class EnumToStringConverter : IValueConverter
-{
-    public object Convert(object value, Type targetType, object parameter, string language) =>
-        value?.ToString() ?? string.Empty;
-
-    public object ConvertBack(object value, Type targetType, object parameter, string language)
-    {
-        if (value is string s && targetType.IsEnum)
-        {
-            return Enum.Parse(targetType, s);
-        }
-
-        return value;
-    }
 }

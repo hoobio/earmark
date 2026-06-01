@@ -19,6 +19,10 @@ public sealed class AppSettings
     [JsonIgnore]
     public const int DeviceKeySchemaVersion = 1;
 
+    /// <summary>The schema version once default Quick Controls pins have been seeded.</summary>
+    [JsonIgnore]
+    public const int QuickControlsSeedSchemaVersion = 2;
+
     public bool LaunchOnStartup { get; set; }
 
     public bool ShowTrayIcon { get; set; } = true;
@@ -28,6 +32,12 @@ public sealed class AppSettings
     public bool CloseToTray { get; set; }
 
     public bool LaunchToTray { get; set; }
+
+    public bool QuickControlsEnabled { get; set; } = true;
+
+    public string QuickControlsHotkey { get; set; } = "Win+Alt+V";
+
+    public QuickControlsBackdropMode QuickControlsBackdrop { get; set; } = QuickControlsBackdropMode.UseAppAppearance;
 
     public bool VerboseLogging { get; set; }
 
@@ -255,6 +265,9 @@ public sealed class DeviceConfig
     /// rule (but not <see cref="Hidden"/>).</summary>
     public bool? Pinned { get; set; }
 
+    /// <summary>User has pinned this device to the Quick Controls overlay.</summary>
+    public bool? PinnedToQuickControls { get; set; }
+
     /// <summary>User has hidden this device's volume slider + mute toggle (the card stays visible).
     /// For endpoints whose volume control doesn't affect output (e.g. a USB DAC/amp with an analog
     /// knob), Windows still reports a writable control, so this is a manual opt-out.</summary>
@@ -272,7 +285,7 @@ public sealed class DeviceConfig
     /// pruned from the map on save. Not serialised (it's a derived helper, not stored state).</summary>
     [JsonIgnore]
     public bool IsDefault => Hidden is not true && Pinned is not true && VolumeControlsHidden is not true
-        && Glyph is null && AccentColour is null;
+        && PinnedToQuickControls is not true && Glyph is null && AccentColour is null;
 }
 
 /// <summary>
@@ -288,6 +301,8 @@ public sealed class DeviceGroup
     public string Id { get; set; } = string.Empty;
 
     public string Title { get; set; } = string.Empty;
+
+    public bool PinnedToQuickControls { get; set; }
 
     /// <summary>Member <see cref="Earmark.Core.Models.DeviceIdentity"/> keys, in left-to-right member order.</summary>
     public List<string> MemberIds { get; set; } = new();

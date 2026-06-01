@@ -55,6 +55,8 @@
                     AllowDrop="True"
                     CanDrag="True"
                     Tag="{x:Bind}"
+                    PointerEntered="OnDeviceCardPointerEntered"
+                    PointerExited="OnDeviceCardPointerExited"
                     DragStarting="OnDeviceCardDragStarting"
                     DropCompleted="OnDeviceCardDropCompleted"
                     DragOver="OnDeviceCardDragOver"
@@ -64,9 +66,17 @@
                 <Border.ContextFlyout>
                     <MenuFlyout>
                         <MenuFlyoutItem Text="{x:Bind HideToggleTooltip, Mode=OneWay}"
-                                        Command="{x:Bind ToggleUserVisibilityCommand}">
+                                        Click="OnDeviceVisibilityClicked"
+                                        Tag="{x:Bind}">
                             <MenuFlyoutItem.Icon>
                                 <FontIcon Glyph="{x:Bind HideToggleGlyph, Mode=OneWay}" />
+                            </MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+                        <MenuFlyoutItem Text="{x:Bind QuickPinToggleLabel, Mode=OneWay}"
+                                        Command="{x:Bind ToggleQuickPinCommand}"
+                                        Visibility="{x:Bind CanQuickPin, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <MenuFlyoutItem.Icon>
+                                <FontIcon Glyph="{x:Bind QuickPinToggleGlyph, Mode=OneWay}" />
                             </MenuFlyoutItem.Icon>
                         </MenuFlyoutItem>
                         <!-- Customise the card glyph + accent colour + volume-controls visibility.
@@ -217,11 +227,42 @@
                                  card instance is now REUSED across a rebuild (persistence / instance
                                  reuse), so name / subtitle / default pills / rules must refresh in
                                  place rather than only on a fresh element. -->
-                            <TextBlock Text="{x:Bind DeviceNameOnly, Mode=OneWay}"
-                                       Style="{StaticResource BodyStrongTextBlockStyle}"
-                                       TextWrapping="NoWrap"
-                                       TextTrimming="CharacterEllipsis"
-                                       ToolTipService.ToolTip="{x:Bind DisplayName, Mode=OneWay}" />
+                            <Grid ColumnSpacing="6">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="{x:Bind DeviceNameOnly, Mode=OneWay}"
+                                           Style="{StaticResource BodyStrongTextBlockStyle}"
+                                           TextWrapping="NoWrap"
+                                           TextTrimming="CharacterEllipsis"
+                                           ToolTipService.ToolTip="{x:Bind DisplayName, Mode=OneWay}" />
+                                <Button Grid.Column="1"
+                                    Width="16" Height="16"
+                                    MinWidth="0" MinHeight="0"
+                                        Padding="0"
+                                        Background="Transparent"
+                                        BorderBrush="Transparent"
+                                        BorderThickness="0"
+                                        Command="{x:Bind ToggleQuickPinCommand}"
+                                        Visibility="{x:Bind ShowQuickPinAffordance, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                        ToolTipService.ToolTip="{x:Bind QuickPinToggleLabel, Mode=OneWay}"
+                                        AutomationProperties.Name="{x:Bind QuickPinToggleLabel, Mode=OneWay}">
+                                    <Button.Resources>
+                                        <SolidColorBrush x:Key="ButtonBackground" Color="Transparent" />
+                                        <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="Transparent" />
+                                        <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="Transparent" />
+                                        <SolidColorBrush x:Key="ButtonBackgroundDisabled" Color="Transparent" />
+                                        <SolidColorBrush x:Key="ButtonBorderBrush" Color="Transparent" />
+                                        <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="Transparent" />
+                                        <SolidColorBrush x:Key="ButtonBorderBrushPressed" Color="Transparent" />
+                                        <SolidColorBrush x:Key="ButtonBorderBrushDisabled" Color="Transparent" />
+                                    </Button.Resources>
+                                    <FontIcon Glyph="{x:Bind QuickPinToggleGlyph, Mode=OneWay}"
+                                              FontSize="12"
+                                              Foreground="{x:Bind IsQuickPinned, Mode=OneWay, Converter={StaticResource QuickPinBrushConverter}}" />
+                                </Button>
+                            </Grid>
                             <TextBlock Text="{x:Bind DeviceIdSubtext, Mode=OneWay}"
                                        Style="{StaticResource CaptionTextBlockStyle}"
                                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
@@ -269,24 +310,24 @@
                              id rows. The name / subtitle live in the * column, so they ellipsify to
                              make room for this button. Shown only on Bluetooth devices. Disabled and
                              shows a spinner for 3 seconds after click. -->
-                        <Button Grid.Column="2"
-                                VerticalAlignment="Top"
-                                Width="32" Height="32"
-                                Padding="0"
-                                Background="{ThemeResource SubtleFillColorSecondaryBrush}"
-                                CornerRadius="{ThemeResource ControlCornerRadius}"
-                                Visibility="{x:Bind ShowBluetoothButton, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
-                                IsEnabled="{x:Bind IsBluetoothConnecting, Mode=OneWay, Converter={StaticResource NegatedBooleanConverter}}"
-                                Command="{x:Bind ToggleBluetoothCommand}"
-                                ToolTipService.ToolTip="{x:Bind BluetoothToggleTooltip, Mode=OneWay}"
-                                AutomationProperties.Name="{x:Bind BluetoothToggleTooltip, Mode=OneWay}">
-                            <Grid>
-                                <FontIcon Glyph="{x:Bind BluetoothToggleGlyph, Mode=OneWay}" FontSize="16"
-                                          Visibility="{x:Bind IsBluetoothConnecting, Mode=OneWay, Converter={StaticResource NegatedBooleanToVisibilityConverter}}" />
-                                <ProgressRing Width="16" Height="16"
-                                              Visibility="{x:Bind IsBluetoothConnecting, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                            </Grid>
-                        </Button>
+                        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" VerticalAlignment="Top">
+                            <Button Width="32" Height="32"
+                                    Padding="0"
+                                    Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                                    CornerRadius="{ThemeResource ControlCornerRadius}"
+                                    Visibility="{x:Bind ShowBluetoothButton, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                    IsEnabled="{x:Bind IsBluetoothConnecting, Mode=OneWay, Converter={StaticResource NegatedBooleanConverter}}"
+                                    Command="{x:Bind ToggleBluetoothCommand}"
+                                    ToolTipService.ToolTip="{x:Bind BluetoothToggleTooltip, Mode=OneWay}"
+                                    AutomationProperties.Name="{x:Bind BluetoothToggleTooltip, Mode=OneWay}">
+                                <Grid>
+                                    <FontIcon Glyph="{x:Bind BluetoothToggleGlyph, Mode=OneWay}" FontSize="16"
+                                              Visibility="{x:Bind IsBluetoothConnecting, Mode=OneWay, Converter={StaticResource NegatedBooleanToVisibilityConverter}}" />
+                                    <ProgressRing Width="16" Height="16"
+                                                  Visibility="{x:Bind IsBluetoothConnecting, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                </Grid>
+                            </Button>
+                        </StackPanel>
                     </Grid>
 
                     <!-- Volume row. "Hide volume controls" hides the slider + readout + lock
@@ -607,9 +648,17 @@
                                                 </MenuFlyoutItem>
                                                 <MenuFlyoutSeparator />
                                                 <MenuFlyoutItem Text="{x:Bind OwnerCard.HideToggleTooltip, Mode=OneWay}"
-                                                                Command="{x:Bind OwnerCard.ToggleUserVisibilityCommand}">
+                                                                Click="OnDeviceVisibilityClicked"
+                                                                Tag="{x:Bind OwnerCard}">
                                                     <MenuFlyoutItem.Icon>
                                                         <FontIcon Glyph="{x:Bind OwnerCard.HideToggleGlyph, Mode=OneWay}" />
+                                                    </MenuFlyoutItem.Icon>
+                                                </MenuFlyoutItem>
+                                                <MenuFlyoutItem Text="{x:Bind OwnerCard.QuickPinToggleLabel, Mode=OneWay}"
+                                                                Command="{x:Bind OwnerCard.ToggleQuickPinCommand}"
+                                                                Visibility="{x:Bind OwnerCard.CanQuickPin, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                                    <MenuFlyoutItem.Icon>
+                                                        <FontIcon Glyph="{x:Bind OwnerCard.QuickPinToggleGlyph, Mode=OneWay}" />
                                                     </MenuFlyoutItem.Icon>
                                                 </MenuFlyoutItem>
                                                 <MenuFlyoutItem Text="{x:Bind OwnerCard.VolumeControlsToggleLabel, Mode=OneWay}"
@@ -792,10 +841,13 @@
                         <!-- Title band. Doubles as the group's drag handle (drag to reorder the whole
                              section); double-tap / context "Rename" edits the title; context "Ungroup
                              all" disbands the group. -->
-                        <Grid Grid.Row="0" Padding="2,0,4,0"
-                              Background="Transparent"
+                        <Grid x:Name="GroupTitleBand"
+                            Grid.Row="0" Padding="2,0,4,0"
+                                                            Background="{ThemeResource GroupTitleBandBackgroundBrush}"
                               CanDrag="True"
                               Tag="{x:Bind}"
+                              PointerEntered="OnGroupPointerEntered"
+                              PointerExited="OnGroupPointerExited"
                               DragStarting="OnGroupHeaderDragStarting"
                               DropCompleted="OnGroupHeaderDropCompleted"
                               DoubleTapped="OnGroupTitleDoubleTapped"
@@ -822,13 +874,17 @@
                                     </MenuFlyoutItem>
                                 </MenuFlyout>
                             </Grid.ContextFlyout>
-                            <TextBlock Text="{x:Bind Title, Mode=OneWay}"
-                                       VerticalAlignment="Center"
-                                       FontWeight="SemiBold"
-                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                       TextTrimming="CharacterEllipsis"
-                                       TextWrapping="NoWrap"
-                                       Visibility="{x:Bind ShowTitleLabel, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                            <StackPanel Orientation="Horizontal"
+                                        Spacing="6"
+                                        VerticalAlignment="Top"
+                                        Visibility="{x:Bind ShowTitleLabel, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                <TextBlock Text="{x:Bind Title, Mode=OneWay}"
+                                           VerticalAlignment="Top"
+                                           FontWeight="SemiBold"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                           TextTrimming="CharacterEllipsis"
+                                           TextWrapping="NoWrap" />
+                            </StackPanel>
                             <TextBox Text="{x:Bind Title, Mode=TwoWay}"
                                      Visibility="{x:Bind IsEditingTitle, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
                                      Tag="{x:Bind}"
