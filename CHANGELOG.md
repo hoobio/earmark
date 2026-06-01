@@ -1,5 +1,77 @@
 # Changelog
 
+## [0.2.0](https://github.com/hoobio/earmark/compare/v0.1.9...v0.2.0) (2026-06-01)
+
+
+### ⚠ BREAKING CHANGES
+
+* **rules:** pinned/one-shot actions, drag-and-drop, consolidated schema ([#49](https://github.com/hoobio/earmark/issues/49))
+* **devices:** rules.json schema replaced - actions and conditions now use a Kind plus orthogonal mode fields (direction / membership / muted) and a Pinned flag; the old type-per-row enum no longer deserialises.
+
+### Features
+
+* add "always show pinned apps" setting for rule-pinned chips ([dd387a6](https://github.com/hoobio/earmark/commit/dd387a6c2715e1eedc9305f69f591d951ae40bbb))
+* add appearance backdrop setting (Mica, Acrylic, Solid) ([#39](https://github.com/hoobio/earmark/issues/39)) ([7f2769a](https://github.com/hoobio/earmark/commit/7f2769a4d1286d2d999c7e80710145b7dfea0511))
+* add Devices-page reset to default and new-install seeding ([baffea1](https://github.com/hoobio/earmark/commit/baffea1346924afcbd953e1ce1a0cecbdb484761))
+* card-height and card-divider options for the Devices page ([dd387a6](https://github.com/hoobio/earmark/commit/dd387a6c2715e1eedc9305f69f591d951ae40bbb))
+* close and terminate an app from its chip menu, across all the ([dd387a6](https://github.com/hoobio/earmark/commit/dd387a6c2715e1eedc9305f69f591d951ae40bbb))
+* device customisation panel (glyph + accent colour) ([#46](https://github.com/hoobio/earmark/issues/46)) ([34956eb](https://github.com/hoobio/earmark/commit/34956ebfd318fe20fd08d8e2105c762c094245a8))
+* Devices app chips, close/terminate, undo, and card options ([#44](https://github.com/hoobio/earmark/issues/44)) ([dd387a6](https://github.com/hoobio/earmark/commit/dd387a6c2715e1eedc9305f69f591d951ae40bbb))
+* Devices page options menu (show title bar / show hidden / lock ([288d13a](https://github.com/hoobio/earmark/commit/288d13a7cc043fd0f3c4d7eaffd6818d1c8d0040))
+* **devices:** add a Bluetooth connect/disconnect button on Bluetooth ([c6feb57](https://github.com/hoobio/earmark/commit/c6feb5797b44d5ac89ed8d617e556a1524a32b0e))
+* **devices:** add persisted device-card display toggles ([1ea0d9e](https://github.com/hoobio/earmark/commit/1ea0d9e0afcfee16dd84dba97dd08aa615044580))
+* hide an app's chip on a single device from its chip context menu ([34956eb](https://github.com/hoobio/earmark/commit/34956ebfd318fe20fd08d8e2105c762c094245a8))
+* hide app chips via a context menu, manage from settings ([#41](https://github.com/hoobio/earmark/issues/41)) ([8e62187](https://github.com/hoobio/earmark/commit/8e62187c223682f26182f093af0d316b3ceb30e1))
+* per-device accents, customise dialog, and Devices page options ([#47](https://github.com/hoobio/earmark/issues/47)) ([288d13a](https://github.com/hoobio/earmark/commit/288d13a7cc043fd0f3c4d7eaffd6818d1c8d0040))
+* per-device app-chip indicators with drag-to-reroute on the Devices ([dd387a6](https://github.com/hoobio/earmark/commit/dd387a6c2715e1eedc9305f69f591d951ae40bbb))
+* per-device deterministic accent colours, reworked customise ([288d13a](https://github.com/hoobio/earmark/commit/288d13a7cc043fd0f3c4d7eaffd6818d1c8d0040))
+* persist disconnected devices and add the Show disconnected filter ([#48](https://github.com/hoobio/earmark/issues/48)) ([c6feb57](https://github.com/hoobio/earmark/commit/c6feb5797b44d5ac89ed8d617e556a1524a32b0e))
+* persist the navigation pane expand/collapse state across ([dd387a6](https://github.com/hoobio/earmark/commit/dd387a6c2715e1eedc9305f69f591d951ae40bbb))
+* **rules:** flag matched-but-disconnected devices in the match chip ([1ea0d9e](https://github.com/hoobio/earmark/commit/1ea0d9e0afcfee16dd84dba97dd08aa615044580))
+* **rules:** per-field match modes (regex / wildcard / exact) with a ([1ea0d9e](https://github.com/hoobio/earmark/commit/1ea0d9e0afcfee16dd84dba97dd08aa615044580))
+* **rules:** pinned/one-shot actions, drag-and-drop, consolidated schema ([#49](https://github.com/hoobio/earmark/issues/49)) ([1ea0d9e](https://github.com/hoobio/earmark/commit/1ea0d9e0afcfee16dd84dba97dd08aa615044580))
+* **rules:** warn when an action is superseded by a higher-priority rule ([1ea0d9e](https://github.com/hoobio/earmark/commit/1ea0d9e0afcfee16dd84dba97dd08aa615044580))
+* undo app-chip hide, reorder, and group changes with Ctrl+Z ([dd387a6](https://github.com/hoobio/earmark/commit/dd387a6c2715e1eedc9305f69f591d951ae40bbb))
+
+
+### Bug Fixes
+
+* allow click-to-mute on the device icon when volume controls are ([34956eb](https://github.com/hoobio/earmark/commit/34956ebfd318fe20fd08d8e2105c762c094245a8))
+* always animate the Devices card reflow (apps row, device ([dd387a6](https://github.com/hoobio/earmark/commit/dd387a6c2715e1eedc9305f69f591d951ae40bbb))
+* expanding a card's rules no longer shrinks a shorter sibling card ([dd387a6](https://github.com/hoobio/earmark/commit/dd387a6c2715e1eedc9305f69f591d951ae40bbb))
+* glide app chips on re-sort by ranking, not collection Move ([dd387a6](https://github.com/hoobio/earmark/commit/dd387a6c2715e1eedc9305f69f591d951ae40bbb))
+* keep the device accent tile coloured while a mute rule is active ([288d13a](https://github.com/hoobio/earmark/commit/288d13a7cc043fd0f3c4d7eaffd6818d1c8d0040))
+* lay out Insights.Resource.dll for self-contained app notifications ([dd387a6](https://github.com/hoobio/earmark/commit/dd387a6c2715e1eedc9305f69f591d951ae40bbb))
+* move a device directly from one group into another in one drag ([dd387a6](https://github.com/hoobio/earmark/commit/dd387a6c2715e1eedc9305f69f591d951ae40bbb))
+
+
+### Documentation
+
+* note the backdrop setting in the design-language section ([7f2769a](https://github.com/hoobio/earmark/commit/7f2769a4d1286d2d999c7e80710145b7dfea0511))
+* rewrite the rule schema reference for the consolidated model ([1ea0d9e](https://github.com/hoobio/earmark/commit/1ea0d9e0afcfee16dd84dba97dd08aa615044580))
+* spec loopback / listening chip suppression heuristic ([#45](https://github.com/hoobio/earmark/issues/45)) ([16b4aad](https://github.com/hoobio/earmark/commit/16b4aadcd598be4e04a12263abf8e3917f6daf45))
+
+
+### Code Refactoring
+
+* **devices:** split oversized DeviceCard and HomeViewModel into ([c6feb57](https://github.com/hoobio/earmark/commit/c6feb5797b44d5ac89ed8d617e556a1524a32b0e))
+
+
+### Tests
+
+* cover rule matcher, device-rule resolver, and shadow analyzer ([1ea0d9e](https://github.com/hoobio/earmark/commit/1ea0d9e0afcfee16dd84dba97dd08aa615044580))
+* **devices:** cover device-key identity, list filter, and store re-key ([c6feb57](https://github.com/hoobio/earmark/commit/c6feb5797b44d5ac89ed8d617e556a1524a32b0e))
+
+
+### Build System
+
+* update dependencies to latest stable ([dd387a6](https://github.com/hoobio/earmark/commit/dd387a6c2715e1eedc9305f69f591d951ae40bbb))
+
+
+### Continuous Integration
+
+* use the release-please PR body for pre-release notes ([288d13a](https://github.com/hoobio/earmark/commit/288d13a7cc043fd0f3c4d7eaffd6818d1c8d0040))
+
 ## [0.1.9](https://github.com/hoobio/earmark/compare/v0.1.8...v0.1.9) (2026-05-30)
 
 
