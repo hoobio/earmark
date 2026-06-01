@@ -206,13 +206,19 @@ public partial class HomeViewModel : ObservableObject, IDisposable
 
     public IReadOnlyList<DeviceCard> VisibleCards => _visibleCards;
 
+    public event EventHandler? QuickControlContentChanged;
+
     /// <summary>Single chokepoint for "this card's apps changed": refreshes the card's HasApps-derived
     /// bindings (section visibility, layout opt-out, dividers). Called wherever a chip is added /
     /// removed. The resulting reflow is animated by the page's always-on block slide, so there's no
     /// signal to raise here.</summary>
-    private static void NotifyCardApps(DeviceCard card)
+    private void NotifyCardApps(DeviceCard card)
     {
         card.NotifyAppsChanged();
+        if (card.IsQuickPinned)
+        {
+            QuickControlContentChanged?.Invoke(this, EventArgs.Empty);
+        }
     }
 
     /// <summary>Group container VMs by id, reused across rebuilds so an in-progress title edit and
@@ -1590,11 +1596,34 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     {
         var desired = new List<object>();
         var liveQuickGroups = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var pendingUngroupedCards = new List<DeviceCard>();
+        var pseudoGroupIndex = 0;
+
+        void FlushUngroupedCards()
+        {
+            if (pendingUngroupedCards.Count == 1)
+            {
+                desired.Add(pendingUngroupedCards[0]);
+            }
+            else if (pendingUngroupedCards.Count > 1)
+            {
+                var key = $"pseudo-{pseudoGroupIndex++}:{pendingUngroupedCards[0].DeviceKey}";
+                var quickGroup = GetQuickControlPseudoGroup(key);
+                RemoveMissing(quickGroup.Members, pendingUngroupedCards);
+                PositionInPlace(quickGroup.Members, pendingUngroupedCards);
+                desired.Add(quickGroup);
+                liveQuickGroups.Add(key);
+            }
+
+            pendingUngroupedCards.Clear();
+        }
+
         foreach (var block in Blocks)
         {
             switch (block)
             {
                 case DeviceGroupCard group:
+                    FlushUngroupedCards();
                     var pinnedMembers = group.Members
                         .Where(card => card.IsQuickPinned)
                         .DistinctBy(card => card.DeviceKey, StringComparer.OrdinalIgnoreCase)
@@ -1609,10 +1638,12 @@ public partial class HomeViewModel : ObservableObject, IDisposable
                     }
                     break;
                 case DeviceCard card when card.IsQuickPinned:
-                    desired.Add(card);
+                    pendingUngroupedCards.Add(card);
                     break;
             }
         }
+
+        FlushUngroupedCards();
 
         foreach (var goneId in _quickGroupCards.Keys.Where(id => !liveQuickGroups.Contains(id)).ToList())
         {
@@ -1633,6 +1664,18 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         }
 
         projection.SyncFrom(source.Title, isQuickPinned: false);
+        return projection;
+    }
+
+    private DeviceGroupCard GetQuickControlPseudoGroup(string key)
+    {
+        if (!_quickGroupCards.TryGetValue(key, out var projection))
+        {
+            projection = new DeviceGroupCard($"quick-{key}", string.Empty, null, hideEmptyTitleBand: true);
+            _quickGroupCards[key] = projection;
+        }
+
+        projection.SyncFrom(string.Empty, isQuickPinned: false);
         return projection;
     }
 

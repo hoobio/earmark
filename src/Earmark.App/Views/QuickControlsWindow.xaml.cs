@@ -12,6 +12,7 @@ using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
 
 using Windows.Graphics;
 using Windows.System;
@@ -28,6 +29,12 @@ public sealed partial class QuickControlsWindow : Window
     private const int OverlayMargin = 8;
     private const int ScrollOverflowTolerance = 16;
     private const int OverlayWidth = OverlayContentWidth + (OverlayPadding * 2);
+    private static readonly HashSet<string> QuickControlsHiddenElementNames = new(StringComparer.Ordinal)
+    {
+        "RulesDivider",
+        "RulesSection",
+        "NoRulesMessage",
+    };
     private const int WhKeyboardLl = 13;
     private const int WhMouseLl = 14;
     private const int WmKeydown = 0x0100;
@@ -82,32 +89,55 @@ public sealed partial class QuickControlsWindow : Window
     {
         ArgumentNullException.ThrowIfNull(blocks);
 
+        var width = Math.Min(OverlayWidth, Math.Max(1, workArea.Width - (OverlayMargin * 2)));
+        var contentWidth = Math.Max(1, width - (OverlayPadding * 2));
+        var workTop = workArea.Y + OverlayMargin;
+        var workBottom = workArea.Y + workArea.Height - OverlayMargin;
+        var boundedBottom = Math.Clamp(bottom, workTop + 1, workBottom);
+        var boundedMaxHeight = Math.Max(1, Math.Min(maxHeight, workBottom - workTop));
+        var left = Math.Clamp(
+            workArea.X + workArea.Width - width - OverlayMargin,
+            workArea.X + OverlayMargin,
+            Math.Max(workArea.X + OverlayMargin, workArea.X + workArea.Width - width - OverlayMargin));
+
         ConfigureWindow();
         Repeater.ItemsSource = null;
         Root.UpdateLayout();
         Repeater.ItemsSource = blocks;
-        Scroller.VerticalScrollBarVisibility = ScrollBarVisibility.Disabled;
+        Scroller.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
 
-        AppWindow.Resize(new SizeInt32(OverlayWidth, maxHeight));
-        AppWindow.Move(new PointInt32(
-            workArea.X + workArea.Width - OverlayWidth - OverlayMargin,
-            Math.Max(workArea.Y + OverlayMargin, bottom - maxHeight)));
+        AppWindow.Resize(new SizeInt32(width, boundedMaxHeight));
+        AppWindow.Move(new PointInt32(left, Math.Max(workTop, boundedBottom - boundedMaxHeight)));
 
         Root.UpdateLayout();
-        Repeater.Measure(new Windows.Foundation.Size(OverlayContentWidth, double.PositiveInfinity));
+        CollapseQuickControlsOnlyElements(Root);
+        Root.UpdateLayout();
+        Repeater.Measure(new Windows.Foundation.Size(contentWidth, double.PositiveInfinity));
 
         var desiredHeight = Math.Max(OverlayPadding * 2, (int)Math.Ceiling(Repeater.DesiredSize.Height) + (OverlayPadding * 2));
-        var height = Math.Min(desiredHeight, maxHeight);
-        Scroller.VerticalScrollBarVisibility = desiredHeight - maxHeight > ScrollOverflowTolerance
-            ? ScrollBarVisibility.Auto
-            : ScrollBarVisibility.Disabled;
+        var height = Math.Min(desiredHeight, boundedMaxHeight);
+        Scroller.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
 
-        AppWindow.Resize(new SizeInt32(OverlayWidth, height));
-        AppWindow.Move(new PointInt32(
-            workArea.X + workArea.Width - OverlayWidth - OverlayMargin,
-            bottom - height));
+        AppWindow.Resize(new SizeInt32(width, height));
+        AppWindow.Move(new PointInt32(left, Math.Clamp(boundedBottom - height, workTop, workBottom - height)));
+        CollapseQuickControlsOnlyElements(Root);
         Root.UpdateLayout();
         return height;
+    }
+
+    private static void CollapseQuickControlsOnlyElements(DependencyObject root)
+    {
+        var count = VisualTreeHelper.GetChildrenCount(root);
+        for (var i = 0; i < count; i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is FrameworkElement element && QuickControlsHiddenElementNames.Contains(element.Name))
+            {
+                element.Visibility = Visibility.Collapsed;
+            }
+
+            CollapseQuickControlsOnlyElements(child);
+        }
     }
 
     public void ShowPrepared()

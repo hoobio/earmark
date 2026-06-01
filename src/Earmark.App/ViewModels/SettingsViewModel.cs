@@ -64,6 +64,9 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     public partial int QuickControlsBackdropIndex { get; set; }
 
+    [ObservableProperty]
+    public partial int QuickControlsDisplayIndex { get; set; }
+
     public string QuickControlsHotkeyStatus => _hotkey.IsRegistered
         ? $"Global shortcut: {QuickControlsHotkey}"
         : _hotkey.RegistrationError ?? $"Global shortcut: {QuickControlsHotkey}";
@@ -191,6 +194,7 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
             QuickControlsEnabled = _settings.Current.QuickControlsEnabled;
             QuickControlsHotkey = _settings.Current.QuickControlsHotkey;
             QuickControlsBackdropIndex = (int)_settings.Current.QuickControlsBackdrop;
+            QuickControlsDisplayIndex = (int)_settings.Current.QuickControlsDisplay;
             VerboseLogging = _settings.Current.VerboseLogging;
             ShowAppIndicators = _settings.Current.ShowAppIndicators;
             ShowAppPeakMeters = _settings.Current.ShowAppPeakMeters;
@@ -234,6 +238,7 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     }
     partial void OnVerboseLoggingChanged(bool value) => Persist(s => s.VerboseLogging = value);
     partial void OnQuickControlsBackdropIndexChanged(int value) => Persist(s => s.QuickControlsBackdrop = (QuickControlsBackdropMode)value);
+    partial void OnQuickControlsDisplayIndexChanged(int value) => Persist(s => s.QuickControlsDisplay = (QuickControlsDisplayMode)value);
 
     public bool TrySetQuickControlsHotkey(string hotkey)
     {

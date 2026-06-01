@@ -470,7 +470,8 @@
                          DividerStroke). The -6 bottom trims the gap to the "Rules" caption so that
                          caption sits evenly between this line and its own chip. Shows only with the
                          volume row above it present. -->
-                    <Border Height="1" Margin="-16,0,-16,-6"
+                        <Border x:Name="RulesDivider"
+                            Height="1" Margin="-16,0,-16,-6"
                             Background="{ThemeResource CardStrokeColorDefaultBrush}"
                             Visibility="{x:Bind ShowVolumeDivider, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
 
@@ -478,7 +479,9 @@
                          multiple rules the chip has an inline chevron on the right that
                          toggles a panel beneath with the additional rules. Saves the
                          vertical space a separate "N more rules" Expander would consume. -->
-                    <StackPanel Spacing="{StaticResource SpacingXSmall}" Visibility="{x:Bind ShowRulesSection, Mode=OneWay}">
+                    <StackPanel x:Name="RulesSection"
+                                Spacing="{StaticResource SpacingXSmall}"
+                                Visibility="{x:Bind ShowRulesSection, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
                         <TextBlock Text="Rules"
                                    Style="{StaticResource CaptionTextBlockStyle}"
                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
@@ -545,9 +548,10 @@
                         </ItemsControl>
                     </StackPanel>
 
-                    <TextBlock Text="No rules target this device."
+                    <TextBlock x:Name="NoRulesMessage"
+                               Text="No rules target this device."
                                Style="{StaticResource MutedCaptionTextStyle}"
-                               Visibility="{x:Bind ShowNoRulesMessage, Mode=OneWay}" />
+                               Visibility="{x:Bind ShowNoRulesMessage, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
 
                     <!-- Divider between the rules block and the apps row; opt-in, shows only when the
                          apps row below it is present. -->
@@ -834,7 +838,7 @@
                          the outline breathing room around the cards while dragging (zero at rest). -->
                     <Grid Padding="{x:Bind ContentPadding, Mode=OneWay}">
                         <Grid.RowDefinitions>
-                            <RowDefinition Height="28" />
+                            <RowDefinition Height="{x:Bind TitleRowHeight, Mode=OneWay}" />
                             <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
 
@@ -851,6 +855,7 @@
                               DragStarting="OnGroupHeaderDragStarting"
                               DropCompleted="OnGroupHeaderDropCompleted"
                               DoubleTapped="OnGroupTitleDoubleTapped"
+                              Visibility="{x:Bind ShowTitleBand, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
                               ToolTipService.ToolTip="Drag to move the group · double-click to rename">
                             <Grid.ContextFlyout>
                                 <MenuFlyout>

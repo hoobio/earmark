@@ -75,6 +75,13 @@
                                 <ComboBoxItem Content="Use app appearance" />
                             </ComboBox>
                         </ctrl:SettingsCard>
+                        <ctrl:SettingsCard Header="Display"
+                                           Description="Choose where Quick Controls opens.">
+                            <ComboBox SelectedIndex="{x:Bind ViewModel.QuickControlsDisplayIndex, Mode=TwoWay}" MinWidth="170">
+                                <ComboBoxItem Content="Currently active" />
+                                <ComboBoxItem Content="Default display" />
+                            </ComboBox>
+                        </ctrl:SettingsCard>
                     </ctrl:SettingsExpander.Items>
                 </ctrl:SettingsExpander>
 

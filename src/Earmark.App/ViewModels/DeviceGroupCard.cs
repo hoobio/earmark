@@ -19,11 +19,13 @@ namespace Earmark.App.ViewModels;
 public partial class DeviceGroupCard : ObservableObject, IBlockLayoutInfo
 {
     private readonly Action<DeviceGroupCard>? _onChanged;
+    private readonly bool _hideEmptyTitleBand;
     private bool _suppressChanged;
 
-    public DeviceGroupCard(string id, string title, Action<DeviceGroupCard>? onChanged)
+    public DeviceGroupCard(string id, string title, Action<DeviceGroupCard>? onChanged, bool hideEmptyTitleBand = false)
     {
         Id = id;
+        _hideEmptyTitleBand = hideEmptyTitleBand;
         _suppressChanged = true;
         Title = title;
         _suppressChanged = false;
@@ -54,6 +56,10 @@ public partial class DeviceGroupCard : ObservableObject, IBlockLayoutInfo
     [ObservableProperty]
     public partial string Title { get; set; }
 
+    public bool HasTitle => !string.IsNullOrWhiteSpace(Title);
+    public bool ShowTitleBand => !_hideEmptyTitleBand || HasTitle || IsEditingTitle;
+    public GridLength TitleRowHeight => ShowTitleBand ? new GridLength(28) : new GridLength(0);
+
     [ObservableProperty]
     public partial bool IsQuickPinned { get; set; }
 
@@ -63,17 +69,18 @@ public partial class DeviceGroupCard : ObservableObject, IBlockLayoutInfo
     [ObservableProperty]
     public partial bool IsPointerOver { get; set; }
 
-    public bool ShowQuickPinAffordance => IsPointerOver && !IsEditingTitle;
+    public bool ShowQuickPinAffordance => HasTitle && IsPointerOver && !IsEditingTitle;
 
     /// <summary>True while the title is being edited (double-tap / Rename): the read-only label swaps
     /// to a text box. The label is the group's drag handle, so editing is entered explicitly.</summary>
     [ObservableProperty]
     public partial bool IsEditingTitle { get; set; }
 
-    public bool ShowTitleLabel => !IsEditingTitle;
+    public bool ShowTitleLabel => HasTitle && !IsEditingTitle;
 
     partial void OnIsEditingTitleChanged(bool value)
     {
+        OnPropertyChanged(nameof(ShowTitleBand));
         OnPropertyChanged(nameof(ShowTitleLabel));
         OnPropertyChanged(nameof(ShowQuickPinAffordance));
     }
@@ -125,6 +132,11 @@ public partial class DeviceGroupCard : ObservableObject, IBlockLayoutInfo
 
     partial void OnTitleChanged(string value)
     {
+        OnPropertyChanged(nameof(HasTitle));
+        OnPropertyChanged(nameof(TitleRowHeight));
+        OnPropertyChanged(nameof(ShowTitleBand));
+        OnPropertyChanged(nameof(ShowTitleLabel));
+        OnPropertyChanged(nameof(ShowQuickPinAffordance));
         if (!_suppressChanged) _onChanged?.Invoke(this);
     }
 

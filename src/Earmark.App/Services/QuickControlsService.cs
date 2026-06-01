@@ -74,6 +74,7 @@ internal sealed class QuickControlsService : IQuickControlsService
         _started = true;
         _hotkey.HotkeyPressed += OnHotkeyPressed;
         _viewModel.QuickControlBlocks.CollectionChanged += OnQuickControlBlocksChanged;
+        _viewModel.QuickControlContentChanged += OnQuickControlContentChanged;
         _hotkey.Start();
         _dispatcher.Enqueue(SchedulePrewarm);
     }
@@ -120,7 +121,7 @@ internal sealed class QuickControlsService : IQuickControlsService
             var availableHeight = bottom - top;
             if (availableHeight <= MinimumOverflowHeight || (blocks.Count - index > 1 && availableHeight < MinimumOverflowHeight * 2))
             {
-                PrepareWindow(blocks.Skip(index).ToList(), workArea, bottom, Math.Max(MinimumOverflowHeight, availableHeight));
+                PrepareWindow(blocks.Skip(index).ToList(), workArea, bottom, availableHeight);
                 break;
             }
 
@@ -239,7 +240,17 @@ internal sealed class QuickControlsService : IQuickControlsService
         }
     }
 
-    private void OnQuickControlBlocksChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    private void OnQuickControlBlocksChanged(object? sender, NotifyCollectionChangedEventArgs e) => QueueRefresh();
+
+    private void OnQuickControlContentChanged(object? sender, EventArgs e)
+    {
+        if (!_isOpen && _prewarmStarted)
+        {
+            QueueRefresh();
+        }
+    }
+
+    private void QueueRefresh()
     {
         if (_refreshQueued) return;
         _refreshQueued = true;
@@ -322,9 +333,9 @@ internal sealed class QuickControlsService : IQuickControlsService
     private static bool IsMouseDownMessage(int message) =>
         message is WmLbuttondown or WmRbuttondown or WmMbuttondown or WmXbuttondown;
 
-    private static DisplayArea ResolveWorkArea()
+    private DisplayArea ResolveWorkArea()
     {
-        if (GetCursorPos(out var point))
+        if (_settings.Current.QuickControlsDisplay == QuickControlsDisplayMode.CurrentlyActive && GetCursorPos(out var point))
         {
             return DisplayArea.GetFromPoint(new PointInt32(point.X, point.Y), DisplayAreaFallback.Primary);
         }
@@ -335,6 +346,7 @@ internal sealed class QuickControlsService : IQuickControlsService
     {
         _hotkey.HotkeyPressed -= OnHotkeyPressed;
         _viewModel.QuickControlBlocks.CollectionChanged -= OnQuickControlBlocksChanged;
+        _viewModel.QuickControlContentChanged -= OnQuickControlContentChanged;
         _prewarmTimer?.Stop();
         _prewarmTimer = null;
         Hide();

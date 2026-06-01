@@ -22,7 +22,7 @@
 
             <ScrollViewer x:Name="Scroller"
                           Margin="12"
-                          VerticalScrollBarVisibility="Disabled"
+                          VerticalScrollBarVisibility="Auto"
                           HorizontalScrollBarVisibility="Disabled"
                           IsScrollInertiaEnabled="False"
                           Background="Transparent">

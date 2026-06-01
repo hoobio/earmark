@@ -39,6 +39,8 @@ public sealed class AppSettings
 
     public QuickControlsBackdropMode QuickControlsBackdrop { get; set; } = QuickControlsBackdropMode.UseAppAppearance;
 
+    public QuickControlsDisplayMode QuickControlsDisplay { get; set; } = QuickControlsDisplayMode.CurrentlyActive;
+
     public bool VerboseLogging { get; set; }
 
     /// <summary>
