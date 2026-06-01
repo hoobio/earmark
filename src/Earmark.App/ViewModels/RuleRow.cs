@@ -240,9 +240,16 @@ public partial class RuleRow : ObservableObject, IDisposable
             return;
         }
 
-        Warning = Actions.Concat(ElseActions).Any(a => a.IsShadowed)
-            ? "An action is superseded by a higher-priority rule and won't run."
-            : string.Empty;
+        if (Actions.Concat(ElseActions).Any(a => a.IsShadowed))
+        {
+            // Distinguish "the whole rule is dead" from "one of several actions won't run".
+            Warning = AllActionsShadowed
+                ? "All actions are superseded by higher-priority rules and won't run."
+                : "An action is superseded by a higher-priority rule and won't run.";
+            return;
+        }
+
+        Warning = string.Empty;
     }
 
     /// <summary>Mark the active branch's actions shadowed (superseded by an earlier rule) and refresh
