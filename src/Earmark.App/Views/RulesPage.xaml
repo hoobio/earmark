@@ -23,7 +23,9 @@
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="180" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
@@ -42,66 +44,65 @@
                                   VerticalAlignment="Center"
                                   ToolTipService.ToolTip="{x:Bind IsSatisfied, Mode=OneWay, Converter={StaticResource SatisfiedTooltipConverter}}" />
 
+                        <!-- Kind + polarity + flow read as one line ("Device · Present · Output"); the
+                             combos / toggle are self-labeling, so no field headers. -->
                         <ComboBox Grid.Column="2"
-                                  Header="Condition"
+                                  MinWidth="150"
                                   ItemsSource="{x:Bind AvailableKindOptions}"
                                   SelectedItem="{x:Bind SelectedKindOption, Mode=OneWay}"
                                   SelectionChanged="OnConditionKindChanged"
-                                  HorizontalAlignment="Stretch" />
+                                  VerticalAlignment="Center" />
 
-                        <!-- Polarity: present/missing, running/not, is-default/not. One toggle, the
-                             labels track the kind. -->
                         <ToggleSwitch Grid.Column="3"
-                                      VerticalAlignment="Bottom"
+                                      MinWidth="0"
+                                      VerticalAlignment="Center"
                                       IsOn="{x:Bind IsPositive, Mode=TwoWay}"
                                       OnContent="{x:Bind PositiveLabel, Mode=OneWay}"
                                       OffContent="{x:Bind NegativeLabel, Mode=OneWay}" />
 
-                        <Button Grid.Column="4"
+                        <ComboBox Grid.Column="4"
+                                  MinWidth="104"
+                                  ItemsSource="{x:Bind AvailableFlowOptions}"
+                                  SelectedItem="{x:Bind SelectedFlowOption, Mode=OneWay}"
+                                  SelectionChanged="OnConditionFlowChanged"
+                                  VerticalAlignment="Center"
+                                  ToolTipService.ToolTip="Which flow to match: any, output (render), or input (capture)"
+                                  Visibility="{x:Bind IsDeviceCondition, Mode=OneWay}" />
+
+                        <Button Grid.Column="6"
                                 Style="{StaticResource GhostIconButtonStyle}"
                                 Click="OnDuplicateConditionClicked"
                                 Tag="{x:Bind}"
-                                VerticalAlignment="Bottom"
+                                VerticalAlignment="Center"
                                 ToolTipService.ToolTip="Duplicate condition">
                             <FontIcon Glyph="&#xE8C8;" FontSize="12" />
                         </Button>
 
-                        <Button Grid.Column="5"
+                        <Button Grid.Column="7"
                                 Style="{StaticResource GhostIconButtonStyle}"
                                 Click="OnRemoveConditionClicked"
                                 Tag="{x:Bind}"
-                                VerticalAlignment="Bottom"
+                                VerticalAlignment="Center"
                                 ToolTipService.ToolTip="Remove condition">
                             <FontIcon Glyph="&#xE74D;" FontSize="12" />
                         </Button>
                     </Grid>
 
-                    <Grid ColumnSpacing="{StaticResource SpacingSmall}">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="120" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
+                    <TextBox PlaceholderText=".*Headphones.*"
+                             Text="{x:Bind DevicePattern, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                             Visibility="{x:Bind IsDeviceCondition, Mode=OneWay}">
+                        <TextBox.Header>
+                            <TextBlock Text="Device pattern (regex)" Style="{StaticResource MutedCaptionTextStyle}" />
+                        </TextBox.Header>
+                    </TextBox>
 
-                        <ComboBox Grid.Column="0"
-                                  Header="Flow"
-                                  ItemsSource="{x:Bind AvailableFlowOptions}"
-                                  SelectedItem="{x:Bind SelectedFlowOption, Mode=OneWay}"
-                                  SelectionChanged="OnConditionFlowChanged"
-                                  HorizontalAlignment="Stretch"
-                                  Visibility="{x:Bind IsDeviceCondition, Mode=OneWay}" />
-
-                        <TextBox Grid.Column="1"
-                                 Header="Device pattern (regex)"
-                                 PlaceholderText=".*Headphones.*"
-                                 Text="{x:Bind DevicePattern, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                 Visibility="{x:Bind IsDeviceCondition, Mode=OneWay}" />
-
-                        <TextBox Grid.Column="1"
-                                 Header="App pattern (regex)"
-                                 PlaceholderText=".*discord.*"
-                                 Text="{x:Bind AppPattern, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                 Visibility="{x:Bind IsApplicationCondition, Mode=OneWay}" />
-                    </Grid>
+                    <TextBox PlaceholderText=".*discord.*"
+                             Text="{x:Bind AppPattern, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                             Visibility="{x:Bind IsApplicationCondition, Mode=OneWay}">
+                        <TextBox.Header>
+                            <TextBlock Text="App pattern (regex)" Style="{StaticResource MutedCaptionTextStyle}" />
+                        </TextBox.Header>
+                    </TextBox>
                 </StackPanel>
             </Border>
         </DataTemplate>
@@ -112,12 +113,14 @@
         <DataTemplate x:Key="ActionRowTemplate" x:DataType="vm:ActionRow">
             <Border Style="{StaticResource EmphasizedSubtleCardStyle}" Margin="0,4,0,0">
                 <StackPanel Spacing="{StaticResource SpacingSmall}">
+                    <!-- Verb line: the action kind, its self-labeling mode control (one shows by
+                         kind: Output/Input, mix membership, or Mute/Unmute), and the Pin toggle read
+                         as one row of intent - the controls carry the meaning, so no field headers.
+                         Drag handle on the left, row actions on the right. -->
                     <Grid ColumnSpacing="{StaticResource SpacingSmall}">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="260" />
                             <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
 
@@ -127,70 +130,63 @@
                                   VerticalAlignment="Center"
                                   ToolTipService.ToolTip="Drag to reorder, between Actions / Otherwise, or onto another rule" />
 
-                        <ComboBox Grid.Column="1"
-                                  Header="Action"
-                                  ItemsSource="{x:Bind AvailableKindOptions}"
-                                  SelectedItem="{x:Bind SelectedKindOption, Mode=OneWay}"
-                                  SelectionChanged="OnActionKindChanged"
-                                  HorizontalAlignment="Stretch" />
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="{StaticResource SpacingMedium}" VerticalAlignment="Center">
+                            <ComboBox MinWidth="190"
+                                      ItemsSource="{x:Bind AvailableKindOptions}"
+                                      SelectedItem="{x:Bind SelectedKindOption, Mode=OneWay}"
+                                      SelectionChanged="OnActionKindChanged"
+                                      VerticalAlignment="Center" />
 
-                        <!-- Shadowed: an earlier, higher-priority rule already claims this action's
-                             target, so it won't run. Same caution glyph as the rule-level warning. -->
-                        <FontIcon Grid.Column="2"
-                                  Glyph="&#xE7BA;" FontSize="14"
-                                  Foreground="{ThemeResource SystemFillColorCautionBrush}"
-                                  HorizontalAlignment="Right" VerticalAlignment="Bottom"
-                                  Visibility="{x:Bind IsShadowed, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
-                                  ToolTipService.ToolTip="Superseded by a higher-priority rule - this action won't run." />
+                            <ToggleSwitch MinWidth="0" VerticalAlignment="Center"
+                                          OffContent="Output" OnContent="Input"
+                                          IsOn="{x:Bind IsInput, Mode=TwoWay}"
+                                          Visibility="{x:Bind ShowDirection, Mode=OneWay}" />
 
-                        <Button Grid.Column="3"
-                                Style="{StaticResource GhostIconButtonStyle}"
-                                Click="OnDuplicateActionClicked"
-                                Tag="{x:Bind}"
-                                VerticalAlignment="Bottom"
-                                ToolTipService.ToolTip="Duplicate action">
-                            <FontIcon Glyph="&#xE8C8;" FontSize="12" />
-                        </Button>
+                            <ComboBox MinWidth="220" VerticalAlignment="Center"
+                                      ItemsSource="{x:Bind AvailableMembershipOptions}"
+                                      SelectedItem="{x:Bind SelectedMembershipOption, Mode=OneWay}"
+                                      SelectionChanged="OnActionMembershipChanged"
+                                      Visibility="{x:Bind ShowMembership, Mode=OneWay}" />
 
-                        <Button Grid.Column="4"
-                                Style="{StaticResource GhostIconButtonStyle}"
-                                Click="OnRemoveActionClicked"
-                                Tag="{x:Bind}"
-                                VerticalAlignment="Bottom"
-                                ToolTipService.ToolTip="Remove action">
-                            <FontIcon Glyph="&#xE74D;" FontSize="12" />
-                        </Button>
+                            <ToggleSwitch MinWidth="0" VerticalAlignment="Center"
+                                          OffContent="Unmute" OnContent="Mute"
+                                          IsOn="{x:Bind Muted, Mode=TwoWay}"
+                                          Visibility="{x:Bind ShowMuteToggle, Mode=OneWay}" />
+
+                            <!-- Pin vs one-shot. Pinned reverts external drift; one-shot applies once
+                                 when the rule's branch activates, then leaves the device editable. -->
+                            <ToggleSwitch MinWidth="0" VerticalAlignment="Center"
+                                          OffContent="One-shot" OnContent="Pinned"
+                                          IsOn="{x:Bind Pinned, Mode=TwoWay}"
+                                          ToolTipService.ToolTip="Pinned reverts external changes back to this setting. One-shot applies it once when the rule's conditions are first met, then leaves it free to change." />
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="{StaticResource SpacingXSmall}" VerticalAlignment="Center">
+                            <!-- Shadowed: an earlier, higher-priority rule already claims this action's
+                                 target, so it won't run. Same caution glyph as the rule-level warning. -->
+                            <FontIcon Glyph="&#xE7BA;" FontSize="14"
+                                      Foreground="{ThemeResource SystemFillColorCautionBrush}"
+                                      VerticalAlignment="Center"
+                                      Visibility="{x:Bind IsShadowed, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                      ToolTipService.ToolTip="Superseded by a higher-priority rule - this action won't run." />
+
+                            <Button Style="{StaticResource GhostIconButtonStyle}"
+                                    Click="OnDuplicateActionClicked"
+                                    Tag="{x:Bind}"
+                                    VerticalAlignment="Center"
+                                    ToolTipService.ToolTip="Duplicate action">
+                                <FontIcon Glyph="&#xE8C8;" FontSize="12" />
+                            </Button>
+
+                            <Button Style="{StaticResource GhostIconButtonStyle}"
+                                    Click="OnRemoveActionClicked"
+                                    Tag="{x:Bind}"
+                                    VerticalAlignment="Center"
+                                    ToolTipService.ToolTip="Remove action">
+                                <FontIcon Glyph="&#xE74D;" FontSize="12" />
+                            </Button>
+                        </StackPanel>
                     </Grid>
-
-                    <!-- Behaviour row: the kind-specific mode control (exactly one shows) sits beside
-                         the Pin toggle so "what it does" and "how it's enforced" read together and the
-                         card stays compact. Direction (Output/Input) for app + default-device actions;
-                         membership for Wave Link; mute state for mute. -->
-                    <StackPanel Orientation="Horizontal" Spacing="{StaticResource SpacingXLarge}">
-                        <ToggleSwitch Header="Direction"
-                                      OffContent="Output" OnContent="Input"
-                                      IsOn="{x:Bind IsInput, Mode=TwoWay}"
-                                      Visibility="{x:Bind ShowDirection, Mode=OneWay}" />
-
-                        <ComboBox Header="Membership"
-                                  MinWidth="240"
-                                  ItemsSource="{x:Bind AvailableMembershipOptions}"
-                                  SelectedItem="{x:Bind SelectedMembershipOption, Mode=OneWay}"
-                                  SelectionChanged="OnActionMembershipChanged"
-                                  Visibility="{x:Bind ShowMembership, Mode=OneWay}" />
-
-                        <ToggleSwitch Header="State"
-                                      OffContent="Unmute" OnContent="Mute"
-                                      IsOn="{x:Bind Muted, Mode=TwoWay}"
-                                      Visibility="{x:Bind ShowMuteToggle, Mode=OneWay}" />
-
-                        <!-- Pin vs one-shot. Pinned reverts external drift; one-shot applies once when
-                             the rule's branch activates, then leaves the device editable. -->
-                        <ToggleSwitch Header="Enforcement"
-                                      OffContent="One-shot" OnContent="Pinned"
-                                      IsOn="{x:Bind Pinned, Mode=TwoWay}"
-                                      ToolTipService.ToolTip="Pinned reverts external changes back to this setting. One-shot applies it once when the rule's conditions are first met, then leaves it free to change." />
-                    </StackPanel>
 
                     <AutoSuggestBox PlaceholderText="Headphone Mix"
                                     Text="{x:Bind MixPattern, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
