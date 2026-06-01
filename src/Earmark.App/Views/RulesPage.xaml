@@ -522,10 +522,12 @@
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
-                                        <StackPanel Grid.Column="0" Spacing="{StaticResource SpacingXXSmall}">
-                                            <TextBlock Text="Conditions" Style="{StaticResource SectionTitleTextStyle}" />
-                                            <TextBlock Style="{StaticResource MutedCaptionTextStyle}"
-                                                       Text="All conditions must be true for the rule to take effect. Leave empty to always run." />
+                                        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="{StaticResource SpacingSmall}" VerticalAlignment="Center">
+                                            <TextBlock Text="Conditions" Style="{StaticResource SectionTitleTextStyle}" VerticalAlignment="Center" />
+                                            <FontIcon Glyph="&#xE946;" FontSize="13"
+                                                      Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                      VerticalAlignment="Center"
+                                                      ToolTipService.ToolTip="All conditions must be true for the rule to take effect. Leave empty to always run." />
                                         </StackPanel>
                                         <Button Grid.Column="1"
                                                 Command="{x:Bind AddConditionCommand}"
@@ -574,7 +576,7 @@
                                                    Stroke="{ThemeResource CardStrokeColorDefaultBrush}"
                                                    StrokeThickness="1" StrokeDashArray="3,3"
                                                    IsHitTestVisible="False" />
-                                        <TextBlock Text="No conditions - drag one here, or use Add condition. The rule always runs."
+                                        <TextBlock Text="No conditions - drag one here, or use Add condition."
                                                    Style="{StaticResource MutedCaptionTextStyle}"
                                                    HorizontalAlignment="Center" Margin="12,10"
                                                    TextWrapping="Wrap" TextAlignment="Center" />
@@ -590,10 +592,12 @@
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
-                                        <StackPanel Grid.Column="0" Spacing="{StaticResource SpacingXXSmall}">
-                                            <TextBlock Text="Actions" Style="{StaticResource SectionTitleTextStyle}" />
-                                            <TextBlock Style="{StaticResource MutedCaptionTextStyle}"
-                                                       Text="Each action runs in order. Topmost wins for the same target." />
+                                        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="{StaticResource SpacingSmall}" VerticalAlignment="Center">
+                                            <TextBlock Text="Actions" Style="{StaticResource SectionTitleTextStyle}" VerticalAlignment="Center" />
+                                            <FontIcon Glyph="&#xE946;" FontSize="13"
+                                                      Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                      VerticalAlignment="Center"
+                                                      ToolTipService.ToolTip="Each action runs in order. Topmost wins for the same target." />
                                         </StackPanel>
                                         <Button Grid.Column="1"
                                                 Style="{StaticResource AccentButtonStyle}"
@@ -661,10 +665,12 @@
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
-                                        <StackPanel Grid.Column="0" Spacing="{StaticResource SpacingXXSmall}">
-                                            <TextBlock Text="Otherwise" Style="{StaticResource SectionTitleTextStyle}" />
-                                            <TextBlock Style="{StaticResource MutedCaptionTextStyle}"
-                                                       Text="Run these instead when the conditions above are not met." />
+                                        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="{StaticResource SpacingSmall}" VerticalAlignment="Center">
+                                            <TextBlock Text="Otherwise" Style="{StaticResource SectionTitleTextStyle}" VerticalAlignment="Center" />
+                                            <FontIcon Glyph="&#xE946;" FontSize="13"
+                                                      Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                      VerticalAlignment="Center"
+                                                      ToolTipService.ToolTip="Run these instead when the conditions above are not met." />
                                         </StackPanel>
                                         <Button Grid.Column="1"
                                                 Command="{x:Bind AddElseActionCommand}"
