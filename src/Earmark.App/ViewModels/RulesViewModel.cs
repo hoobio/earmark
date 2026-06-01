@@ -22,6 +22,7 @@ public partial class RulesViewModel : ObservableObject, IDisposable
     private readonly IAudioSessionService _sessions;
     private readonly IAudioEndpointService _endpoints;
     private readonly IRuleEvaluator _evaluator;
+    private readonly IRuleMatcher _matcher;
     private readonly IWaveLinkService _waveLink;
     private readonly IDispatcherQueueProvider _dispatcher;
     private readonly Lock _gate = new();
@@ -35,6 +36,7 @@ public partial class RulesViewModel : ObservableObject, IDisposable
         IAudioSessionService sessions,
         IAudioEndpointService endpoints,
         IRuleEvaluator evaluator,
+        IRuleMatcher matcher,
         IWaveLinkService waveLink,
         IDispatcherQueueProvider dispatcher)
     {
@@ -43,6 +45,7 @@ public partial class RulesViewModel : ObservableObject, IDisposable
         _sessions = sessions ?? throw new ArgumentNullException(nameof(sessions));
         _endpoints = endpoints ?? throw new ArgumentNullException(nameof(endpoints));
         _evaluator = evaluator ?? throw new ArgumentNullException(nameof(evaluator));
+        _matcher = matcher ?? throw new ArgumentNullException(nameof(matcher));
         _waveLink = waveLink ?? throw new ArgumentNullException(nameof(waveLink));
         _dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
 
@@ -56,6 +59,9 @@ public partial class RulesViewModel : ObservableObject, IDisposable
         _rules.RulesChanged += OnRulesChanged;
         _sessions.SessionsChanged += OnSessionsOrEndpointsChanged;
         _endpoints.EndpointsChanged += OnSessionsOrEndpointsChanged;
+        // A default-device change can flip a "Default device is" condition's preview, so refresh
+        // the match/status when the system default switches (not just on topology changes).
+        _endpoints.DefaultsChanged += OnSessionsOrEndpointsChanged;
         _waveLink.SnapshotChanged += OnWaveLinkChanged;
         _waveLink.StateChanged += OnWaveLinkChanged;
         QueueMatchRefresh();
@@ -103,7 +109,14 @@ public partial class RulesViewModel : ObservableObject, IDisposable
         PendingFocusRuleId = ruleId;
     }
 
-    private RuleRow BuildRow(RoutingRule rule) => new(rule, r => _rules.UpsertAsync(r));
+    private RuleRow BuildRow(RoutingRule rule)
+    {
+        var row = new RuleRow(rule, r => _rules.UpsertAsync(r));
+        // Re-run the (debounced) match preview as the user edits, so chips/badges and shadow flags
+        // track the live text rather than only the last-saved state.
+        row.PreviewInvalidated += QueueMatchRefresh;
+        return row;
+    }
 
     [RelayCommand]
     private async Task AddAsync()
@@ -112,7 +125,7 @@ public partial class RulesViewModel : ObservableObject, IDisposable
         {
             Name = "New rule",
             Enabled = true,
-            Actions = { new RuleAction { Type = ActionType.SetApplicationOutput } },
+            Actions = { new RuleAction { Kind = ActionKind.ApplicationDevice, Flow = EndpointFlow.Render } },
         };
 
         await _rules.UpsertAsync(rule);
@@ -314,6 +327,15 @@ public partial class RulesViewModel : ObservableObject, IDisposable
                 row.Recompute(sessions, endpoints, snapshot, waveLinkState);
                 var evaluation = _evaluator.Evaluate(liveRules[i], liveRules, sessions, endpoints);
                 row.ApplyEvaluation(evaluation);
+
+                // Flag actions superseded by an earlier (higher-priority) rule so the editor can warn
+                // that they won't run. Uses the same first-match-wins precedence the appliers enforce.
+                // A disabled rule isn't running at all, so it shows no shadow warning.
+                var met = _matcher.ConditionsMet(liveRules[i], endpoints, sessions);
+                var shadowed = liveRules[i].Enabled
+                    ? RuleShadowAnalyzer.ShadowedActiveActions(liveRules[i], met, liveRules, endpoints, sessions, _matcher)
+                    : new HashSet<int>();
+                row.ApplyShadow(shadowed, met);
             }
         });
     }
@@ -341,6 +363,7 @@ public partial class RulesViewModel : ObservableObject, IDisposable
         _rules.RulesChanged -= OnRulesChanged;
         _sessions.SessionsChanged -= OnSessionsOrEndpointsChanged;
         _endpoints.EndpointsChanged -= OnSessionsOrEndpointsChanged;
+        _endpoints.DefaultsChanged -= OnSessionsOrEndpointsChanged;
         _waveLink.SnapshotChanged -= OnWaveLinkChanged;
         _waveLink.StateChanged -= OnWaveLinkChanged;
         Items.CollectionChanged -= OnItemsCollectionChanged;

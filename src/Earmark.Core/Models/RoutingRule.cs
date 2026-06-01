@@ -12,12 +12,19 @@ public enum RoleScope
     Default,
 }
 
-public enum ConditionType
+/// <summary>
+/// What a condition tests. The present/absent (or running/not-running) polarity is a separate
+/// <see cref="RuleCondition.Negate"/> flag rather than a doubled-up enum, so the editor offers one
+/// row type with an inline toggle instead of two near-identical entries.
+/// </summary>
+public enum ConditionKind
 {
-    DevicePresent,
-    DeviceMissing,
-    ApplicationRunning,
-    ApplicationNotRunning,
+    /// <summary>An active endpoint matches the pattern (device present / missing).</summary>
+    Device,
+    /// <summary>A running process matches the pattern (application running / not running).</summary>
+    Application,
+    /// <summary>The current system default endpoint for the flow matches the pattern.</summary>
+    DefaultDevice,
 }
 
 public enum ConditionFlow
@@ -27,35 +34,79 @@ public enum ConditionFlow
     Capture,
 }
 
-public enum ActionType
+/// <summary>How a pattern string is matched against a candidate (device / app / mix name).</summary>
+public enum PatternMatchMode
 {
-    SetApplicationOutput,
-    SetApplicationInput,
-    SetDefaultOutput,
-    SetDefaultInput,
-    AddWaveLinkMixOutput,
-    RemoveWaveLinkMixOutput,
-    SetWaveLinkMixOutput,
-    SetDeviceVolume,
-    MuteDevice,
-    UnmuteDevice,
+    /// <summary>.NET regular expression (the default, and what every pre-existing rule uses).</summary>
+    Regex,
+    /// <summary>Glob: <c>*</c> = any run, <c>?</c> = one char, <c>\*</c> / <c>\?</c> = literal; matched
+    /// as "contains" (unanchored), so "Sony" matches "Sony Headphones (...)".</summary>
+    Wildcard,
+    /// <summary>Exact, case-insensitive match against the picked item's full name (device display
+    /// name, process name, or mix name) - the value comes from a picker, not free text.</summary>
+    Exact,
+}
+
+/// <summary>
+/// What an action does. Binary variants that used to be separate enum values (mute/unmute,
+/// add/remove from a Wave Link mix, output/input) collapse into one kind plus an orthogonal mode
+/// field (<see cref="RuleAction.Muted"/>, <see cref="RuleAction.Membership"/>,
+/// <see cref="RuleAction.Flow"/>), so the editor shows one action with an inline toggle.
+/// </summary>
+public enum ActionKind
+{
+    /// <summary>Pin a matching app's per-app render/capture endpoint (see <see cref="RuleAction.Flow"/>).</summary>
+    ApplicationDevice,
+    /// <summary>Set the system default render/capture endpoint (see <see cref="RuleAction.Flow"/>).</summary>
+    DefaultDevice,
+    /// <summary>Control a device's membership of a Wave Link mix (see <see cref="RuleAction.Membership"/>).</summary>
+    WaveLinkMix,
+    /// <summary>Pin a device's volume.</summary>
+    DeviceVolume,
+    /// <summary>Set a device's mute state (see <see cref="RuleAction.Muted"/>).</summary>
+    DeviceMute,
+    /// <summary>Rename a device. Parked: needs an elevated registry write, so it's hidden from the picker.</summary>
     RenameDevice,
+}
+
+/// <summary>How a <see cref="ActionKind.WaveLinkMix"/> action relates a device to a mix.</summary>
+public enum MixMembership
+{
+    /// <summary>Ensure the device is one of the mix's outputs (pinned) / add it (one-shot).</summary>
+    Include,
+    /// <summary>Ensure the device is NOT one of the mix's outputs (pinned) / remove it (one-shot).</summary>
+    Exclude,
+    /// <summary>The matching device(s) become the mix's <i>only</i> outputs; others are stripped.</summary>
+    Exclusive,
 }
 
 public sealed class RuleCondition
 {
-    public ConditionType Type { get; set; } = ConditionType.DevicePresent;
+    public ConditionKind Kind { get; set; } = ConditionKind.Device;
+
+    /// <summary>
+    /// Inverts the test: for <see cref="ConditionKind.Device"/> / <see cref="ConditionKind.DefaultDevice"/>
+    /// false = present/is-default, true = missing/not-default; for <see cref="ConditionKind.Application"/>
+    /// false = running, true = not running.
+    /// </summary>
+    public bool Negate { get; set; }
 
     public ConditionFlow Flow { get; set; } = ConditionFlow.Any;
 
-    /// <summary>Device regex; required for Device* conditions.</summary>
+    /// <summary>Device pattern; required for <see cref="ConditionKind.Device"/> / <see cref="ConditionKind.DefaultDevice"/>.</summary>
     public string DevicePattern { get; set; } = string.Empty;
 
-    /// <summary>Process/executable regex; required for Application* conditions.</summary>
+    /// <summary>How <see cref="DevicePattern"/> is matched.</summary>
+    public PatternMatchMode DeviceMatchMode { get; set; } = PatternMatchMode.Regex;
+
+    /// <summary>Process/executable pattern; required for <see cref="ConditionKind.Application"/>.</summary>
     public string AppPattern { get; set; } = string.Empty;
 
+    /// <summary>How <see cref="AppPattern"/> is matched.</summary>
+    public PatternMatchMode AppMatchMode { get; set; } = PatternMatchMode.Regex;
+
     [JsonIgnore]
-    public bool IsApplicationCondition => Type is ConditionType.ApplicationRunning or ConditionType.ApplicationNotRunning;
+    public bool IsApplicationCondition => Kind == ConditionKind.Application;
 
     [JsonIgnore]
     public bool IsValid => IsApplicationCondition
@@ -64,88 +115,120 @@ public sealed class RuleCondition
 
     public RuleCondition Clone() => new()
     {
-        Type = Type,
+        Kind = Kind,
+        Negate = Negate,
         Flow = Flow,
         DevicePattern = DevicePattern,
+        DeviceMatchMode = DeviceMatchMode,
         AppPattern = AppPattern,
+        AppMatchMode = AppMatchMode,
     };
 }
 
 public sealed class RuleAction
 {
-    public ActionType Type { get; set; } = ActionType.SetApplicationOutput;
+    public ActionKind Kind { get; set; } = ActionKind.ApplicationDevice;
 
-    /// <summary>Required for SetApplication* actions; ignored for SetDefault*.</summary>
+    /// <summary>
+    /// Pinned (default): the action is continuously reconciled - external drift is reverted to the
+    /// target, exactly like a "pin". One-shot (false): the action fires once when its branch becomes
+    /// active (a condition edge, rule edit, or startup) and is then left alone, so the user can
+    /// freely override it afterwards. See the routing applier for the edge-detection.
+    /// </summary>
+    public bool Pinned { get; set; } = true;
+
+    /// <summary>Output (Render) vs Input (Capture). Only meaningful for
+    /// <see cref="ActionKind.ApplicationDevice"/> / <see cref="ActionKind.DefaultDevice"/>.</summary>
+    public EndpointFlow Flow { get; set; } = EndpointFlow.Render;
+
+    /// <summary><see cref="ActionKind.WaveLinkMix"/> only: how the device relates to the mix.</summary>
+    public MixMembership Membership { get; set; } = MixMembership.Include;
+
+    /// <summary><see cref="ActionKind.DeviceMute"/> only: target mute state (true = muted).</summary>
+    public bool Muted { get; set; } = true;
+
+    /// <summary>Required for <see cref="ActionKind.ApplicationDevice"/>.</summary>
     public string AppPattern { get; set; } = string.Empty;
+
+    /// <summary>How <see cref="AppPattern"/> is matched.</summary>
+    public PatternMatchMode AppMatchMode { get; set; } = PatternMatchMode.Regex;
 
     public string DevicePattern { get; set; } = string.Empty;
 
-    /// <summary>SetWaveLinkMixOutput only: regex against the Wave Link mix name.</summary>
+    /// <summary>How <see cref="DevicePattern"/> is matched.</summary>
+    public PatternMatchMode DeviceMatchMode { get; set; } = PatternMatchMode.Regex;
+
+    /// <summary><see cref="ActionKind.WaveLinkMix"/> only: matched against the Wave Link mix name.</summary>
     public string MixPattern { get; set; } = string.Empty;
 
-    /// <summary>SetDeviceVolume only: target volume in [0, 1].</summary>
+    /// <summary>How <see cref="MixPattern"/> is matched.</summary>
+    public PatternMatchMode MixMatchMode { get; set; } = PatternMatchMode.Regex;
+
+    /// <summary><see cref="ActionKind.DeviceVolume"/> only: target volume in [0, 1].</summary>
     public float Volume { get; set; } = 0.5f;
 
-    /// <summary>RenameDevice only: the literal FriendlyName to write to matching devices.</summary>
+    /// <summary><see cref="ActionKind.RenameDevice"/> only: the literal FriendlyName to write.</summary>
     public string NewName { get; set; } = string.Empty;
 
-    /// <summary>SetDefault* only: claim the device for the system "default" (Console + Multimedia) role.</summary>
+    /// <summary><see cref="ActionKind.DefaultDevice"/> only: claim the device for the system "default" (Console + Multimedia) role.</summary>
     public bool SetsDefault { get; set; } = true;
 
-    /// <summary>SetDefault* only: claim the device for the system "communications" role.</summary>
+    /// <summary><see cref="ActionKind.DefaultDevice"/> only: claim the device for the system "communications" role.</summary>
     public bool SetsCommunications { get; set; } = true;
 
     [JsonIgnore]
-    public bool IsApplicationAction => Type is ActionType.SetApplicationOutput or ActionType.SetApplicationInput;
+    public bool IsApplicationAction => Kind == ActionKind.ApplicationDevice;
 
     [JsonIgnore]
-    public bool IsDefaultAction => Type is ActionType.SetDefaultOutput or ActionType.SetDefaultInput;
+    public bool IsDefaultAction => Kind == ActionKind.DefaultDevice;
 
     [JsonIgnore]
-    public bool IsWaveLinkAction => Type is
-        ActionType.AddWaveLinkMixOutput or
-        ActionType.RemoveWaveLinkMixOutput or
-        ActionType.SetWaveLinkMixOutput;
+    public bool IsWaveLinkAction => Kind == ActionKind.WaveLinkMix;
 
     [JsonIgnore]
-    public bool IsVolumeAction => Type is ActionType.SetDeviceVolume;
+    public bool IsVolumeAction => Kind == ActionKind.DeviceVolume;
 
     [JsonIgnore]
-    public bool IsMuteAction => Type is ActionType.MuteDevice or ActionType.UnmuteDevice;
+    public bool IsMuteAction => Kind == ActionKind.DeviceMute;
 
     [JsonIgnore]
-    public EndpointFlow EffectiveFlow => Type switch
+    public EndpointFlow EffectiveFlow => Kind switch
     {
-        ActionType.SetApplicationOutput or ActionType.SetDefaultOutput => EndpointFlow.Render,
-        ActionType.SetApplicationInput or ActionType.SetDefaultInput => EndpointFlow.Capture,
-        ActionType.AddWaveLinkMixOutput or ActionType.RemoveWaveLinkMixOutput or ActionType.SetWaveLinkMixOutput => EndpointFlow.Render,
+        ActionKind.ApplicationDevice or ActionKind.DefaultDevice => Flow,
         _ => EndpointFlow.Render,
     };
 
     [JsonIgnore]
-    public bool IsValid => Type switch
+    public bool IsValid => Kind switch
     {
-        ActionType.SetApplicationOutput or ActionType.SetApplicationInput =>
+        ActionKind.ApplicationDevice =>
             !string.IsNullOrWhiteSpace(AppPattern) && !string.IsNullOrWhiteSpace(DevicePattern),
-        ActionType.SetDefaultOutput or ActionType.SetDefaultInput =>
+        ActionKind.DefaultDevice =>
             !string.IsNullOrWhiteSpace(DevicePattern) && (SetsDefault || SetsCommunications),
-        ActionType.AddWaveLinkMixOutput or ActionType.RemoveWaveLinkMixOutput or ActionType.SetWaveLinkMixOutput =>
+        ActionKind.WaveLinkMix =>
             !string.IsNullOrWhiteSpace(MixPattern) && !string.IsNullOrWhiteSpace(DevicePattern),
-        ActionType.SetDeviceVolume =>
+        ActionKind.DeviceVolume =>
             !string.IsNullOrWhiteSpace(DevicePattern) && Volume is >= 0f and <= 1f,
-        ActionType.MuteDevice or ActionType.UnmuteDevice =>
+        ActionKind.DeviceMute =>
             !string.IsNullOrWhiteSpace(DevicePattern),
-        ActionType.RenameDevice =>
+        ActionKind.RenameDevice =>
             !string.IsNullOrWhiteSpace(DevicePattern) && !string.IsNullOrWhiteSpace(NewName),
         _ => false,
     };
 
     public RuleAction Clone() => new()
     {
-        Type = Type,
+        Kind = Kind,
+        Pinned = Pinned,
+        Flow = Flow,
+        Membership = Membership,
+        Muted = Muted,
         AppPattern = AppPattern,
+        AppMatchMode = AppMatchMode,
         DevicePattern = DevicePattern,
+        DeviceMatchMode = DeviceMatchMode,
         MixPattern = MixPattern,
+        MixMatchMode = MixMatchMode,
         Volume = Volume,
         NewName = NewName,
         SetsDefault = SetsDefault,

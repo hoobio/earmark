@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="Earmark.App.Controls.PickerComboBox"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <!-- Read-only dropdown: the closed button shows the chosen value (or placeholder); the
+         flyout carries the search box + filtered list, so the field never holds keyboard focus
+         (an editable ComboBox loses focus on each keystroke). -->
+    <DropDownButton x:Name="Root"
+                    HorizontalAlignment="Stretch"
+                    HorizontalContentAlignment="Stretch"
+                    Padding="10,5,8,6">
+        <!-- DropDownButton draws its own chevron; the content is just the caption.
+             OneTime, refreshed via Bindings.Update() when Value/Placeholder change - the getters
+             have no change notification, so OneWay would warn (WMC1506). -->
+        <TextBlock Text="{x:Bind DisplayText, Mode=OneTime}"
+                   Foreground="{x:Bind DisplayBrush, Mode=OneTime}"
+                   TextTrimming="CharacterEllipsis"
+                   VerticalAlignment="Center" />
+        <DropDownButton.Flyout>
+            <Flyout x:Name="DropFlyout" Placement="Bottom" Opened="OnFlyoutOpened">
+                <Flyout.FlyoutPresenterStyle>
+                    <Style TargetType="FlyoutPresenter">
+                        <Setter Property="Padding" Value="4" />
+                        <Setter Property="MinWidth" Value="0" />
+                    </Style>
+                </Flyout.FlyoutPresenterStyle>
+                <Grid Width="320" RowSpacing="6">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <AutoSuggestBox x:Name="Search" Grid.Row="0"
+                                    PlaceholderText="Search…"
+                                    QueryIcon="Find"
+                                    TextChanged="OnSearchChanged" />
+                    <ListView x:Name="List" Grid.Row="1"
+                              MaxHeight="280"
+                              SelectionMode="Single"
+                              IsItemClickEnabled="True"
+                              ItemClick="OnItemClick" />
+                </Grid>
+            </Flyout>
+        </DropDownButton.Flyout>
+    </DropDownButton>
+</UserControl>

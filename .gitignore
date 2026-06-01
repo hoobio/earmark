@@ -48,3 +48,4 @@ _pkginfo.txt
 
 # Local Claude cache
 .claude/
+.agent-shots/

@@ -32,6 +32,8 @@
             <converters:SatisfiedTooltipConverter x:Key="SatisfiedTooltipConverter" />
             <converters:WaveLinkStateBrushConverter x:Key="WaveLinkStateBrushConverter" />
             <converters:WaveLinkStateGlyphConverter x:Key="WaveLinkStateGlyphConverter" />
+            <converters:NegatedBooleanConverter x:Key="NegatedBooleanConverter" />
+            <converters:NegatedBooleanToVisibilityConverter x:Key="NegatedBooleanToVisibilityConverter" />
             <converters:VolumeFloatToPercentConverter x:Key="VolumeFloatToPercentConverter" />
             <converters:MutedBrushConverter x:Key="MutedBrushConverter" />
             <converters:MuteLockedBackgroundConverter x:Key="MuteLockedBackgroundConverter" />

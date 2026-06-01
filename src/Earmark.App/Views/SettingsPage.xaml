@@ -86,6 +86,13 @@
                     </ctrl:SettingsCard.HeaderIcon>
                     <ToggleSwitch IsOn="{x:Bind ViewModel.ShowCardDividers, Mode=TwoWay}" />
                 </ctrl:SettingsCard>
+                <ctrl:SettingsCard Header="Show rules"
+                                   Description="Show each device card's rules section. Off hides the entire rules section on every card.">
+                    <ctrl:SettingsCard.HeaderIcon>
+                        <FontIcon Glyph="&#xE8A5;" />
+                    </ctrl:SettingsCard.HeaderIcon>
+                    <ToggleSwitch IsOn="{x:Bind ViewModel.ShowRules, Mode=TwoWay}" />
+                </ctrl:SettingsCard>
                 <ctrl:SettingsExpander Header="App indicators"
                                        Description="Show a chip for each app playing through a device, on that device's card. Drag a chip onto another card to reroute the app."
                                        IsExpanded="{x:Bind ViewModel.ShowAppIndicators, Mode=OneWay}">

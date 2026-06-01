@@ -39,4 +39,16 @@ public sealed record AudioEndpoint(
     public string DisplayName => string.IsNullOrEmpty(DeviceDescription)
         ? FriendlyName
         : $"{FriendlyName} ({DeviceDescription})";
+
+    /// <summary>
+    /// Name for pickers / labels that avoids the doubled suffix some drivers produce, where the
+    /// friendly name already ends with "(description)" (e.g. Elgato virtual devices, whose friendly
+    /// name is "Comms (Elgato Virtual Audio)" and description "Elgato Virtual Audio"). Falls back to
+    /// <see cref="DisplayName"/> when the description adds new information (e.g. "Sony Headphones"
+    /// + "4-WH-1000XM5" -> "Sony Headphones (4-WH-1000XM5)").
+    /// </summary>
+    public string PickerName => string.IsNullOrEmpty(DeviceDescription)
+        || FriendlyName.Contains(DeviceDescription, StringComparison.OrdinalIgnoreCase)
+        ? FriendlyName
+        : $"{FriendlyName} ({DeviceDescription})";
 }

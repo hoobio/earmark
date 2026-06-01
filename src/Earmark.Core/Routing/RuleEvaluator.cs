@@ -88,7 +88,7 @@ public sealed class RuleEvaluator : IRuleEvaluator
 
             if (action.IsDefaultAction)
             {
-                var endpoint = MatchEndpoint(action.DevicePattern, action.EffectiveFlow, endpoints);
+                var endpoint = MatchEndpoint(action.DevicePattern, action.DeviceMatchMode, action.EffectiveFlow, endpoints);
                 if (endpoint is null)
                 {
                     anyIdle = true;
@@ -108,7 +108,7 @@ public sealed class RuleEvaluator : IRuleEvaluator
             }
             else if (action.IsApplicationAction)
             {
-                var matchedPids = MatchAppPids(action.AppPattern, sessions);
+                var matchedPids = MatchAppPids(action.AppPattern, action.AppMatchMode, sessions);
                 if (matchedPids.Count == 0)
                 {
                     anyIdle = true;
@@ -135,8 +135,8 @@ public sealed class RuleEvaluator : IRuleEvaluator
                 // flow-specific search would wrongly classify mic-targeted rules as Idle.
                 var flowAgnostic = action.IsVolumeAction || action.IsMuteAction;
                 var endpoint = flowAgnostic
-                    ? MatchEndpointAnyFlow(action.DevicePattern, endpoints)
-                    : MatchEndpoint(action.DevicePattern, action.EffectiveFlow, endpoints);
+                    ? MatchEndpointAnyFlow(action.DevicePattern, action.DeviceMatchMode, endpoints)
+                    : MatchEndpoint(action.DevicePattern, action.DeviceMatchMode, action.EffectiveFlow, endpoints);
                 if (endpoint is null)
                 {
                     anyIdle = true;
@@ -196,7 +196,7 @@ public sealed class RuleEvaluator : IRuleEvaluator
 
                 if (action.IsDefaultAction)
                 {
-                    var endpoint = MatchEndpoint(action.DevicePattern, action.EffectiveFlow, endpoints);
+                    var endpoint = MatchEndpoint(action.DevicePattern, action.DeviceMatchMode, action.EffectiveFlow, endpoints);
                     if (endpoint is null)
                     {
                         continue;
@@ -209,13 +209,13 @@ public sealed class RuleEvaluator : IRuleEvaluator
                 }
                 else if (action.IsApplicationAction)
                 {
-                    var endpoint = MatchEndpoint(action.DevicePattern, action.EffectiveFlow, endpoints);
+                    var endpoint = MatchEndpoint(action.DevicePattern, action.DeviceMatchMode, action.EffectiveFlow, endpoints);
                     if (endpoint is null)
                     {
                         continue;
                     }
 
-                    foreach (var pid in MatchAppPids(action.AppPattern, sessions))
+                    foreach (var pid in MatchAppPids(action.AppPattern, action.AppMatchMode, sessions))
                     {
                         apps.Add((action.EffectiveFlow, pid));
                     }
@@ -232,11 +232,9 @@ public sealed class RuleEvaluator : IRuleEvaluator
         if (action.SetsCommunications) yield return DefaultRoleKind.Communications;
     }
 
-    private static List<uint> MatchAppPids(string pattern, IReadOnlyList<AudioSession> sessions)
+    private static List<uint> MatchAppPids(string pattern, PatternMatchMode mode, IReadOnlyList<AudioSession> sessions)
     {
         var pids = new List<uint>();
-        RegexCache.TryGet(pattern, out var regex);
-
         var seen = new HashSet<uint>();
         foreach (var session in sessions)
         {
@@ -244,8 +242,8 @@ public sealed class RuleEvaluator : IRuleEvaluator
             {
                 continue;
             }
-            if (PatternMatcher.Matches(pattern, regex, session.ProcessName) ||
-                PatternMatcher.Matches(pattern, regex, session.ExecutablePath))
+            if (PatternMatcher.Matches(mode, pattern, session.ProcessName) ||
+                PatternMatcher.Matches(mode, pattern, session.ExecutablePath))
             {
                 pids.Add(session.ProcessId);
             }
@@ -254,25 +252,21 @@ public sealed class RuleEvaluator : IRuleEvaluator
         return pids;
     }
 
-    private static AudioEndpoint? MatchEndpoint(string pattern, EndpointFlow flow, IReadOnlyList<AudioEndpoint> endpoints)
+    private static AudioEndpoint? MatchEndpoint(string pattern, PatternMatchMode mode, EndpointFlow flow, IReadOnlyList<AudioEndpoint> endpoints)
     {
-        RegexCache.TryGet(pattern, out var regex);
-
         return endpoints
             .Where(e => e.Flow == flow && e.State == EndpointState.Active)
             .FirstOrDefault(e =>
-                PatternMatcher.Matches(pattern, regex, e.FriendlyName) ||
-                PatternMatcher.Matches(pattern, regex, e.DisplayName));
+                PatternMatcher.Matches(mode, pattern, e.FriendlyName) ||
+                PatternMatcher.Matches(mode, pattern, e.DisplayName));
     }
 
-    private static AudioEndpoint? MatchEndpointAnyFlow(string pattern, IReadOnlyList<AudioEndpoint> endpoints)
+    private static AudioEndpoint? MatchEndpointAnyFlow(string pattern, PatternMatchMode mode, IReadOnlyList<AudioEndpoint> endpoints)
     {
-        RegexCache.TryGet(pattern, out var regex);
-
         return endpoints
             .Where(e => e.State == EndpointState.Active)
             .FirstOrDefault(e =>
-                PatternMatcher.Matches(pattern, regex, e.FriendlyName) ||
-                PatternMatcher.Matches(pattern, regex, e.DisplayName));
+                PatternMatcher.Matches(mode, pattern, e.FriendlyName) ||
+                PatternMatcher.Matches(mode, pattern, e.DisplayName));
     }
 }
