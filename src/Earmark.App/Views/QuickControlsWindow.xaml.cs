@@ -183,9 +183,15 @@ public sealed partial class QuickControlsWindow : Window
     {
         AppWindow.Show();
         IsOpen = true;
-        CollapseQuickControlsOnlyElements(Root);
-        DispatcherQueue.TryEnqueue(() => CollapseQuickControlsOnlyElements(Root));
+        CollapseRulesAfterLayoutPasses();
         _logger.LogDebug("QuickControls window show prepared: hwnd={Hwnd}", _hwnd);
+    }
+
+    private void CollapseRulesAfterLayoutPasses(int remainingPasses = 3)
+    {
+        CollapseQuickControlsOnlyElements(Root);
+        if (remainingPasses <= 0) return;
+        DispatcherQueue.TryEnqueue(() => CollapseRulesAfterLayoutPasses(remainingPasses - 1));
     }
 
     public void Hide()

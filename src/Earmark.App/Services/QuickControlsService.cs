@@ -43,7 +43,8 @@ internal sealed class QuickControlsService : IQuickControlsService
     private readonly ILogger<QuickControlsService> _logger;
     private readonly IDispatcherQueueProvider _dispatcher;
     private readonly List<QuickControlsWindow> _windows = new();
-    private int _activeWindowCount;
+    private readonly Dictionary<string, QuickControlsWindow> _windowsByBlockKey = new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<(string Key, IReadOnlyList<object> Blocks, QuickControlsWindow Window)> _activeWindows = new();
     private LowLevelKeyboardProc? _escapeProc;
     private LowLevelMouseProc? _mouseProc;
     private nint _escapeHook;
@@ -107,8 +108,6 @@ internal sealed class QuickControlsService : IQuickControlsService
     private void Show()
     {
         Hide();
-        _activeWindowCount = 0;
-
         var blocks = _viewModel.QuickControlBlocks.ToList();
         _logger.LogDebug("QuickControls show: blocks={BlockCount} blocks=[{Blocks}]", blocks.Count, FormatBlocks(blocks));
         if (blocks.Count == 0)
@@ -126,8 +125,9 @@ internal sealed class QuickControlsService : IQuickControlsService
 
     private void RenderBlocks(List<object> blocks)
     {
+        _activeWindows.Clear();
         var workArea = ResolveWorkArea().WorkArea;
-        var blockItems = blocks.Select(block => (IReadOnlyList<object>)[block]).ToList();
+        var blockItems = blocks.Select(block => (Key: GetBlockKey(block), Blocks: (IReadOnlyList<object>)[block], Window: GetWindowForBlock(block))).ToList();
         _logger.LogDebug(
             "QuickControls render start: workArea=({X},{Y},{Width},{Height}) blocks={BlockCount} activeWindows={ActiveWindows} totalWindows={TotalWindows}",
             workArea.X,
@@ -135,7 +135,7 @@ internal sealed class QuickControlsService : IQuickControlsService
             workArea.Width,
             workArea.Height,
             blocks.Count,
-            _activeWindowCount,
+            _activeWindows.Count,
             _windows.Count);
 
         EnsureWindowPool(blockItems.Count);
@@ -152,8 +152,8 @@ internal sealed class QuickControlsService : IQuickControlsService
                 index,
                 bottom,
                 heights[index],
-                FormatBlocks(blockItems[index]));
-            var height = PrepareWindow(workArea, bottom, heights[index], desiredHeights[index]);
+                FormatBlocks(blockItems[index].Blocks));
+            var height = PrepareWindow(blockItems[index].Window, blockItems[index].Key, workArea, bottom, heights[index], desiredHeights[index]);
             _logger.LogDebug("QuickControls render prepared window: index={Index} actualHeight={Height} nextBottom={NextBottom}",
                 index,
                 height,
@@ -163,22 +163,22 @@ internal sealed class QuickControlsService : IQuickControlsService
 
         HideUnusedWindows();
 
-        for (var i = _activeWindowCount - 1; i >= 0; i--)
+        for (var i = _activeWindows.Count - 1; i >= 0; i--)
         {
-            _logger.LogDebug("QuickControls render show prepared window: index={Index}", i);
-            _windows[i].ShowPrepared();
+            _logger.LogDebug("QuickControls render show prepared window: index={Index} key='{Key}'", i, _activeWindows[i].Key);
+            _activeWindows[i].Window.ShowPrepared();
         }
 
-        _logger.LogDebug("QuickControls render complete: activeWindows={ActiveWindows} totalWindows={TotalWindows}", _activeWindowCount, _windows.Count);
+        _logger.LogDebug("QuickControls render complete: activeWindows={ActiveWindows} totalWindows={TotalWindows}", _activeWindows.Count, _windows.Count);
     }
 
-    private List<int> MeasureBlockHeights(List<IReadOnlyList<object>> blockItems, RectInt32 workArea)
+    private List<int> MeasureBlockHeights(List<(string Key, IReadOnlyList<object> Blocks, QuickControlsWindow Window)> blockItems, RectInt32 workArea)
     {
         var heights = new List<int>(blockItems.Count);
         for (var i = 0; i < blockItems.Count; i++)
         {
-            var height = _windows[i].MeasureBlocksHeight(blockItems[i], workArea);
-            _logger.LogDebug("QuickControls measured block: index={Index} height={Height} block=[{Block}]", i, height, FormatBlocks(blockItems[i]));
+            var height = blockItems[i].Window.MeasureBlocksHeight(blockItems[i].Blocks, workArea);
+            _logger.LogDebug("QuickControls measured block: index={Index} key='{Key}' height={Height} block=[{Block}]", i, blockItems[i].Key, height, FormatBlocks(blockItems[i].Blocks));
             heights.Add(height);
         }
 
@@ -230,47 +230,71 @@ internal sealed class QuickControlsService : IQuickControlsService
             return;
         }
 
-        _activeWindowCount = 0;
         RenderBlocks(blocks);
         _isOpen = true;
     }
 
-    private int PrepareWindow(RectInt32 workArea, int bottom, int maxHeight, int desiredHeight)
+    private int PrepareWindow(QuickControlsWindow window, string key, RectInt32 workArea, int bottom, int maxHeight, int desiredHeight)
     {
-        var window = _windows[_activeWindowCount];
-        _activeWindowCount++;
-        _logger.LogDebug("QuickControls prepare selected window: activeIndex={Index} totalWindows={WindowCount}", _activeWindowCount - 1, _windows.Count);
+        _activeWindows.Add((key, [], window));
+        _logger.LogDebug("QuickControls prepare selected window: activeIndex={Index} key='{Key}' hwnd={Hwnd} totalWindows={WindowCount}", _activeWindows.Count - 1, key, window.Hwnd, _windows.Count);
         return window.PrepareMeasuredBlocks(workArea, bottom, maxHeight, desiredHeight);
     }
+
+    private QuickControlsWindow GetWindowForBlock(object block)
+    {
+        var key = GetBlockKey(block);
+        if (_windowsByBlockKey.TryGetValue(key, out var window)) return window;
+
+        window = _windows.FirstOrDefault(candidate => !_windowsByBlockKey.ContainsValue(candidate)) ?? CreateWindow();
+        _windowsByBlockKey[key] = window;
+        _logger.LogDebug("QuickControls assign window: key='{Key}' hwnd={Hwnd}", key, window.Hwnd);
+        return window;
+    }
+
+    private static string GetBlockKey(object block) => block switch
+    {
+        DeviceCard card => $"card:{card.DeviceKey}",
+        DeviceGroupCard group => $"group:{group.Id}",
+        _ => block.GetHashCode().ToString(System.Globalization.CultureInfo.InvariantCulture),
+    };
 
     private void EnsureWindowPool(int count)
     {
         while (_windows.Count < count)
         {
-            var window = new QuickControlsWindow(_viewModel, _homePage, _settings, _loggerFactory.CreateLogger<QuickControlsWindow>());
-            _windows.Add(window);
-            _logger.LogDebug("QuickControls create window: index={Index} hwnd={Hwnd} totalWindows={WindowCount}", _windows.Count - 1, window.Hwnd, _windows.Count);
+            CreateWindow();
         }
+    }
+
+    private QuickControlsWindow CreateWindow()
+    {
+        var window = new QuickControlsWindow(_viewModel, _homePage, _settings, _loggerFactory.CreateLogger<QuickControlsWindow>());
+        _windows.Add(window);
+        _logger.LogDebug("QuickControls create window: index={Index} hwnd={Hwnd} totalWindows={WindowCount}", _windows.Count - 1, window.Hwnd, _windows.Count);
+        return window;
     }
 
     private void HideUnusedWindows()
     {
-        for (var i = _activeWindowCount; i < _windows.Count; i++)
+        var visible = _activeWindows.Select(item => item.Window).ToHashSet();
+        for (var i = 0; i < _windows.Count; i++)
         {
-            _logger.LogDebug("QuickControls hide unused window: index={Index}", i);
+            if (visible.Contains(_windows[i])) continue;
+            _logger.LogDebug("QuickControls hide unused window: index={Index} hwnd={Hwnd}", i, _windows[i].Hwnd);
             _windows[i].Hide();
         }
     }
 
     private void Hide()
     {
-        _logger.LogDebug("QuickControls hide: windows={WindowCount} activeWindows={ActiveWindowCount} wasOpen={WasOpen}", _windows.Count, _activeWindowCount, _isOpen);
+        _logger.LogDebug("QuickControls hide: windows={WindowCount} activeWindows={ActiveWindowCount} wasOpen={WasOpen}", _windows.Count, _activeWindows.Count, _isOpen);
         foreach (var window in _windows)
         {
             window.Hide();
         }
 
-        _activeWindowCount = 0;
+        _activeWindows.Clear();
         _isOpen = false;
         StopEscapeHook();
         StopMouseHook();
