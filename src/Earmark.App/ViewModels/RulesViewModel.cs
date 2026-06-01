@@ -109,7 +109,14 @@ public partial class RulesViewModel : ObservableObject, IDisposable
         PendingFocusRuleId = ruleId;
     }
 
-    private RuleRow BuildRow(RoutingRule rule) => new(rule, r => _rules.UpsertAsync(r));
+    private RuleRow BuildRow(RoutingRule rule)
+    {
+        var row = new RuleRow(rule, r => _rules.UpsertAsync(r));
+        // Re-run the (debounced) match preview as the user edits, so chips/badges and shadow flags
+        // track the live text rather than only the last-saved state.
+        row.PreviewInvalidated += QueueMatchRefresh;
+        return row;
+    }
 
     [RelayCommand]
     private async Task AddAsync()

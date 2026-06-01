@@ -92,7 +92,20 @@
                              Text="{x:Bind DevicePattern, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                              Visibility="{x:Bind IsDeviceCondition, Mode=OneWay}">
                         <TextBox.Header>
-                            <TextBlock Text="Device pattern (regex)" Style="{StaticResource MutedCaptionTextStyle}" />
+                            <StackPanel Orientation="Horizontal" Spacing="{StaticResource SpacingSmall}" VerticalAlignment="Center">
+                                <TextBlock Text="Device pattern (regex)" VerticalAlignment="Center" />
+                                <Border Style="{StaticResource ChipBorderStyle}"
+                                        Visibility="{x:Bind HasDeviceMatch, Mode=OneWay}">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <FontIcon Glyph="&#xE7F5;" FontSize="11"
+                                                  Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                  VerticalAlignment="Center" />
+                                        <TextBlock Text="{x:Bind DeviceMatchSummary, Mode=OneWay}"
+                                                   Style="{StaticResource CaptionTextBlockStyle}"
+                                                   VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
                         </TextBox.Header>
                     </TextBox>
 
@@ -100,7 +113,21 @@
                              Text="{x:Bind AppPattern, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                              Visibility="{x:Bind IsApplicationCondition, Mode=OneWay}">
                         <TextBox.Header>
-                            <TextBlock Text="App pattern (regex)" Style="{StaticResource MutedCaptionTextStyle}" />
+                            <StackPanel Orientation="Horizontal" Spacing="{StaticResource SpacingSmall}" VerticalAlignment="Center">
+                                <TextBlock Text="App pattern (regex)" VerticalAlignment="Center" />
+                                <Border Style="{StaticResource ChipBorderStyle}"
+                                        Visibility="{x:Bind HasAppMatches, Mode=OneWay}"
+                                        ToolTipService.ToolTip="{x:Bind AppMatchNames, Mode=OneWay}">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <FontIcon Glyph="&#xE946;" FontSize="11"
+                                                  Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                  VerticalAlignment="Center" />
+                                        <TextBlock Text="{x:Bind AppMatchSummary, Mode=OneWay}"
+                                                   Style="{StaticResource CaptionTextBlockStyle}"
+                                                   VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </Border>
+                            </StackPanel>
                         </TextBox.Header>
                     </TextBox>
                 </StackPanel>

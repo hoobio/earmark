@@ -165,6 +165,11 @@ public partial class RuleRow : ObservableObject, IDisposable
 
     private static RoutingRule Deserialize(string json) => JsonSerializer.Deserialize<RoutingRule>(json, RuleJson)!;
 
+    /// <summary>Raised whenever the row's live (possibly-unsaved) content changes, so the Rules
+    /// view-model can re-run the match preview - the chips/badges and shadow flags then update as
+    /// the user types, not only after a save or an external audio event. Debounced by the VM.</summary>
+    public event Action? PreviewInvalidated;
+
     private void RecomputeDirty()
     {
         if (_suppress || _disposed)
@@ -172,6 +177,7 @@ public partial class RuleRow : ObservableObject, IDisposable
             return;
         }
         IsDirty = !string.Equals(_savedJson, Serialize(ToRule()), StringComparison.Ordinal);
+        PreviewInvalidated?.Invoke();
     }
 
     private static void SyncList<TRow, TModel>(
@@ -1257,6 +1263,19 @@ public partial class ConditionRow : ObservableObject, IDisposable, ISyncable<Rul
     [ObservableProperty]
     public partial bool IsSatisfied { get; set; }
 
+    [ObservableProperty]
+    public partial string DeviceMatchSummary { get; set; } = string.Empty;
+
+    [ObservableProperty]
+    public partial int AppMatchCount { get; set; }
+
+    [ObservableProperty]
+    public partial string AppMatchNames { get; set; } = string.Empty;
+
+    public bool HasDeviceMatch => !string.IsNullOrEmpty(DeviceMatchSummary);
+    public bool HasAppMatches => AppMatchCount > 0;
+    public string AppMatchSummary => AppMatchCount == 1 ? "1 matching app" : $"{AppMatchCount} matching apps";
+
     public bool IsApplicationCondition => Kind == ConditionKind.Application;
     /// <summary>Device + DefaultDevice both take a device pattern and a flow.</summary>
     public bool IsDeviceCondition => !IsApplicationCondition;
@@ -1352,27 +1371,77 @@ public partial class ConditionRow : ObservableObject, IDisposable, ISyncable<Rul
         bool positive;
         if (IsApplicationCondition)
         {
-            positive = !string.IsNullOrWhiteSpace(AppPattern) && sessions.Any(s =>
-                RuleRow.MatchOrExact(AppPattern, s.ProcessName) ||
-                RuleRow.MatchOrExact(AppPattern, s.ExecutablePath));
-        }
-        else if (string.IsNullOrWhiteSpace(DevicePattern) || !RuleRow.TryCompile(DevicePattern, out var regex) || regex is null)
-        {
-            positive = false;
+            RecomputeAppMatches(sessions);
+            DeviceMatchSummary = string.Empty;
+            positive = AppMatchCount > 0;
         }
         else
         {
-            var requireDefault = Kind == ConditionKind.DefaultDevice;
-            positive = endpoints.Any(e =>
-                e.State == EndpointState.Active &&
+            AppMatchCount = 0;
+            AppMatchNames = string.Empty;
+            var matched = MatchedDeviceNames(endpoints);
+            DeviceMatchSummary = matched.Count switch
+            {
+                0 => string.Empty,
+                1 => matched[0],
+                _ => $"{matched[0]} (+{matched.Count - 1})",
+            };
+            positive = matched.Count > 0;
+        }
+
+        IsSatisfied = Negate ? !positive : positive;
+    }
+
+    private void RecomputeAppMatches(IReadOnlyList<AudioSession> sessions)
+    {
+        if (string.IsNullOrWhiteSpace(AppPattern))
+        {
+            AppMatchCount = 0;
+            AppMatchNames = string.Empty;
+            return;
+        }
+
+        // Dedupe by application identity (executable path) so an app's several processes count once,
+        // matching how the action match chip counts.
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var names = new List<string>();
+        foreach (var s in sessions)
+        {
+            if (!RuleRow.MatchOrExact(AppPattern, s.ProcessName) && !RuleRow.MatchOrExact(AppPattern, s.ExecutablePath))
+            {
+                continue;
+            }
+            if (!seen.Add(s.IdentityKey))
+            {
+                continue;
+            }
+            names.Add(string.IsNullOrEmpty(s.ProcessName)
+                ? s.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                : s.ProcessName);
+        }
+
+        AppMatchCount = names.Count;
+        AppMatchNames = names.Count == 0 ? string.Empty : string.Join("\n", names);
+    }
+
+    private List<string> MatchedDeviceNames(IReadOnlyList<AudioEndpoint> endpoints)
+    {
+        if (string.IsNullOrWhiteSpace(DevicePattern) || !RuleRow.TryCompile(DevicePattern, out var regex) || regex is null)
+        {
+            return new List<string>();
+        }
+
+        var requireDefault = Kind == ConditionKind.DefaultDevice;
+        return endpoints
+            .Where(e => e.State == EndpointState.Active &&
                 (Flow == ConditionFlow.Any
                     || (Flow == ConditionFlow.Render && e.Flow == EndpointFlow.Render)
                     || (Flow == ConditionFlow.Capture && e.Flow == EndpointFlow.Capture)) &&
                 (!requireDefault || e.IsDefault || e.IsDefaultCommunications) &&
-                (RuleRow.MatchSafe(regex, e.FriendlyName) || RuleRow.MatchSafe(regex, e.DisplayName)));
-        }
-
-        IsSatisfied = Negate ? !positive : positive;
+                (RuleRow.MatchSafe(regex, e.FriendlyName) || RuleRow.MatchSafe(regex, e.DisplayName)))
+            .Select(e => e.FriendlyName)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     public void Dispose() => _disposed = true;
@@ -1402,6 +1471,12 @@ public partial class ConditionRow : ObservableObject, IDisposable, ISyncable<Rul
     }
     partial void OnDevicePatternChanged(string value) => Notify();
     partial void OnAppPatternChanged(string value) => Notify();
+    partial void OnDeviceMatchSummaryChanged(string value) => OnPropertyChanged(nameof(HasDeviceMatch));
+    partial void OnAppMatchCountChanged(int value)
+    {
+        OnPropertyChanged(nameof(HasAppMatches));
+        OnPropertyChanged(nameof(AppMatchSummary));
+    }
 
     private void Notify()
     {
