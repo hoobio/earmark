@@ -74,6 +74,7 @@ public sealed partial class QuickControlsWindow : Window
         ConfigureWindow();
         Hide();
         Activated += OnActivated;
+        Root.LayoutUpdated += OnRootLayoutUpdated;
         Root.ActualThemeChanged += OnRootActualThemeChanged;
         _settings.SettingsChanged += OnSettingsChanged;
         Closed += OnClosed;
@@ -84,6 +85,44 @@ public sealed partial class QuickControlsWindow : Window
     public nint Hwnd => _hwnd;
 
     public bool IsOpen { get; private set; }
+
+    public int MeasureBlocksHeight(IReadOnlyList<object> blocks, RectInt32 workArea)
+    {
+        ArgumentNullException.ThrowIfNull(blocks);
+
+        var width = Math.Min(OverlayWidth, Math.Max(1, workArea.Width - (OverlayMargin * 2)));
+        var contentWidth = Math.Max(1, width - (OverlayPadding * 2));
+        var maxHeight = Math.Max(1, workArea.Height - (OverlayMargin * 2));
+
+        ConfigureWindow();
+        Repeater.ItemsSource = null;
+        Root.UpdateLayout();
+        Repeater.ItemsSource = blocks;
+        Scroller.VerticalScrollBarVisibility = ScrollBarVisibility.Disabled;
+        AppWindow.Resize(new SizeInt32(width, maxHeight));
+        AppWindow.Move(new PointInt32(-40000, -40000));
+
+        Root.UpdateLayout();
+        var collapsed = CollapseQuickControlsOnlyElements(Root);
+        Root.UpdateLayout();
+        Repeater.Measure(new Windows.Foundation.Size(contentWidth, double.PositiveInfinity));
+
+        var desiredHeight = Math.Max(OverlayPadding * 2, (int)Math.Ceiling(Repeater.DesiredSize.Height) + (OverlayPadding * 2));
+        _logger.LogDebug(
+            "QuickControls window measure: hwnd={Hwnd} blocks={BlockCount} workArea=({X},{Y},{Width},{Height}) width={OverlayWidth} contentWidth={ContentWidth} maxHeight={MaxHeight} desiredHeight={DesiredHeight} collapsedRuleElements={Collapsed}",
+            _hwnd,
+            blocks.Count,
+            workArea.X,
+            workArea.Y,
+            workArea.Width,
+            workArea.Height,
+            width,
+            contentWidth,
+            maxHeight,
+            desiredHeight,
+            collapsed);
+        return desiredHeight;
+    }
 
     public int PrepareBlocks(IReadOnlyList<object> blocks, RectInt32 workArea, int bottom, int maxHeight)
     {
@@ -110,23 +149,56 @@ public sealed partial class QuickControlsWindow : Window
         AppWindow.Move(new PointInt32(left, Math.Max(workTop, boundedBottom - boundedMaxHeight)));
 
         Root.UpdateLayout();
-        CollapseQuickControlsOnlyElements(Root);
+        var collapsedBeforeMeasure = CollapseQuickControlsOnlyElements(Root);
         Root.UpdateLayout();
         Repeater.Measure(new Windows.Foundation.Size(contentWidth, double.PositiveInfinity));
 
         var desiredHeight = Math.Max(OverlayPadding * 2, (int)Math.Ceiling(Repeater.DesiredSize.Height) + (OverlayPadding * 2));
         var height = Math.Min(desiredHeight, boundedMaxHeight);
-        Scroller.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
+        Scroller.VerticalScrollBarVisibility = desiredHeight - boundedMaxHeight > ScrollOverflowTolerance
+            ? ScrollBarVisibility.Auto
+            : ScrollBarVisibility.Disabled;
 
         AppWindow.Resize(new SizeInt32(width, height));
         AppWindow.Move(new PointInt32(left, Math.Clamp(boundedBottom - height, workTop, workBottom - height)));
-        CollapseQuickControlsOnlyElements(Root);
+        var collapsedAfterResize = CollapseQuickControlsOnlyElements(Root);
+        DispatcherQueue.TryEnqueue(() => CollapseQuickControlsOnlyElements(Root));
         Root.UpdateLayout();
+        _logger.LogDebug(
+            "QuickControls window prepare: hwnd={Hwnd} blocks={BlockCount} workArea=({X},{Y},{Width},{Height}) requestedBottom={Bottom} boundedBottom={BoundedBottom} maxHeight={MaxHeight} boundedMaxHeight={BoundedMaxHeight} desiredHeight={DesiredHeight} actualHeight={Height} left={Left} top={Top} scrollbar={Scrollbar} collapsedBefore={CollapsedBefore} collapsedAfter={CollapsedAfter}",
+            _hwnd,
+            blocks.Count,
+            workArea.X,
+            workArea.Y,
+            workArea.Width,
+            workArea.Height,
+            bottom,
+            boundedBottom,
+            maxHeight,
+            boundedMaxHeight,
+            desiredHeight,
+            height,
+            left,
+            Math.Clamp(boundedBottom - height, workTop, workBottom - height),
+            Scroller.VerticalScrollBarVisibility,
+            collapsedBeforeMeasure,
+            collapsedAfterResize);
         return height;
     }
 
-    private static void CollapseQuickControlsOnlyElements(DependencyObject root)
+    private void OnRepeaterElementPrepared(ItemsRepeater sender, ItemsRepeaterElementPreparedEventArgs args)
     {
+        var collapsed = CollapseQuickControlsOnlyElements(args.Element);
+        if (collapsed > 0)
+        {
+            _logger.LogDebug("QuickControls repeater prepared element: collapsedRuleElements={Collapsed}", collapsed);
+        }
+        DispatcherQueue.TryEnqueue(() => CollapseQuickControlsOnlyElements(args.Element));
+    }
+
+    private static int CollapseQuickControlsOnlyElements(DependencyObject root)
+    {
+        var collapsed = 0;
         var count = VisualTreeHelper.GetChildrenCount(root);
         for (var i = 0; i < count; i++)
         {
@@ -134,17 +206,25 @@ public sealed partial class QuickControlsWindow : Window
             if (child is FrameworkElement element && QuickControlsHiddenElementNames.Contains(element.Name))
             {
                 element.Visibility = Visibility.Collapsed;
+                collapsed++;
             }
 
-            CollapseQuickControlsOnlyElements(child);
+            collapsed += CollapseQuickControlsOnlyElements(child);
         }
+
+        return collapsed;
     }
 
     public void ShowPrepared()
     {
         AppWindow.Show();
         IsOpen = true;
+        CollapseQuickControlsOnlyElements(Root);
+        DispatcherQueue.TryEnqueue(() => CollapseQuickControlsOnlyElements(Root));
+        _logger.LogDebug("QuickControls window show prepared: hwnd={Hwnd}", _hwnd);
     }
+
+    private void OnRootLayoutUpdated(object? sender, object e) => CollapseQuickControlsOnlyElements(Root);
 
     public void Toggle()
     {
@@ -200,6 +280,7 @@ public sealed partial class QuickControlsWindow : Window
 
     public void Hide()
     {
+        _logger.LogDebug("QuickControls window hide: hwnd={Hwnd} wasOpen={WasOpen}", _hwnd, IsOpen);
         AppWindow.Hide();
         Repeater.ItemsSource = null;
         IsOpen = false;
@@ -314,6 +395,7 @@ public sealed partial class QuickControlsWindow : Window
     private void OnClosed(object sender, WindowEventArgs args)
     {
         _settings.SettingsChanged -= OnSettingsChanged;
+        Root.LayoutUpdated -= OnRootLayoutUpdated;
         Root.ActualThemeChanged -= OnRootActualThemeChanged;
         _backdropController?.Dispose();
         _backdropController = null;

@@ -39,6 +39,7 @@ internal sealed class QuickControlsService : IQuickControlsService
     private readonly HomePage _homePage;
     private readonly ISettingsService _settings;
     private readonly ILoggerFactory _loggerFactory;
+    private readonly ILogger<QuickControlsService> _logger;
     private readonly IDispatcherQueueProvider _dispatcher;
     private readonly List<QuickControlsWindow> _windows = new();
     private int _activeWindowCount;
@@ -65,6 +66,7 @@ internal sealed class QuickControlsService : IQuickControlsService
         _homePage = homePage;
         _settings = settings;
         _loggerFactory = loggerFactory;
+        _logger = loggerFactory.CreateLogger<QuickControlsService>();
         _dispatcher = dispatcher;
     }
 
@@ -72,21 +74,27 @@ internal sealed class QuickControlsService : IQuickControlsService
     {
         if (_started) return;
         _started = true;
+        _logger.LogDebug("QuickControls service start: enabled={Enabled} hotkey='{Hotkey}' display={Display} backdrop={Backdrop}",
+            _settings.Current.QuickControlsEnabled,
+            _settings.Current.QuickControlsHotkey,
+            _settings.Current.QuickControlsDisplay,
+            _settings.Current.QuickControlsBackdrop);
         _hotkey.HotkeyPressed += OnHotkeyPressed;
         _viewModel.QuickControlBlocks.CollectionChanged += OnQuickControlBlocksChanged;
         _viewModel.QuickControlContentChanged += OnQuickControlContentChanged;
         _hotkey.Start();
-        _dispatcher.Enqueue(SchedulePrewarm);
     }
 
     public void Toggle()
     {
         if (_isOpen)
         {
+            _logger.LogDebug("QuickControls toggle: hide requested");
             Hide();
         }
         else
         {
+            _logger.LogDebug("QuickControls toggle: show requested");
             Show();
         }
     }
@@ -97,8 +105,10 @@ internal sealed class QuickControlsService : IQuickControlsService
         _activeWindowCount = 0;
 
         var blocks = _viewModel.QuickControlBlocks.ToList();
+        _logger.LogDebug("QuickControls show: blocks={BlockCount} blocks=[{Blocks}]", blocks.Count, FormatBlocks(blocks));
         if (blocks.Count == 0)
         {
+            _logger.LogDebug("QuickControls show aborted: no quick control blocks");
             return;
         }
 
@@ -112,33 +122,91 @@ internal sealed class QuickControlsService : IQuickControlsService
     private void RenderBlocks(List<object> blocks)
     {
         var workArea = ResolveWorkArea().WorkArea;
-        var top = workArea.Y + OverlayMargin;
+        var blockItems = blocks.Select(block => (IReadOnlyList<object>)[block]).ToList();
+        _logger.LogDebug(
+            "QuickControls render start: workArea=({X},{Y},{Width},{Height}) blocks={BlockCount} activeWindows={ActiveWindows} totalWindows={TotalWindows}",
+            workArea.X,
+            workArea.Y,
+            workArea.Width,
+            workArea.Height,
+            blocks.Count,
+            _activeWindowCount,
+            _windows.Count);
+        var heights = MeasureBlockHeights(blockItems, workArea);
+        var measuredHeights = string.Join(", ", heights);
+        FitBlockHeights(heights, Math.Max(1, workArea.Height - (OverlayMargin * 2) - (OverlayGap * Math.Max(0, heights.Count - 1))));
+        _logger.LogDebug("QuickControls render heights: measured=[{MeasuredHeights}] fitted=[{FittedHeights}]", measuredHeights, string.Join(", ", heights));
+
         var bottom = workArea.Y + workArea.Height - OverlayMargin;
-        var index = 0;
-
-        while (index < blocks.Count)
+        for (var index = 0; index < blockItems.Count; index++)
         {
-            var availableHeight = bottom - top;
-            if (availableHeight <= 0)
-            {
-                break;
-            }
-
-            var remainingBlocks = blocks.Count - index - 1;
-            var reservedHeight = remainingBlocks * MinimumOverflowHeight + remainingBlocks * OverlayGap;
-            var maxHeight = remainingBlocks == 0
-                ? availableHeight
-                : Math.Max(1, availableHeight - reservedHeight);
-            var height = PrepareWindow(new[] { blocks[index] }, workArea, bottom, maxHeight);
+            _logger.LogDebug("QuickControls render prepare window: index={Index} bottom={Bottom} maxHeight={MaxHeight} block=[{Block}]",
+                index,
+                bottom,
+                heights[index],
+                FormatBlocks(blockItems[index]));
+            var height = PrepareWindow(blockItems[index], workArea, bottom, heights[index]);
+            _logger.LogDebug("QuickControls render prepared window: index={Index} actualHeight={Height} nextBottom={NextBottom}",
+                index,
+                height,
+                bottom - height - OverlayGap);
             bottom -= height + OverlayGap;
-            index++;
         }
 
         HideUnusedWindows();
 
         for (var i = _activeWindowCount - 1; i >= 0; i--)
         {
+            _logger.LogDebug("QuickControls render show prepared window: index={Index}", i);
             _windows[i].ShowPrepared();
+        }
+
+        _logger.LogDebug("QuickControls render complete: activeWindows={ActiveWindows} totalWindows={TotalWindows}", _activeWindowCount, _windows.Count);
+    }
+
+    private List<int> MeasureBlockHeights(List<IReadOnlyList<object>> blockItems, RectInt32 workArea)
+    {
+        var heights = new List<int>(blockItems.Count);
+        for (var i = 0; i < blockItems.Count; i++)
+        {
+            var window = i < _windows.Count ? _windows[i] : CreateWindow();
+            var height = window.MeasureBlocksHeight(blockItems[i], workArea);
+            _logger.LogDebug("QuickControls measured block: index={Index} height={Height} block=[{Block}]", i, height, FormatBlocks(blockItems[i]));
+            heights.Add(height);
+        }
+
+        return heights;
+    }
+
+    private static void FitBlockHeights(List<int> heights, int availableHeight)
+    {
+        var overflow = heights.Sum() - availableHeight;
+        while (overflow > 0)
+        {
+            var tallestIndex = -1;
+            var tallestHeight = 0;
+            for (var i = 0; i < heights.Count; i++)
+            {
+                if (heights[i] > tallestHeight && heights[i] > MinimumOverflowHeight)
+                {
+                    tallestIndex = i;
+                    tallestHeight = heights[i];
+                }
+            }
+
+            if (tallestIndex < 0) break;
+            var reduction = Math.Min(overflow, tallestHeight - MinimumOverflowHeight);
+            heights[tallestIndex] -= reduction;
+            overflow -= reduction;
+        }
+
+        while (overflow > 0)
+        {
+            var tallestIndex = heights.IndexOf(heights.Max());
+            if (tallestIndex < 0 || heights[tallestIndex] <= 1) break;
+            var reduction = Math.Min(overflow, heights[tallestIndex] - 1);
+            heights[tallestIndex] -= reduction;
+            overflow -= reduction;
         }
     }
 
@@ -146,15 +214,20 @@ internal sealed class QuickControlsService : IQuickControlsService
     {
         if (!_isOpen) return;
 
-        _activeWindowCount = 0;
         var blocks = _viewModel.QuickControlBlocks.ToList();
+        _logger.LogDebug("QuickControls refresh open stack: blocks={BlockCount} blocks=[{Blocks}]", blocks.Count, FormatBlocks(blocks));
         if (blocks.Count == 0)
         {
+            _logger.LogDebug("QuickControls refresh hides stack: no blocks remain");
             Hide();
             return;
         }
 
+        CloseWindows();
         RenderBlocks(blocks);
+        _isOpen = true;
+        StartEscapeHook();
+        StartMouseHook();
     }
 
     private int PrepareWindow(IReadOnlyList<object> blocks, RectInt32 workArea, int bottom, int maxHeight)
@@ -163,6 +236,7 @@ internal sealed class QuickControlsService : IQuickControlsService
             ? _windows[_activeWindowCount]
             : CreateWindow();
         _activeWindowCount++;
+        _logger.LogDebug("QuickControls prepare selected window: activeIndex={Index} existingWindows={WindowCount}", _activeWindowCount - 1, _windows.Count);
         return window.PrepareBlocks(blocks, workArea, bottom, maxHeight);
     }
 
@@ -170,6 +244,7 @@ internal sealed class QuickControlsService : IQuickControlsService
     {
         var window = new QuickControlsWindow(_viewModel, _homePage, _settings, _loggerFactory.CreateLogger<QuickControlsWindow>());
         _windows.Add(window);
+        _logger.LogDebug("QuickControls create window: totalWindows={WindowCount}", _windows.Count);
         return window;
     }
 
@@ -194,6 +269,7 @@ internal sealed class QuickControlsService : IQuickControlsService
 
         var blocks = _viewModel.QuickControlBlocks.ToList();
         if (blocks.Count == 0) return;
+        _logger.LogDebug("QuickControls prewarm start: blocks={BlockCount} blocks=[{Blocks}]", blocks.Count, FormatBlocks(blocks));
 
         var offscreen = new RectInt32(-40000, -40000, 1000, 1000);
         _activeWindowCount = 0;
@@ -208,32 +284,42 @@ internal sealed class QuickControlsService : IQuickControlsService
         }
 
         Hide();
+        _logger.LogDebug("QuickControls prewarm complete: windows={WindowCount}", _windows.Count);
     }
 
     private void HideUnusedWindows()
     {
         for (var i = _activeWindowCount; i < _windows.Count; i++)
         {
+            _logger.LogDebug("QuickControls hide unused window: index={Index}", i);
             _windows[i].Hide();
         }
     }
 
     private void Hide()
     {
-        foreach (var window in _windows)
-        {
-            window.Hide();
-        }
-
-        _activeWindowCount = 0;
+        _logger.LogDebug("QuickControls hide: windows={WindowCount} activeWindows={ActiveWindowCount} wasOpen={WasOpen}", _windows.Count, _activeWindowCount, _isOpen);
+        CloseWindows();
         _isOpen = false;
         StopEscapeHook();
         StopMouseHook();
         _viewModel.PausePeakPollingForQuickControls();
     }
 
+    private void CloseWindows()
+    {
+        foreach (var window in _windows.ToList())
+        {
+            window.CloseFlyout();
+        }
+
+        _windows.Clear();
+        _activeWindowCount = 0;
+    }
+
     private void OnHotkeyPressed(object? sender, EventArgs e)
     {
+        _logger.LogDebug("QuickControls hotkey pressed: windows={WindowCount} isOpen={IsOpen}", _windows.Count, _isOpen);
         if (_windows.FirstOrDefault() is { } window)
         {
             window.DispatcherQueue.TryEnqueue(Toggle);
@@ -244,31 +330,37 @@ internal sealed class QuickControlsService : IQuickControlsService
         }
     }
 
-    private void OnQuickControlBlocksChanged(object? sender, NotifyCollectionChangedEventArgs e) => QueueRefresh();
+    private void OnQuickControlBlocksChanged(object? sender, NotifyCollectionChangedEventArgs e)
+    {
+        _logger.LogDebug(
+            "QuickControls blocks changed: action={Action} newCount={NewCount} oldCount={OldCount} newIndex={NewIndex} oldIndex={OldIndex} isOpen={IsOpen}",
+            e.Action,
+            e.NewItems?.Count ?? 0,
+            e.OldItems?.Count ?? 0,
+            e.NewStartingIndex,
+            e.OldStartingIndex,
+            _isOpen);
+        QueueRefresh();
+    }
 
     private void OnQuickControlContentChanged(object? sender, EventArgs e)
     {
-        if (!_isOpen && _prewarmStarted)
-        {
-            QueueRefresh();
-        }
+        _logger.LogDebug("QuickControls content changed: isOpen={IsOpen} prewarmStarted={PrewarmStarted}", _isOpen, _prewarmStarted);
     }
 
     private void QueueRefresh()
     {
         if (_refreshQueued) return;
         _refreshQueued = true;
+        _logger.LogDebug("QuickControls queue refresh: isOpen={IsOpen} prewarmStarted={PrewarmStarted}", _isOpen, _prewarmStarted);
 
         _dispatcher.Queue.TryEnqueue(() =>
         {
             _refreshQueued = false;
+            _logger.LogDebug("QuickControls run queued refresh: isOpen={IsOpen} prewarmStarted={PrewarmStarted}", _isOpen, _prewarmStarted);
             if (_isOpen)
             {
                 RefreshOpenStack();
-            }
-            else if (_prewarmStarted)
-            {
-                PrewarmWindows();
             }
         });
     }
@@ -278,12 +370,14 @@ internal sealed class QuickControlsService : IQuickControlsService
         if (_escapeHook != 0) return;
         _escapeProc = EscapeHookProc;
         _escapeHook = SetWindowsHookEx(WhKeyboardLl, _escapeProc, GetModuleHandle(null), 0);
+        _logger.LogDebug("QuickControls escape hook start: handle={Handle}", _escapeHook);
     }
 
     private void StopEscapeHook()
     {
         if (_escapeHook == 0) return;
         UnhookWindowsHookEx(_escapeHook);
+        _logger.LogDebug("QuickControls escape hook stop: handle={Handle}", _escapeHook);
         _escapeHook = 0;
         _escapeProc = null;
     }
@@ -293,12 +387,14 @@ internal sealed class QuickControlsService : IQuickControlsService
         if (_mouseHook != 0) return;
         _mouseProc = MouseHookProc;
         _mouseHook = SetWindowsHookEx(WhMouseLl, _mouseProc, GetModuleHandle(null), 0);
+        _logger.LogDebug("QuickControls mouse hook start: handle={Handle}", _mouseHook);
     }
 
     private void StopMouseHook()
     {
         if (_mouseHook == 0) return;
         UnhookWindowsHookEx(_mouseHook);
+        _logger.LogDebug("QuickControls mouse hook stop: handle={Handle}", _mouseHook);
         _mouseHook = 0;
         _mouseProc = null;
     }
@@ -310,6 +406,7 @@ internal sealed class QuickControlsService : IQuickControlsService
             var data = Marshal.PtrToStructure<KbdLlHookStruct>(lParam);
             if (data.vkCode == VkEscape)
             {
+                _logger.LogDebug("QuickControls escape pressed: hiding stack");
                 _windows[0].DispatcherQueue.TryEnqueue(Hide);
                 return 1;
             }
@@ -327,6 +424,7 @@ internal sealed class QuickControlsService : IQuickControlsService
             var rootHwnd = GetAncestor(hwnd, GA_ROOT);
             if (!_windows.Any(window => window.Hwnd == hwnd || window.Hwnd == rootHwnd || IsChild(window.Hwnd, hwnd)))
             {
+                _logger.LogDebug("QuickControls outside click: hwnd={Hwnd} root={RootHwnd} point=({X},{Y})", hwnd, rootHwnd, data.pt.X, data.pt.Y);
                 _windows[0].DispatcherQueue.TryEnqueue(Hide);
             }
         }
@@ -341,10 +439,36 @@ internal sealed class QuickControlsService : IQuickControlsService
     {
         if (_settings.Current.QuickControlsDisplay == QuickControlsDisplayMode.CurrentlyActive && GetCursorPos(out var point))
         {
-            return DisplayArea.GetFromPoint(new PointInt32(point.X, point.Y), DisplayAreaFallback.Primary);
+            var area = DisplayArea.GetFromPoint(new PointInt32(point.X, point.Y), DisplayAreaFallback.Primary);
+            _logger.LogDebug("QuickControls resolve work area: mode={Mode} cursor=({X},{Y}) workArea=({AreaX},{AreaY},{AreaWidth},{AreaHeight})",
+                _settings.Current.QuickControlsDisplay,
+                point.X,
+                point.Y,
+                area.WorkArea.X,
+                area.WorkArea.Y,
+                area.WorkArea.Width,
+                area.WorkArea.Height);
+            return area;
         }
-        return DisplayArea.Primary;
+        var primary = DisplayArea.Primary;
+        _logger.LogDebug("QuickControls resolve work area: mode={Mode} workArea=({AreaX},{AreaY},{AreaWidth},{AreaHeight})",
+            _settings.Current.QuickControlsDisplay,
+            primary.WorkArea.X,
+            primary.WorkArea.Y,
+            primary.WorkArea.Width,
+            primary.WorkArea.Height);
+        return primary;
     }
+
+    private static string FormatBlocks(IEnumerable<object> blocks) =>
+        string.Join(" | ", blocks.Select(FormatBlock));
+
+    private static string FormatBlock(object block) => block switch
+    {
+        DeviceCard card => $"card:'{card.DisplayName}' key='{card.DeviceKey}' quick={card.IsQuickPinned} apps={card.Apps.Count}",
+        DeviceGroupCard group => $"group:'{group.Title}' id='{group.Id}' members=[{string.Join(", ", group.Members.Select(card => $"'{card.DisplayName}' key='{card.DeviceKey}' quick={card.IsQuickPinned} apps={card.Apps.Count}"))}]",
+        _ => block.GetType().Name,
+    };
 
     public void Dispose()
     {
@@ -354,11 +478,6 @@ internal sealed class QuickControlsService : IQuickControlsService
         _prewarmTimer?.Stop();
         _prewarmTimer = null;
         Hide();
-        foreach (var window in _windows)
-        {
-            window.CloseFlyout();
-        }
-        _windows.Clear();
     }
 
     [StructLayout(LayoutKind.Sequential)]

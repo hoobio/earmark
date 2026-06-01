@@ -910,7 +910,7 @@
                              aligned + content-width so the box hugs them. -->
                         <ItemsRepeater Grid.Row="1"
                                        HorizontalAlignment="Left"
-                                       ItemsSource="{x:Bind Members}"
+                                       ItemsSource="{x:Bind Members, Mode=OneWay}"
                                        ElementPrepared="OnBlockElementPrepared"
                                        ItemTemplate="{StaticResource DeviceCardTemplate}">
                             <ItemsRepeater.Layout>

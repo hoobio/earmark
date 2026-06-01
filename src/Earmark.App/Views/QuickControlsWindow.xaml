@@ -26,7 +26,8 @@
                           HorizontalScrollBarVisibility="Disabled"
                           IsScrollInertiaEnabled="False"
                           Background="Transparent">
-                <ItemsRepeater x:Name="Repeater">
+                <ItemsRepeater x:Name="Repeater"
+                               ElementPrepared="OnRepeaterElementPrepared">
                     <ItemsRepeater.Layout>
                         <StackLayout Spacing="12" />
                     </ItemsRepeater.Layout>
