@@ -224,7 +224,6 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     /// <summary>Group container VMs by id, reused across rebuilds so an in-progress title edit and
     /// the member card instances survive.</summary>
     private readonly Dictionary<string, DeviceGroupCard> _groupCards = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<string, DeviceGroupCard> _quickGroupCards = new(StringComparer.OrdinalIgnoreCase);
 
     public bool HasItems => Blocks.Count > 0;
     public bool IsEmpty => Blocks.Count == 0;
@@ -1595,7 +1594,6 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     private void SyncQuickControlBlocks()
     {
         var desired = new List<object>();
-        var liveQuickGroups = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var pendingUngroupedCards = new List<DeviceCard>();
         var pseudoGroupIndex = 0;
 
@@ -1608,11 +1606,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             else if (pendingUngroupedCards.Count > 1)
             {
                 var key = $"pseudo-{pseudoGroupIndex++}:{pendingUngroupedCards[0].DeviceKey}";
-                var quickGroup = GetQuickControlPseudoGroup(key);
-                RemoveMissing(quickGroup.Members, pendingUngroupedCards);
-                PositionInPlace(quickGroup.Members, pendingUngroupedCards);
-                desired.Add(quickGroup);
-                liveQuickGroups.Add(key);
+                desired.Add(CreateQuickControlGroup(key, string.Empty, pendingUngroupedCards, hideEmptyTitleBand: true));
             }
 
             pendingUngroupedCards.Clear();
@@ -1630,11 +1624,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
                         .ToList();
                     if (pinnedMembers.Count > 0)
                     {
-                        var quickGroup = GetQuickControlGroup(group);
-                        RemoveMissing(quickGroup.Members, pinnedMembers);
-                        PositionInPlace(quickGroup.Members, pinnedMembers);
-                        desired.Add(quickGroup);
-                        liveQuickGroups.Add(group.Id);
+                        desired.Add(CreateQuickControlGroup(group.Id, group.Title, pinnedMembers, hideEmptyTitleBand: false));
                     }
                     break;
                 case DeviceCard card when card.IsQuickPinned:
@@ -1645,38 +1635,24 @@ public partial class HomeViewModel : ObservableObject, IDisposable
 
         FlushUngroupedCards();
 
-        foreach (var goneId in _quickGroupCards.Keys.Where(id => !liveQuickGroups.Contains(id)).ToList())
-        {
-            _quickGroupCards.Remove(goneId);
-        }
-
         RemoveMissing(QuickControlBlocks, desired);
         PositionInPlace(QuickControlBlocks, desired);
         OnPropertyChanged(nameof(HasQuickControlBlocks));
     }
 
-    private DeviceGroupCard GetQuickControlGroup(DeviceGroupCard source)
+    private static DeviceGroupCard CreateQuickControlGroup(
+        string key,
+        string title,
+        IReadOnlyList<DeviceCard> members,
+        bool hideEmptyTitleBand)
     {
-        if (!_quickGroupCards.TryGetValue(source.Id, out var projection))
+        var group = new DeviceGroupCard($"quick-{key}", title, null, hideEmptyTitleBand);
+        foreach (var member in members)
         {
-            projection = new DeviceGroupCard($"quick-{source.Id}", source.Title, null);
-            _quickGroupCards[source.Id] = projection;
+            group.Members.Add(member);
         }
 
-        projection.SyncFrom(source.Title, isQuickPinned: false);
-        return projection;
-    }
-
-    private DeviceGroupCard GetQuickControlPseudoGroup(string key)
-    {
-        if (!_quickGroupCards.TryGetValue(key, out var projection))
-        {
-            projection = new DeviceGroupCard($"quick-{key}", string.Empty, null, hideEmptyTitleBand: true);
-            _quickGroupCards[key] = projection;
-        }
-
-        projection.SyncFrom(string.Empty, isQuickPinned: false);
-        return projection;
+        return group;
     }
 
     /// <summary>Removal half of the two-phase reconcile: drops from <paramref name="target"/> any item

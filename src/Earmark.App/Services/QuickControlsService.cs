@@ -119,13 +119,17 @@ internal sealed class QuickControlsService : IQuickControlsService
         while (index < blocks.Count)
         {
             var availableHeight = bottom - top;
-            if (availableHeight <= MinimumOverflowHeight || (blocks.Count - index > 1 && availableHeight < MinimumOverflowHeight * 2))
+            if (availableHeight <= 0)
             {
-                PrepareWindow(blocks.Skip(index).ToList(), workArea, bottom, availableHeight);
                 break;
             }
 
-            var height = PrepareWindow([blocks[index]], workArea, bottom, availableHeight);
+            var remainingBlocks = blocks.Count - index - 1;
+            var reservedHeight = remainingBlocks * MinimumOverflowHeight + remainingBlocks * OverlayGap;
+            var maxHeight = remainingBlocks == 0
+                ? availableHeight
+                : Math.Max(1, availableHeight - reservedHeight);
+            var height = PrepareWindow(new[] { blocks[index] }, workArea, bottom, maxHeight);
             bottom -= height + OverlayGap;
             index++;
         }
