@@ -641,67 +641,9 @@ public sealed partial class RulesPage : Page
     // CA1822 suppressed: XAML event hookup requires instance methods even when the body
     // doesn't touch instance state.
 #pragma warning disable CA1822
-    // The pattern AutoSuggestBoxes serve both as free-text inputs (Regex/Wildcard) and as the
-    // searchable picker (Exact mode); they live on both ActionRow and ConditionRow, so the candidate
-    // lookups are DataContext-agnostic.
-    private void OnDevicePatternTextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
-    {
-        if (args.Reason != AutoSuggestionBoxTextChangeReason.UserInput) return;
-        sender.ItemsSource = FilterCandidates(DeviceCandidatesOf(sender.DataContext), sender.Text);
-    }
-
-    private void OnDevicePatternGotFocus(object sender, RoutedEventArgs e)
-    {
-        if (sender is AutoSuggestBox box)
-        {
-            box.ItemsSource = FilterCandidates(DeviceCandidatesOf(box.DataContext), box.Text);
-        }
-    }
-
-    private void OnDeviceSuggestionChosen(AutoSuggestBox sender, AutoSuggestBoxSuggestionChosenEventArgs args)
-    {
-        if (args.SelectedItem is string name) sender.Text = name;
-    }
-
-    private void OnAppPatternTextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
-    {
-        if (args.Reason != AutoSuggestionBoxTextChangeReason.UserInput) return;
-        sender.ItemsSource = FilterCandidates(AppCandidatesOf(sender.DataContext), sender.Text);
-    }
-
-    private void OnAppPatternGotFocus(object sender, RoutedEventArgs e)
-    {
-        if (sender is AutoSuggestBox box)
-        {
-            box.ItemsSource = FilterCandidates(AppCandidatesOf(box.DataContext), box.Text);
-        }
-    }
-
-    private void OnAppSuggestionChosen(AutoSuggestBox sender, AutoSuggestBoxSuggestionChosenEventArgs args)
-    {
-        if (args.SelectedItem is string name) sender.Text = name;
-    }
-
-    private void OnMixPatternTextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
-    {
-        if (args.Reason != AutoSuggestionBoxTextChangeReason.UserInput) return;
-        sender.ItemsSource = FilterCandidates(MixCandidatesOf(sender.DataContext), sender.Text);
-    }
-
-    private void OnMixPatternGotFocus(object sender, RoutedEventArgs e)
-    {
-        if (sender is AutoSuggestBox box)
-        {
-            box.ItemsSource = FilterCandidates(MixCandidatesOf(box.DataContext), box.Text);
-        }
-    }
-
-    private void OnMixSuggestionChosen(AutoSuggestBox sender, AutoSuggestBoxSuggestionChosenEventArgs args)
-    {
-        if (args.SelectedItem is string name) sender.Text = name;
-    }
-
     // Match-mode dropdowns. Each lives on an ActionRow or a ConditionRow; route by DataContext.
+    // Picking Exact swaps the field to a PickerComboBox (read-only dropdown + in-flyout search),
+    // bound directly in XAML to the row's DeviceCandidates / AppCandidates / MixCandidates.
     private void OnDeviceModeChanged(object sender, SelectionChangedEventArgs e)
     {
         if (sender is not ComboBox combo || combo.SelectedItem is not PatternModeOption opt) return;
@@ -725,44 +667,5 @@ public sealed partial class RulesPage : Page
         }
     }
 #pragma warning restore CA1822
-
-    private static IReadOnlyList<string> DeviceCandidatesOf(object? dc) => dc switch
-    {
-        ActionRow a => a.DeviceCandidates,
-        ConditionRow c => c.DeviceCandidates,
-        _ => Array.Empty<string>(),
-    };
-
-    private static IReadOnlyList<string> AppCandidatesOf(object? dc) => dc switch
-    {
-        ActionRow a => a.AppCandidates,
-        ConditionRow c => c.AppCandidates,
-        _ => Array.Empty<string>(),
-    };
-
-    private static IReadOnlyList<string> MixCandidatesOf(object? dc) => dc switch
-    {
-        ActionRow a => a.MixCandidates,
-        _ => Array.Empty<string>(),
-    };
-
-    private static List<string> FilterCandidates(IReadOnlyList<string> candidates, string? text)
-    {
-        if (string.IsNullOrEmpty(text))
-        {
-            return candidates.Take(20).ToList();
-        }
-
-        var matches = new List<string>();
-        foreach (var candidate in candidates)
-        {
-            if (candidate.Contains(text, StringComparison.OrdinalIgnoreCase))
-            {
-                matches.Add(candidate);
-                if (matches.Count >= 20) break;
-            }
-        }
-        return matches;
-    }
 
 }

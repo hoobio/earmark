@@ -88,75 +88,106 @@
                         </Button>
                     </Grid>
 
-                    <Grid ColumnSpacing="{StaticResource SpacingSmall}" Visibility="{x:Bind IsDeviceCondition, Mode=OneWay}">
+                    <Grid ColumnSpacing="{StaticResource SpacingSmall}" RowSpacing="4" Visibility="{x:Bind IsDeviceCondition, Mode=OneWay}">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <AutoSuggestBox Grid.Column="0"
-                                        PlaceholderText=".*Headphones.*"
-                                        Text="{x:Bind DevicePattern, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                        TextChanged="OnDevicePatternTextChanged"
-                                        SuggestionChosen="OnDeviceSuggestionChosen"
-                                        GotFocus="OnDevicePatternGotFocus">
-                            <AutoSuggestBox.Header>
-                                <StackPanel Orientation="Horizontal" Spacing="{StaticResource SpacingSmall}" VerticalAlignment="Center">
-                                    <TextBlock Text="Device pattern" VerticalAlignment="Center" />
-                                    <Border Style="{StaticResource ChipBorderStyle}"
-                                            Visibility="{x:Bind HasDeviceMatch, Mode=OneWay}">
-                                        <StackPanel Orientation="Horizontal" Spacing="6">
-                                            <FontIcon Glyph="&#xE7F5;" FontSize="11"
-                                                      Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                      VerticalAlignment="Center" />
-                                            <TextBlock Text="{x:Bind DeviceMatchSummary, Mode=OneWay}"
-                                                       Style="{StaticResource CaptionTextBlockStyle}"
-                                                       VerticalAlignment="Center" />
-                                        </StackPanel>
-                                    </Border>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <StackPanel Grid.Row="0" Grid.Column="0" Orientation="Horizontal" Spacing="{StaticResource SpacingSmall}" VerticalAlignment="Center">
+                            <TextBlock Text="Device" VerticalAlignment="Center" />
+                            <Border Style="{StaticResource ChipBorderStyle}"
+                                    Visibility="{x:Bind HasDeviceMatch, Mode=OneWay}">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <FontIcon Glyph="&#xE7F5;" FontSize="11"
+                                              Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                              VerticalAlignment="Center" />
+                                    <TextBlock Text="{x:Bind DeviceMatchSummary, Mode=OneWay}"
+                                               Style="{StaticResource CaptionTextBlockStyle}"
+                                               VerticalAlignment="Center" />
+                                    <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center"
+                                                Visibility="{x:Bind DeviceMatchDisconnected, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                                ToolTipService.ToolTip="{x:Bind DeviceMatchDisconnectedNames, Mode=OneWay}">
+                                        <FontIcon Glyph="&#xEB5E;" FontSize="11"
+                                                  Foreground="{ThemeResource SystemFillColorCautionBrush}"
+                                                  VerticalAlignment="Center" />
+                                        <TextBlock Text="offline"
+                                                   Style="{StaticResource CaptionTextBlockStyle}"
+                                                   Foreground="{ThemeResource SystemFillColorCautionBrush}"
+                                                   VerticalAlignment="Center" />
+                                    </StackPanel>
                                 </StackPanel>
-                            </AutoSuggestBox.Header>
-                        </AutoSuggestBox>
-                        <ComboBox Grid.Column="1" Header="Match" MinWidth="112" VerticalAlignment="Bottom"
+                            </Border>
+                        </StackPanel>
+                        <TextBlock Grid.Row="0" Grid.Column="1" Text="Match" VerticalAlignment="Center"
+                                   Style="{StaticResource CaptionTextBlockStyle}"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+
+                        <TextBox Grid.Row="1" Grid.Column="0"
+                                 PlaceholderText=".*Headphones.*"
+                                 Text="{x:Bind DevicePattern, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                 Visibility="{x:Bind DevicePatternIsText, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                        <controls:PickerComboBox Grid.Row="1" Grid.Column="0"
+                                  PlaceholderText="Pick a device"
+                                  Candidates="{x:Bind DeviceCandidates, Mode=OneWay}"
+                                  Value="{x:Bind DevicePattern, Mode=TwoWay}"
+                                  Visibility="{x:Bind DevicePatternIsPick, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
+
+                        <ComboBox Grid.Row="1" Grid.Column="1" MinWidth="112"
                                   ItemsSource="{x:Bind DeviceModeOptions}"
                                   SelectedItem="{x:Bind SelectedDeviceMode, Mode=OneWay}"
                                   SelectionChanged="OnDeviceModeChanged"
-                                  ToolTipService.ToolTip="How the device pattern is matched: Regex, Wildcard (* ?), or pick an exact Device" />
+                                  ToolTipService.ToolTip="How the device is matched: Regex, Wildcard (* ?), or pick an exact device" />
                     </Grid>
 
-                    <Grid ColumnSpacing="{StaticResource SpacingSmall}" Visibility="{x:Bind IsApplicationCondition, Mode=OneWay}">
+                    <Grid ColumnSpacing="{StaticResource SpacingSmall}" RowSpacing="4" Visibility="{x:Bind IsApplicationCondition, Mode=OneWay}">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <AutoSuggestBox Grid.Column="0"
-                                        PlaceholderText=".*discord.*"
-                                        Text="{x:Bind AppPattern, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                        TextChanged="OnAppPatternTextChanged"
-                                        SuggestionChosen="OnAppSuggestionChosen"
-                                        GotFocus="OnAppPatternGotFocus">
-                            <AutoSuggestBox.Header>
-                                <StackPanel Orientation="Horizontal" Spacing="{StaticResource SpacingSmall}" VerticalAlignment="Center">
-                                    <TextBlock Text="App pattern" VerticalAlignment="Center" />
-                                    <Border Style="{StaticResource ChipBorderStyle}"
-                                            Visibility="{x:Bind HasAppMatches, Mode=OneWay}"
-                                            ToolTipService.ToolTip="{x:Bind AppMatchNames, Mode=OneWay}">
-                                        <StackPanel Orientation="Horizontal" Spacing="6">
-                                            <FontIcon Glyph="&#xE946;" FontSize="11"
-                                                      Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                      VerticalAlignment="Center" />
-                                            <TextBlock Text="{x:Bind AppMatchSummary, Mode=OneWay}"
-                                                       Style="{StaticResource CaptionTextBlockStyle}"
-                                                       VerticalAlignment="Center" />
-                                    </StackPanel>
-                                </Border>
-                            </StackPanel>
-                        </AutoSuggestBox.Header>
-                        </AutoSuggestBox>
-                        <ComboBox Grid.Column="1" Header="Match" MinWidth="112" VerticalAlignment="Bottom"
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <StackPanel Grid.Row="0" Grid.Column="0" Orientation="Horizontal" Spacing="{StaticResource SpacingSmall}" VerticalAlignment="Center">
+                            <TextBlock Text="App" VerticalAlignment="Center" />
+                            <Border Style="{StaticResource ChipBorderStyle}"
+                                    Visibility="{x:Bind HasAppMatches, Mode=OneWay}"
+                                    ToolTipService.ToolTip="{x:Bind AppMatchNames, Mode=OneWay}">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <FontIcon Glyph="&#xE946;" FontSize="11"
+                                              Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                              VerticalAlignment="Center" />
+                                    <TextBlock Text="{x:Bind AppMatchSummary, Mode=OneWay}"
+                                               Style="{StaticResource CaptionTextBlockStyle}"
+                                               VerticalAlignment="Center" />
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                        <TextBlock Grid.Row="0" Grid.Column="1" Text="Match" VerticalAlignment="Center"
+                                   Style="{StaticResource CaptionTextBlockStyle}"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+
+                        <TextBox Grid.Row="1" Grid.Column="0"
+                                 PlaceholderText=".*discord.*"
+                                 Text="{x:Bind AppPattern, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                 Visibility="{x:Bind AppPatternIsText, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                        <controls:PickerComboBox Grid.Row="1" Grid.Column="0"
+                                  PlaceholderText="Pick an app"
+                                  Candidates="{x:Bind AppCandidates, Mode=OneWay}"
+                                  Value="{x:Bind AppPattern, Mode=TwoWay}"
+                                  Visibility="{x:Bind AppPatternIsPick, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
+
+                        <ComboBox Grid.Row="1" Grid.Column="1" MinWidth="112"
                                   ItemsSource="{x:Bind AppModeOptions}"
                                   SelectedItem="{x:Bind SelectedAppMode, Mode=OneWay}"
                                   SelectionChanged="OnAppModeChanged"
-                                  ToolTipService.ToolTip="How the app pattern is matched: Regex, Wildcard (* ?), or pick an exact App" />
+                                  ToolTipService.ToolTip="How the app is matched: Regex, Wildcard (* ?), or pick an exact app" />
                     </Grid>
                 </StackPanel>
             </Border>
@@ -243,110 +274,151 @@
                         </StackPanel>
                     </Grid>
 
-                    <Grid ColumnSpacing="{StaticResource SpacingSmall}" Visibility="{x:Bind IsWaveLinkAction, Mode=OneWay}">
+                    <Grid ColumnSpacing="{StaticResource SpacingSmall}" RowSpacing="4" Visibility="{x:Bind IsWaveLinkAction, Mode=OneWay}">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <AutoSuggestBox Grid.Column="0"
-                                        PlaceholderText="Headphone Mix"
-                                        Text="{x:Bind MixPattern, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                        TextChanged="OnMixPatternTextChanged"
-                                        SuggestionChosen="OnMixSuggestionChosen"
-                                        GotFocus="OnMixPatternGotFocus">
-                            <AutoSuggestBox.Header>
-                                <StackPanel Orientation="Horizontal" Spacing="{StaticResource SpacingSmall}" VerticalAlignment="Center">
-                                    <TextBlock Text="Mix pattern" VerticalAlignment="Center" />
-                                    <Border Style="{StaticResource ChipBorderStyle}"
-                                            Visibility="{x:Bind HasMixMatch, Mode=OneWay}">
-                                        <StackPanel Orientation="Horizontal" Spacing="6">
-                                            <FontIcon Glyph="&#xE9D5;" FontSize="11"
-                                                      Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                      VerticalAlignment="Center" />
-                                            <TextBlock Text="{x:Bind MixMatchSummary, Mode=OneWay}"
-                                                       Style="{StaticResource CaptionTextBlockStyle}"
-                                                       VerticalAlignment="Center" />
-                                        </StackPanel>
-                                    </Border>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <StackPanel Grid.Row="0" Grid.Column="0" Orientation="Horizontal" Spacing="{StaticResource SpacingSmall}" VerticalAlignment="Center">
+                            <TextBlock Text="Mix" VerticalAlignment="Center" />
+                            <Border Style="{StaticResource ChipBorderStyle}"
+                                    Visibility="{x:Bind HasMixMatch, Mode=OneWay}">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <FontIcon Glyph="&#xE9D5;" FontSize="11"
+                                              Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                              VerticalAlignment="Center" />
+                                    <TextBlock Text="{x:Bind MixMatchSummary, Mode=OneWay}"
+                                               Style="{StaticResource CaptionTextBlockStyle}"
+                                               VerticalAlignment="Center" />
                                 </StackPanel>
-                            </AutoSuggestBox.Header>
-                        </AutoSuggestBox>
-                        <ComboBox Grid.Column="1" Header="Match" MinWidth="112" VerticalAlignment="Bottom"
+                            </Border>
+                        </StackPanel>
+                        <TextBlock Grid.Row="0" Grid.Column="1" Text="Match" VerticalAlignment="Center"
+                                   Style="{StaticResource CaptionTextBlockStyle}"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+
+                        <TextBox Grid.Row="1" Grid.Column="0"
+                                 PlaceholderText="Headphone Mix"
+                                 Text="{x:Bind MixPattern, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                 Visibility="{x:Bind MixPatternIsText, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                        <controls:PickerComboBox Grid.Row="1" Grid.Column="0"
+                                  PlaceholderText="Pick a mix"
+                                  Candidates="{x:Bind MixCandidates, Mode=OneWay}"
+                                  Value="{x:Bind MixPattern, Mode=TwoWay}"
+                                  Visibility="{x:Bind MixPatternIsPick, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
+
+                        <ComboBox Grid.Row="1" Grid.Column="1" MinWidth="112"
                                   ItemsSource="{x:Bind MixModeOptions}"
                                   SelectedItem="{x:Bind SelectedMixMode, Mode=OneWay}"
                                   SelectionChanged="OnMixModeChanged"
-                                  ToolTipService.ToolTip="How the mix pattern is matched: Regex, Wildcard (* ?), or pick an exact Mix" />
+                                  ToolTipService.ToolTip="How the mix is matched: Regex, Wildcard (* ?), or pick an exact mix" />
                     </Grid>
 
-                    <Grid ColumnSpacing="{StaticResource SpacingSmall}" Visibility="{x:Bind RequiresAppPattern, Mode=OneWay}">
+                    <Grid ColumnSpacing="{StaticResource SpacingSmall}" RowSpacing="4" Visibility="{x:Bind RequiresAppPattern, Mode=OneWay}">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <AutoSuggestBox Grid.Column="0"
-                                        PlaceholderText=".*chrome.*"
-                                        Text="{x:Bind AppPattern, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                        TextChanged="OnAppPatternTextChanged"
-                                        SuggestionChosen="OnAppSuggestionChosen"
-                                        GotFocus="OnAppPatternGotFocus">
-                            <AutoSuggestBox.Header>
-                                <StackPanel Orientation="Horizontal" Spacing="{StaticResource SpacingSmall}" VerticalAlignment="Center">
-                                    <TextBlock Text="App pattern" VerticalAlignment="Center" />
-                                    <Border Style="{StaticResource ChipBorderStyle}"
-                                            Visibility="{x:Bind HasAppMatches, Mode=OneWay}"
-                                            ToolTipService.ToolTip="{x:Bind AppMatchNames, Mode=OneWay}">
-                                        <StackPanel Orientation="Horizontal" Spacing="6">
-                                            <FontIcon Glyph="&#xE946;" FontSize="11"
-                                                      Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                      VerticalAlignment="Center" />
-                                            <TextBlock Text="{x:Bind AppMatchSummary, Mode=OneWay}"
-                                                       Style="{StaticResource CaptionTextBlockStyle}"
-                                                       VerticalAlignment="Center" />
-                                        </StackPanel>
-                                    </Border>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <StackPanel Grid.Row="0" Grid.Column="0" Orientation="Horizontal" Spacing="{StaticResource SpacingSmall}" VerticalAlignment="Center">
+                            <TextBlock Text="App" VerticalAlignment="Center" />
+                            <Border Style="{StaticResource ChipBorderStyle}"
+                                    Visibility="{x:Bind HasAppMatches, Mode=OneWay}"
+                                    ToolTipService.ToolTip="{x:Bind AppMatchNames, Mode=OneWay}">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <FontIcon Glyph="&#xE946;" FontSize="11"
+                                              Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                              VerticalAlignment="Center" />
+                                    <TextBlock Text="{x:Bind AppMatchSummary, Mode=OneWay}"
+                                               Style="{StaticResource CaptionTextBlockStyle}"
+                                               VerticalAlignment="Center" />
                                 </StackPanel>
-                            </AutoSuggestBox.Header>
-                        </AutoSuggestBox>
-                        <ComboBox Grid.Column="1" Header="Match" MinWidth="112" VerticalAlignment="Bottom"
+                            </Border>
+                        </StackPanel>
+                        <TextBlock Grid.Row="0" Grid.Column="1" Text="Match" VerticalAlignment="Center"
+                                   Style="{StaticResource CaptionTextBlockStyle}"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+
+                        <TextBox Grid.Row="1" Grid.Column="0"
+                                 PlaceholderText=".*chrome.*"
+                                 Text="{x:Bind AppPattern, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                 Visibility="{x:Bind AppPatternIsText, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                        <controls:PickerComboBox Grid.Row="1" Grid.Column="0"
+                                  PlaceholderText="Pick an app"
+                                  Candidates="{x:Bind AppCandidates, Mode=OneWay}"
+                                  Value="{x:Bind AppPattern, Mode=TwoWay}"
+                                  Visibility="{x:Bind AppPatternIsPick, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
+
+                        <ComboBox Grid.Row="1" Grid.Column="1" MinWidth="112"
                                   ItemsSource="{x:Bind AppModeOptions}"
                                   SelectedItem="{x:Bind SelectedAppMode, Mode=OneWay}"
                                   SelectionChanged="OnAppModeChanged"
-                                  ToolTipService.ToolTip="How the app pattern is matched: Regex, Wildcard (* ?), or pick an exact App" />
+                                  ToolTipService.ToolTip="How the app is matched: Regex, Wildcard (* ?), or pick an exact app" />
                     </Grid>
 
-                    <Grid ColumnSpacing="{StaticResource SpacingSmall}" Visibility="{x:Bind RequiresDevicePattern, Mode=OneWay}">
+                    <Grid ColumnSpacing="{StaticResource SpacingSmall}" RowSpacing="4" Visibility="{x:Bind RequiresDevicePattern, Mode=OneWay}">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <AutoSuggestBox Grid.Column="0"
-                                        PlaceholderText=".*Headphones.*"
-                                        Text="{x:Bind DevicePattern, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                        TextChanged="OnDevicePatternTextChanged"
-                                        SuggestionChosen="OnDeviceSuggestionChosen"
-                                        GotFocus="OnDevicePatternGotFocus">
-                            <AutoSuggestBox.Header>
-                                <StackPanel Orientation="Horizontal" Spacing="{StaticResource SpacingSmall}" VerticalAlignment="Center">
-                                    <TextBlock Text="Device pattern" VerticalAlignment="Center" />
-                                    <Border Style="{StaticResource ChipBorderStyle}"
-                                            Visibility="{x:Bind HasDeviceMatch, Mode=OneWay}">
-                                        <StackPanel Orientation="Horizontal" Spacing="6">
-                                            <FontIcon Glyph="&#xE7F5;" FontSize="11"
-                                                      Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                      VerticalAlignment="Center" />
-                                            <TextBlock Text="{x:Bind DeviceMatchSummary, Mode=OneWay}"
-                                                       Style="{StaticResource CaptionTextBlockStyle}"
-                                                       VerticalAlignment="Center" />
-                                        </StackPanel>
-                                    </Border>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <StackPanel Grid.Row="0" Grid.Column="0" Orientation="Horizontal" Spacing="{StaticResource SpacingSmall}" VerticalAlignment="Center">
+                            <TextBlock Text="Device" VerticalAlignment="Center" />
+                            <Border Style="{StaticResource ChipBorderStyle}"
+                                    Visibility="{x:Bind HasDeviceMatch, Mode=OneWay}">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <FontIcon Glyph="&#xE7F5;" FontSize="11"
+                                              Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                              VerticalAlignment="Center" />
+                                    <TextBlock Text="{x:Bind DeviceMatchSummary, Mode=OneWay}"
+                                               Style="{StaticResource CaptionTextBlockStyle}"
+                                               VerticalAlignment="Center" />
+                                    <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center"
+                                                Visibility="{x:Bind DeviceMatchDisconnected, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                                ToolTipService.ToolTip="{x:Bind DeviceMatchDisconnectedNames, Mode=OneWay}">
+                                        <FontIcon Glyph="&#xEB5E;" FontSize="11"
+                                                  Foreground="{ThemeResource SystemFillColorCautionBrush}"
+                                                  VerticalAlignment="Center" />
+                                        <TextBlock Text="offline"
+                                                   Style="{StaticResource CaptionTextBlockStyle}"
+                                                   Foreground="{ThemeResource SystemFillColorCautionBrush}"
+                                                   VerticalAlignment="Center" />
+                                    </StackPanel>
                                 </StackPanel>
-                            </AutoSuggestBox.Header>
-                        </AutoSuggestBox>
-                        <ComboBox Grid.Column="1" Header="Match" MinWidth="112" VerticalAlignment="Bottom"
+                            </Border>
+                        </StackPanel>
+                        <TextBlock Grid.Row="0" Grid.Column="1" Text="Match" VerticalAlignment="Center"
+                                   Style="{StaticResource CaptionTextBlockStyle}"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+
+                        <TextBox Grid.Row="1" Grid.Column="0"
+                                 PlaceholderText=".*Headphones.*"
+                                 Text="{x:Bind DevicePattern, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                 Visibility="{x:Bind DevicePatternIsText, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                        <controls:PickerComboBox Grid.Row="1" Grid.Column="0"
+                                  PlaceholderText="Pick a device"
+                                  Candidates="{x:Bind DeviceCandidates, Mode=OneWay}"
+                                  Value="{x:Bind DevicePattern, Mode=TwoWay}"
+                                  Visibility="{x:Bind DevicePatternIsPick, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
+
+                        <ComboBox Grid.Row="1" Grid.Column="1" MinWidth="112"
                                   ItemsSource="{x:Bind DeviceModeOptions}"
                                   SelectedItem="{x:Bind SelectedDeviceMode, Mode=OneWay}"
                                   SelectionChanged="OnDeviceModeChanged"
-                                  ToolTipService.ToolTip="How the device pattern is matched: Regex, Wildcard (* ?), or pick an exact Device" />
+                                  ToolTipService.ToolTip="How the device is matched: Regex, Wildcard (* ?), or pick an exact device" />
                     </Grid>
 
                     <TextBox Header="New name"

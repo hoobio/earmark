@@ -797,6 +797,14 @@ public partial class ActionRow : ObservableObject, IDisposable, ISyncable<RuleAc
     [ObservableProperty]
     public partial string DeviceMatchSummary { get; set; } = string.Empty;
 
+    /// <summary>True when the device pattern matches a device that's currently disconnected.</summary>
+    [ObservableProperty]
+    public partial bool DeviceMatchDisconnected { get; set; }
+
+    /// <summary>Newline-joined names of the matched-but-disconnected devices (chip tooltip).</summary>
+    [ObservableProperty]
+    public partial string DeviceMatchDisconnectedNames { get; set; } = string.Empty;
+
     [ObservableProperty]
     public partial string MixMatchSummary { get; set; } = string.Empty;
 
@@ -1015,6 +1023,8 @@ public partial class ActionRow : ObservableObject, IDisposable, ISyncable<RuleAc
         if (IsWaveLinkAction)
         {
             DeviceMatchSummary = ResolveWaveLinkDeviceName(DevicePattern, DeviceMatchMode, waveLinkSnapshot);
+            DeviceMatchDisconnected = false;
+            DeviceMatchDisconnectedNames = string.Empty;
             MixMatchSummary = ResolveWaveLinkMixName(MixPattern, MixMatchMode, waveLinkSnapshot);
             Diagnostic = ComputeWaveLinkDiagnostic(waveLinkState, waveLinkSnapshot);
 
@@ -1033,7 +1043,12 @@ public partial class ActionRow : ObservableObject, IDisposable, ISyncable<RuleAc
         }
         else
         {
-            DeviceMatchSummary = ResolveDeviceNameAnyFlow(DevicePattern, DeviceMatchMode, EffectiveDeviceFlow(), endpoints);
+            var flow = EffectiveDeviceFlow();
+            var chip = DeviceChipMatcher.Match(DevicePattern, DeviceMatchMode, endpoints,
+                e => flow is null || e.Flow == flow);
+            DeviceMatchSummary = chip.Summary;
+            DeviceMatchDisconnected = chip.AnyDisconnected;
+            DeviceMatchDisconnectedNames = chip.DisconnectedNames;
             MixMatchSummary = string.Empty;
             Diagnostic = ComputeNonWaveLinkDiagnostic();
 
@@ -1041,7 +1056,7 @@ public partial class ActionRow : ObservableObject, IDisposable, ISyncable<RuleAc
             // mode stores and matches.
             DeviceCandidates = endpoints
                 .Where(e => e.State == EndpointState.Active && DeviceMatchesKind(e.Flow))
-                .Select(e => e.DisplayName)
+                .Select(e => e.PickerName)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
                 .ToArray();
@@ -1207,28 +1222,6 @@ public partial class ActionRow : ObservableObject, IDisposable, ISyncable<RuleAc
         AppMatchNames = names.Count == 0 ? string.Empty : string.Join("\n", names);
     }
 
-    private static string ResolveDeviceNameAnyFlow(string pattern, PatternMatchMode mode, EndpointFlow? flow, IReadOnlyList<AudioEndpoint> endpoints)
-    {
-        if (string.IsNullOrWhiteSpace(pattern))
-        {
-            return string.Empty;
-        }
-
-        var matched = endpoints
-            .Where(e => e.State == EndpointState.Active && (flow is null || e.Flow == flow))
-            .Where(e => PatternMatcher.Matches(mode, pattern, e.FriendlyName) || PatternMatcher.Matches(mode, pattern, e.DisplayName))
-            .Select(e => e.FriendlyName)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        return matched.Count switch
-        {
-            0 => string.Empty,
-            1 => matched[0],
-            _ => $"{matched[0]} (+{matched.Count - 1})",
-        };
-    }
-
     public void Dispose() => _disposed = true;
 
     partial void OnKindChanged(ActionKind value)
@@ -1367,6 +1360,14 @@ public partial class ConditionRow : ObservableObject, IDisposable, ISyncable<Rul
 
     [ObservableProperty]
     public partial string DeviceMatchSummary { get; set; } = string.Empty;
+
+    /// <summary>True when the device pattern matches a device that's currently disconnected.</summary>
+    [ObservableProperty]
+    public partial bool DeviceMatchDisconnected { get; set; }
+
+    /// <summary>Newline-joined names of the matched-but-disconnected devices (chip tooltip).</summary>
+    [ObservableProperty]
+    public partial string DeviceMatchDisconnectedNames { get; set; } = string.Empty;
 
     [ObservableProperty]
     public partial int AppMatchCount { get; set; }
@@ -1516,14 +1517,17 @@ public partial class ConditionRow : ObservableObject, IDisposable, ISyncable<Rul
         {
             AppMatchCount = 0;
             AppMatchNames = string.Empty;
-            var matched = MatchedDeviceNames(endpoints);
-            DeviceMatchSummary = matched.Count switch
-            {
-                0 => string.Empty,
-                1 => matched[0],
-                _ => $"{matched[0]} (+{matched.Count - 1})",
-            };
-            positive = matched.Count > 0;
+            var requireDefault = Kind == ConditionKind.DefaultDevice;
+            var chip = DeviceChipMatcher.Match(DevicePattern, DeviceMatchMode, endpoints, e =>
+                (Flow == ConditionFlow.Any
+                    || (Flow == ConditionFlow.Render && e.Flow == EndpointFlow.Render)
+                    || (Flow == ConditionFlow.Capture && e.Flow == EndpointFlow.Capture))
+                && (!requireDefault || e.IsDefault || e.IsDefaultCommunications));
+            DeviceMatchSummary = chip.Summary;
+            DeviceMatchDisconnected = chip.AnyDisconnected;
+            DeviceMatchDisconnectedNames = chip.DisconnectedNames;
+            // A disconnected device is not "present", so satisfaction tracks live (Active) matches only.
+            positive = chip.ConnectedCount > 0;
         }
 
         // Picker candidates: full device display names (flow-filtered) and running process names.
@@ -1533,7 +1537,7 @@ public partial class ConditionRow : ObservableObject, IDisposable, ISyncable<Rul
                     || (Flow == ConditionFlow.Render && e.Flow == EndpointFlow.Render)
                     || (Flow == ConditionFlow.Capture && e.Flow == EndpointFlow.Capture)) &&
                 (Kind != ConditionKind.DefaultDevice || e.IsDefault || e.IsDefaultCommunications))
-            .Select(e => e.DisplayName)
+            .Select(e => e.PickerName)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
             .ToArray();
@@ -1580,27 +1584,6 @@ public partial class ConditionRow : ObservableObject, IDisposable, ISyncable<Rul
 
         AppMatchCount = names.Count;
         AppMatchNames = names.Count == 0 ? string.Empty : string.Join("\n", names);
-    }
-
-    private List<string> MatchedDeviceNames(IReadOnlyList<AudioEndpoint> endpoints)
-    {
-        if (string.IsNullOrWhiteSpace(DevicePattern))
-        {
-            return new List<string>();
-        }
-
-        var requireDefault = Kind == ConditionKind.DefaultDevice;
-        return endpoints
-            .Where(e => e.State == EndpointState.Active &&
-                (Flow == ConditionFlow.Any
-                    || (Flow == ConditionFlow.Render && e.Flow == EndpointFlow.Render)
-                    || (Flow == ConditionFlow.Capture && e.Flow == EndpointFlow.Capture)) &&
-                (!requireDefault || e.IsDefault || e.IsDefaultCommunications) &&
-                (PatternMatcher.Matches(DeviceMatchMode, DevicePattern, e.FriendlyName) ||
-                 PatternMatcher.Matches(DeviceMatchMode, DevicePattern, e.DisplayName)))
-            .Select(e => e.FriendlyName)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
     }
 
     public void Dispose() => _disposed = true;
@@ -1655,5 +1638,49 @@ public partial class ConditionRow : ObservableObject, IDisposable, ISyncable<Rul
     {
         if (_suppress || _disposed) return;
         _notifyParent();
+    }
+}
+
+/// <summary>
+/// Builds the device match-chip for a rule field. Matches across <em>all</em> endpoint states (not
+/// just Active) so a rule that targets a currently-disconnected device still shows what it points at,
+/// flagged as disconnected. <see cref="DeviceChipMatch.ConnectedCount"/> drives condition satisfaction
+/// (a disconnected device is not "present"); the disconnected fields drive the chip's offline marker.
+/// </summary>
+internal readonly record struct DeviceChipMatch(
+    string Summary, int ConnectedCount, bool AnyDisconnected, string DisconnectedNames)
+{
+    public static readonly DeviceChipMatch Empty = new(string.Empty, 0, false, string.Empty);
+}
+
+internal static class DeviceChipMatcher
+{
+    public static DeviceChipMatch Match(
+        string pattern, PatternMatchMode mode,
+        IReadOnlyList<AudioEndpoint> endpoints, Func<AudioEndpoint, bool> filter)
+    {
+        if (string.IsNullOrWhiteSpace(pattern)) return DeviceChipMatch.Empty;
+
+        // Group by friendly name so a device that exists in more than one state counts once, and is
+        // "connected" if any of its instances is Active.
+        var matched = endpoints
+            .Where(filter)
+            .Where(e => PatternMatcher.Matches(mode, pattern, e.FriendlyName)
+                     || PatternMatcher.Matches(mode, pattern, e.DisplayName))
+            .GroupBy(e => e.FriendlyName, StringComparer.OrdinalIgnoreCase)
+            .Select(g => (Name: g.Key, Connected: g.Any(e => e.State == EndpointState.Active)))
+            // Connected first, so the primary name shown in the chip is a live device when one matches.
+            .OrderByDescending(m => m.Connected)
+            .ToList();
+
+        if (matched.Count == 0) return DeviceChipMatch.Empty;
+
+        var summary = matched.Count == 1 ? matched[0].Name : $"{matched[0].Name} (+{matched.Count - 1})";
+        var disconnected = matched.Where(m => !m.Connected).Select(m => m.Name).ToList();
+        return new DeviceChipMatch(
+            summary,
+            matched.Count(m => m.Connected),
+            disconnected.Count > 0,
+            string.Join("\n", disconnected));
     }
 }
