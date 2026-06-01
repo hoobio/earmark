@@ -77,8 +77,14 @@ public partial class RuleRow : ObservableObject, IDisposable
 
     public bool CanSave => IsDirty && !IsSaving;
 
-    public bool IsActive => Status == RuleStatus.Active;
-    public bool IsDimmed => Status is RuleStatus.Off or RuleStatus.ConditionsNotMet or RuleStatus.Shadowed or RuleStatus.Idle or RuleStatus.Incomplete;
+    /// <summary>Every action in the live branch is superseded by a higher-priority rule, so the rule
+    /// does nothing - dim it like a no-match rule. Set by the Rules view-model from the shadow
+    /// analyzer, which sees volume/mute shadowing the evaluator's status doesn't.</summary>
+    [ObservableProperty]
+    public partial bool AllActionsShadowed { get; set; }
+
+    public bool IsActive => Status == RuleStatus.Active && !AllActionsShadowed;
+    public bool IsDimmed => AllActionsShadowed || Status is RuleStatus.Off or RuleStatus.ConditionsNotMet or RuleStatus.Shadowed or RuleStatus.Idle or RuleStatus.Incomplete;
     public double CardOpacity => IsDimmed ? 0.55 : 1.0;
     public bool HasConditions => Conditions.Count > 0;
     public bool HasActions => Actions.Count > 0;
@@ -219,7 +225,8 @@ public partial class RuleRow : ObservableObject, IDisposable
     private void UpdateWarning()
     {
         // Aggregate the first diagnostic from any enabled action (either branch); only relevant
-        // when the rule itself is on.
+        // when the rule itself is on. A shadowed action (superseded by a higher-priority rule)
+        // also raises the rule warning, after any concrete diagnostic.
         if (!Enabled)
         {
             Warning = string.Empty;
@@ -227,7 +234,42 @@ public partial class RuleRow : ObservableObject, IDisposable
         }
 
         var first = Actions.Concat(ElseActions).FirstOrDefault(a => a.HasDiagnostic);
-        Warning = first?.Diagnostic ?? string.Empty;
+        if (first is not null)
+        {
+            Warning = first.Diagnostic;
+            return;
+        }
+
+        Warning = Actions.Concat(ElseActions).Any(a => a.IsShadowed)
+            ? "An action is superseded by a higher-priority rule and won't run."
+            : string.Empty;
+    }
+
+    /// <summary>Mark the active branch's actions shadowed (superseded by an earlier rule) and refresh
+    /// the rule-level warning. The inactive branch is never shadowed - it's idle for a different
+    /// reason (its conditions). Indices are into the active branch selected by
+    /// <paramref name="conditionsMet"/>.</summary>
+    public void ApplyShadow(IReadOnlySet<int> shadowedActiveIndices, bool conditionsMet)
+    {
+        var active = conditionsMet ? Actions : ElseActions;
+        var inactive = conditionsMet ? ElseActions : Actions;
+        for (var i = 0; i < active.Count; i++)
+        {
+            active[i].IsShadowed = shadowedActiveIndices.Contains(i);
+        }
+        foreach (var a in inactive)
+        {
+            a.IsShadowed = false;
+        }
+
+        // Every live action superseded -> the rule does nothing; dim it and say so (overriding the
+        // evaluator's "Active", which doesn't account for volume/mute shadowing).
+        AllActionsShadowed = active.Count > 0 && shadowedActiveIndices.Count == active.Count;
+        if (AllActionsShadowed)
+        {
+            StatusMessage = "Superseded by a higher-priority rule";
+        }
+        UpdateWarning();
     }
 
     public void ApplyEvaluation(RuleEvaluation evaluation)
@@ -546,6 +588,13 @@ public partial class RuleRow : ObservableObject, IDisposable
         OnPropertyChanged(nameof(CardOpacity));
     }
 
+    partial void OnAllActionsShadowedChanged(bool value)
+    {
+        OnPropertyChanged(nameof(IsActive));
+        OnPropertyChanged(nameof(IsDimmed));
+        OnPropertyChanged(nameof(CardOpacity));
+    }
+
     partial void OnStatusMessageChanged(string value) => OnPropertyChanged(nameof(HasStatusMessage));
 
     partial void OnMatchSummaryChanged(string value) => OnPropertyChanged(nameof(HasMatchSummary));
@@ -731,6 +780,12 @@ public partial class ActionRow : ObservableObject, IDisposable, ISyncable<RuleAc
 
     [ObservableProperty]
     public partial bool IsAppPatternValid { get; set; } = true;
+
+    /// <summary>Display-only: this action's target is already claimed by an earlier (higher-priority)
+    /// rule, so it won't run. Set by the Rules view-model from <c>RuleShadowAnalyzer</c>; not part of
+    /// the model, so it never marks the row dirty.</summary>
+    [ObservableProperty]
+    public partial bool IsShadowed { get; set; }
 
     public IReadOnlyList<string> DeviceCandidates { get; private set; } = Array.Empty<string>();
     public IReadOnlyList<string> MixCandidates { get; private set; } = Array.Empty<string>();

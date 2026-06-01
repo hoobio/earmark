@@ -134,6 +134,15 @@
                                   SelectionChanged="OnActionKindChanged"
                                   HorizontalAlignment="Stretch" />
 
+                        <!-- Shadowed: an earlier, higher-priority rule already claims this action's
+                             target, so it won't run. Same caution glyph as the rule-level warning. -->
+                        <FontIcon Grid.Column="2"
+                                  Glyph="&#xE7BA;" FontSize="14"
+                                  Foreground="{ThemeResource SystemFillColorCautionBrush}"
+                                  HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                                  Visibility="{x:Bind IsShadowed, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                  ToolTipService.ToolTip="Superseded by a higher-priority rule - this action won't run." />
+
                         <Button Grid.Column="3"
                                 Style="{StaticResource GhostIconButtonStyle}"
                                 Click="OnDuplicateActionClicked"
