@@ -208,8 +208,6 @@ public partial class HomeViewModel : ObservableObject, IDisposable
 
     public IReadOnlyList<DeviceCard> VisibleCards => _visibleCards;
 
-    public event EventHandler? QuickControlContentChanged;
-
     /// <summary>Single chokepoint for "this card's apps changed": refreshes the card's HasApps-derived
     /// bindings (section visibility, layout opt-out, dividers). Called wherever a chip is added /
     /// removed. The resulting reflow is animated by the page's always-on block slide, so there's no
@@ -225,7 +223,6 @@ public partial class HomeViewModel : ObservableObject, IDisposable
                 card.DeviceKey,
                 card.Apps.Count,
                 card.HasApps);
-            QuickControlContentChanged?.Invoke(this, EventArgs.Empty);
         }
     }
 

@@ -11,11 +11,9 @@ using Microsoft.UI;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 
 using Windows.Graphics;
-using Windows.System;
 
 using WinRT;
 using WinRT.Interop;
@@ -35,26 +33,12 @@ public sealed partial class QuickControlsWindow : Window
         "RulesSection",
         "NoRulesMessage",
     };
-    private const int WhKeyboardLl = 13;
-    private const int WhMouseLl = 14;
-    private const int WmKeydown = 0x0100;
-    private const int WmSyskeydown = 0x0104;
-    private const int WmLbuttondown = 0x0201;
-    private const int WmRbuttondown = 0x0204;
-    private const int WmMbuttondown = 0x0207;
-    private const int WmXbuttondown = 0x020B;
-    private const uint VkEscape = 0x1B;
     private readonly ILogger<QuickControlsWindow> _logger;
     private readonly ISettingsService _settings;
     private readonly nint _hwnd;
     private ISystemBackdropControllerWithTargets? _backdropController;
     private readonly SystemBackdropConfiguration _backdropConfig = new() { IsInputActive = true };
     private BackdropMode? _appliedBackdrop;
-    private LowLevelKeyboardProc? _escapeProc;
-    private LowLevelMouseProc? _mouseProc;
-    private nint _escapeHook;
-    private nint _mouseHook;
-    private bool _hideOnDeactivate;
 
     public QuickControlsWindow(HomeViewModel viewModel, HomePage homePage, ISettingsService settings, ILogger<QuickControlsWindow> logger)
     {
@@ -74,7 +58,6 @@ public sealed partial class QuickControlsWindow : Window
         ConfigureWindow();
         Hide();
         Activated += OnActivated;
-        Root.LayoutUpdated += OnRootLayoutUpdated;
         Root.ActualThemeChanged += OnRootActualThemeChanged;
         _settings.SettingsChanged += OnSettingsChanged;
         Closed += OnClosed;
@@ -92,14 +75,13 @@ public sealed partial class QuickControlsWindow : Window
 
         var width = Math.Min(OverlayWidth, Math.Max(1, workArea.Width - (OverlayMargin * 2)));
         var contentWidth = Math.Max(1, width - (OverlayPadding * 2));
-        var maxHeight = Math.Max(1, workArea.Height - (OverlayMargin * 2));
 
         ConfigureWindow();
         Repeater.ItemsSource = null;
         Root.UpdateLayout();
-        Repeater.ItemsSource = blocks;
+        Repeater.ItemsSource = blocks.ToList();
         Scroller.VerticalScrollBarVisibility = ScrollBarVisibility.Disabled;
-        AppWindow.Resize(new SizeInt32(width, maxHeight));
+        AppWindow.Resize(new SizeInt32(width, Math.Max(1, workArea.Height - (OverlayMargin * 2))));
         AppWindow.Move(new PointInt32(-40000, -40000));
 
         Root.UpdateLayout();
@@ -109,7 +91,7 @@ public sealed partial class QuickControlsWindow : Window
 
         var desiredHeight = Math.Max(OverlayPadding * 2, (int)Math.Ceiling(Repeater.DesiredSize.Height) + (OverlayPadding * 2));
         _logger.LogDebug(
-            "QuickControls window measure: hwnd={Hwnd} blocks={BlockCount} workArea=({X},{Y},{Width},{Height}) width={OverlayWidth} contentWidth={ContentWidth} maxHeight={MaxHeight} desiredHeight={DesiredHeight} collapsedRuleElements={Collapsed}",
+            "QuickControls window measure: hwnd={Hwnd} blocks={BlockCount} workArea=({X},{Y},{Width},{Height}) width={OverlayWidth} contentWidth={ContentWidth} desiredHeight={DesiredHeight} collapsedRuleElements={Collapsed}",
             _hwnd,
             blocks.Count,
             workArea.X,
@@ -118,18 +100,14 @@ public sealed partial class QuickControlsWindow : Window
             workArea.Height,
             width,
             contentWidth,
-            maxHeight,
             desiredHeight,
             collapsed);
         return desiredHeight;
     }
 
-    public int PrepareBlocks(IReadOnlyList<object> blocks, RectInt32 workArea, int bottom, int maxHeight)
+    public int PrepareMeasuredBlocks(RectInt32 workArea, int bottom, int maxHeight, int desiredHeight)
     {
-        ArgumentNullException.ThrowIfNull(blocks);
-
         var width = Math.Min(OverlayWidth, Math.Max(1, workArea.Width - (OverlayMargin * 2)));
-        var contentWidth = Math.Max(1, width - (OverlayPadding * 2));
         var workTop = workArea.Y + OverlayMargin;
         var workBottom = workArea.Y + workArea.Height - OverlayMargin;
         var boundedBottom = Math.Clamp(bottom, workTop + 1, workBottom);
@@ -140,20 +118,7 @@ public sealed partial class QuickControlsWindow : Window
             Math.Max(workArea.X + OverlayMargin, workArea.X + workArea.Width - width - OverlayMargin));
 
         ConfigureWindow();
-        Repeater.ItemsSource = null;
-        Root.UpdateLayout();
-        Repeater.ItemsSource = blocks;
-        Scroller.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
-
-        AppWindow.Resize(new SizeInt32(width, boundedMaxHeight));
-        AppWindow.Move(new PointInt32(left, Math.Max(workTop, boundedBottom - boundedMaxHeight)));
-
-        Root.UpdateLayout();
-        var collapsedBeforeMeasure = CollapseQuickControlsOnlyElements(Root);
-        Root.UpdateLayout();
-        Repeater.Measure(new Windows.Foundation.Size(contentWidth, double.PositiveInfinity));
-
-        var desiredHeight = Math.Max(OverlayPadding * 2, (int)Math.Ceiling(Repeater.DesiredSize.Height) + (OverlayPadding * 2));
+        var collapsedBeforeResize = CollapseQuickControlsOnlyElements(Root);
         var height = Math.Min(desiredHeight, boundedMaxHeight);
         Scroller.VerticalScrollBarVisibility = desiredHeight - boundedMaxHeight > ScrollOverflowTolerance
             ? ScrollBarVisibility.Auto
@@ -165,9 +130,8 @@ public sealed partial class QuickControlsWindow : Window
         DispatcherQueue.TryEnqueue(() => CollapseQuickControlsOnlyElements(Root));
         Root.UpdateLayout();
         _logger.LogDebug(
-            "QuickControls window prepare: hwnd={Hwnd} blocks={BlockCount} workArea=({X},{Y},{Width},{Height}) requestedBottom={Bottom} boundedBottom={BoundedBottom} maxHeight={MaxHeight} boundedMaxHeight={BoundedMaxHeight} desiredHeight={DesiredHeight} actualHeight={Height} left={Left} top={Top} scrollbar={Scrollbar} collapsedBefore={CollapsedBefore} collapsedAfter={CollapsedAfter}",
+            "QuickControls window prepare: hwnd={Hwnd} workArea=({X},{Y},{Width},{Height}) requestedBottom={Bottom} boundedBottom={BoundedBottom} maxHeight={MaxHeight} boundedMaxHeight={BoundedMaxHeight} desiredHeight={DesiredHeight} actualHeight={Height} left={Left} top={Top} scrollbar={Scrollbar} collapsedBefore={CollapsedBefore} collapsedAfter={CollapsedAfter}",
             _hwnd,
-            blocks.Count,
             workArea.X,
             workArea.Y,
             workArea.Width,
@@ -181,7 +145,7 @@ public sealed partial class QuickControlsWindow : Window
             left,
             Math.Clamp(boundedBottom - height, workTop, workBottom - height),
             Scroller.VerticalScrollBarVisibility,
-            collapsedBeforeMeasure,
+            collapsedBeforeResize,
             collapsedAfterResize);
         return height;
     }
@@ -224,70 +188,12 @@ public sealed partial class QuickControlsWindow : Window
         _logger.LogDebug("QuickControls window show prepared: hwnd={Hwnd}", _hwnd);
     }
 
-    private void OnRootLayoutUpdated(object? sender, object e) => CollapseQuickControlsOnlyElements(Root);
-
-    public void Toggle()
-    {
-        if (IsOpen) Hide();
-        else ShowOverlay();
-    }
-
-    public void ShowOverlay()
-    {
-        ConfigureWindow();
-        var workArea = ResolveWorkArea().WorkArea;
-        AppWindow.Resize(new SizeInt32(OverlayWidth, workArea.Height - (OverlayMargin * 2)));
-        MoveToWorkArea(workArea, workArea.Height - (OverlayMargin * 2));
-        AppWindow.Show();
-        DispatcherQueue.TryEnqueue(() =>
-        {
-            SizeToContent(workArea);
-            ScrollToBottom();
-        });
-
-        IsOpen = true;
-        _hideOnDeactivate = true;
-        StartEscapeHook();
-        StartMouseHook();
-        ViewModel.ResumePeakPollingForQuickControls();
-        Root.Focus(FocusState.Programmatic);
-    }
-
-    private void SizeToContent(RectInt32 workArea)
-    {
-        Root.UpdateLayout();
-        Root.Measure(new Windows.Foundation.Size(OverlayWidth, double.PositiveInfinity));
-
-        var maxHeight = Math.Max(OverlayContentWidth, workArea.Height - (OverlayMargin * 2));
-        var desiredHeight = Math.Max(OverlayContentWidth, (int)Math.Ceiling(Root.DesiredSize.Height));
-        var height = Math.Min(desiredHeight, maxHeight);
-
-        AppWindow.Resize(new SizeInt32(OverlayWidth, height));
-        MoveToWorkArea(workArea, height);
-        Root.UpdateLayout();
-    }
-
-    private void MoveToWorkArea(RectInt32 workArea, int height) => AppWindow.Move(new PointInt32(
-        workArea.X + workArea.Width - OverlayWidth - OverlayMargin,
-        workArea.Y + workArea.Height - height - OverlayMargin));
-
-    private void ScrollToBottom()
-    {
-        Root.UpdateLayout();
-        Scroller.ChangeView(null, Scroller.ScrollableHeight, null, true);
-        Root.UpdateLayout();
-    }
-
     public void Hide()
     {
         _logger.LogDebug("QuickControls window hide: hwnd={Hwnd} wasOpen={WasOpen}", _hwnd, IsOpen);
         AppWindow.Hide();
         Repeater.ItemsSource = null;
         IsOpen = false;
-        _hideOnDeactivate = false;
-        StopEscapeHook();
-        StopMouseHook();
-        ViewModel.PausePeakPollingForQuickControls();
     }
 
     public void CloseFlyout()
@@ -315,10 +221,6 @@ public sealed partial class QuickControlsWindow : Window
     private void OnActivated(object sender, WindowActivatedEventArgs args)
     {
         _backdropConfig.IsInputActive = args.WindowActivationState != WindowActivationState.Deactivated;
-        if (_hideOnDeactivate && args.WindowActivationState == WindowActivationState.Deactivated)
-        {
-            Hide();
-        }
     }
 
     private void ApplySettings()
@@ -395,92 +297,9 @@ public sealed partial class QuickControlsWindow : Window
     private void OnClosed(object sender, WindowEventArgs args)
     {
         _settings.SettingsChanged -= OnSettingsChanged;
-        Root.LayoutUpdated -= OnRootLayoutUpdated;
         Root.ActualThemeChanged -= OnRootActualThemeChanged;
         _backdropController?.Dispose();
         _backdropController = null;
-    }
-
-    private void OnRootKeyDown(object sender, KeyRoutedEventArgs e)
-    {
-        if (e.Key == VirtualKey.Escape)
-        {
-            Hide();
-            e.Handled = true;
-        }
-    }
-
-    private void StartEscapeHook()
-    {
-        if (_escapeHook != 0) return;
-        _escapeProc = EscapeHookProc;
-        _escapeHook = SetWindowsHookEx(WhKeyboardLl, _escapeProc, GetModuleHandle(null), 0);
-    }
-
-    private void StopEscapeHook()
-    {
-        if (_escapeHook == 0) return;
-        UnhookWindowsHookEx(_escapeHook);
-        _escapeHook = 0;
-        _escapeProc = null;
-    }
-
-    private void StartMouseHook()
-    {
-        if (_mouseHook != 0) return;
-        _mouseProc = MouseHookProc;
-        _mouseHook = SetWindowsHookEx(WhMouseLl, _mouseProc, GetModuleHandle(null), 0);
-    }
-
-    private void StopMouseHook()
-    {
-        if (_mouseHook == 0) return;
-        UnhookWindowsHookEx(_mouseHook);
-        _mouseHook = 0;
-        _mouseProc = null;
-    }
-
-    private nint EscapeHookProc(int code, nint wParam, nint lParam)
-    {
-        if (code >= 0 && IsOpen && (wParam == WmKeydown || wParam == WmSyskeydown))
-        {
-            var data = Marshal.PtrToStructure<KbdLlHookStruct>(lParam);
-            if (data.vkCode == VkEscape)
-            {
-                DispatcherQueue.TryEnqueue(Hide);
-                return 1;
-            }
-        }
-
-        return CallNextHookEx(_escapeHook, code, wParam, lParam);
-    }
-
-    private nint MouseHookProc(int code, nint wParam, nint lParam)
-    {
-        if (code >= 0 && IsOpen && IsMouseDownMessage(wParam.ToInt32()))
-        {
-            var data = Marshal.PtrToStructure<MouseLlHookStruct>(lParam);
-            if (!IsPointInsideOverlay(data.pt))
-            {
-                DispatcherQueue.TryEnqueue(Hide);
-            }
-        }
-
-        return CallNextHookEx(_mouseHook, code, wParam, lParam);
-    }
-
-    private static bool IsMouseDownMessage(int message) =>
-        message is WmLbuttondown or WmRbuttondown or WmMbuttondown or WmXbuttondown;
-
-    private bool IsPointInsideOverlay(POINT point) => WindowFromPoint(point) == _hwnd;
-
-    private static DisplayArea ResolveWorkArea()
-    {
-        if (GetCursorPos(out var point))
-        {
-            return DisplayArea.GetFromPoint(new PointInt32(point.X, point.Y), DisplayAreaFallback.Primary);
-        }
-        return DisplayArea.Primary;
     }
 
     private void ConfigureToolWindow()
@@ -505,45 +324,6 @@ public sealed partial class QuickControlsWindow : Window
         }
     }
 
-    [StructLayout(LayoutKind.Sequential)]
-    private struct POINT
-    {
-        public int X;
-        public int Y;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct RECT
-    {
-        public int Left;
-        public int Top;
-        public int Right;
-        public int Bottom;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct KbdLlHookStruct
-    {
-        public uint vkCode;
-        public uint scanCode;
-        public uint flags;
-        public uint time;
-        public nint dwExtraInfo;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct MouseLlHookStruct
-    {
-        public POINT pt;
-        public uint mouseData;
-        public uint flags;
-        public uint time;
-        public nint dwExtraInfo;
-    }
-
-    private delegate nint LowLevelKeyboardProc(int nCode, nint wParam, nint lParam);
-    private delegate nint LowLevelMouseProc(int nCode, nint wParam, nint lParam);
-
     private const int GWL_STYLE = -16;
     private const int GWL_EXSTYLE = -20;
     private const nint WS_CAPTION = 0x00C00000;
@@ -562,12 +342,6 @@ public sealed partial class QuickControlsWindow : Window
     private const int DwmWindowCornerPreference = 33;
     private const int DwmWindowCornerPreferenceRound = 2;
 
-    [DllImport("user32.dll")]
-    private static extern bool GetCursorPos(out POINT lpPoint);
-
-    [DllImport("user32.dll")]
-    private static extern nint WindowFromPoint(POINT point);
-
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW", SetLastError = true)]
     private static extern nint GetWindowLongPtr(nint hWnd, int nIndex);
 
@@ -579,20 +353,4 @@ public sealed partial class QuickControlsWindow : Window
 
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(nint hwnd, int dwAttribute, ref int pvAttribute, int cbAttribute);
-
-
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern nint SetWindowsHookEx(int idHook, LowLevelKeyboardProc lpfn, nint hMod, uint dwThreadId);
-
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern nint SetWindowsHookEx(int idHook, LowLevelMouseProc lpfn, nint hMod, uint dwThreadId);
-
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern bool UnhookWindowsHookEx(nint hhk);
-
-    [DllImport("user32.dll")]
-    private static extern nint CallNextHookEx(nint hhk, int nCode, nint wParam, nint lParam);
-
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
-    private static extern nint GetModuleHandle(string? lpModuleName);
 }
