@@ -54,7 +54,7 @@ public static class DeviceRuleResolver
                 if (volume.HasValue && muted.HasValue) break;
                 if (!action.IsValid) continue;
                 if (action.Kind is not (ActionKind.DeviceVolume or ActionKind.DeviceMute)) continue;
-                if (!TargetsEndpoint(action.DevicePattern, endpoint)) continue;
+                if (!TargetsEndpoint(action.DevicePattern, action.DeviceMatchMode, endpoint)) continue;
 
                 if (action.Kind == ActionKind.DeviceVolume && !volume.HasValue)
                 {
@@ -70,10 +70,9 @@ public static class DeviceRuleResolver
         return new DeviceRuleTargets(volume, muted);
     }
 
-    private static bool TargetsEndpoint(string pattern, AudioEndpoint endpoint)
+    private static bool TargetsEndpoint(string pattern, PatternMatchMode mode, AudioEndpoint endpoint)
     {
-        RegexCache.TryGet(pattern, out var regex);
-        return PatternMatcher.Matches(pattern, regex, endpoint.FriendlyName)
-            || PatternMatcher.Matches(pattern, regex, endpoint.DisplayName);
+        return PatternMatcher.Matches(mode, pattern, endpoint.FriendlyName)
+            || PatternMatcher.Matches(mode, pattern, endpoint.DisplayName);
     }
 }

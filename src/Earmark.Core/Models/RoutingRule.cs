@@ -34,6 +34,19 @@ public enum ConditionFlow
     Capture,
 }
 
+/// <summary>How a pattern string is matched against a candidate (device / app / mix name).</summary>
+public enum PatternMatchMode
+{
+    /// <summary>.NET regular expression (the default, and what every pre-existing rule uses).</summary>
+    Regex,
+    /// <summary>Glob: <c>*</c> = any run, <c>?</c> = one char, <c>\*</c> / <c>\?</c> = literal; matched
+    /// as "contains" (unanchored), so "Sony" matches "Sony Headphones (...)".</summary>
+    Wildcard,
+    /// <summary>Exact, case-insensitive match against the picked item's full name (device display
+    /// name, process name, or mix name) - the value comes from a picker, not free text.</summary>
+    Exact,
+}
+
 /// <summary>
 /// What an action does. Binary variants that used to be separate enum values (mute/unmute,
 /// add/remove from a Wave Link mix, output/input) collapse into one kind plus an orthogonal mode
@@ -80,11 +93,17 @@ public sealed class RuleCondition
 
     public ConditionFlow Flow { get; set; } = ConditionFlow.Any;
 
-    /// <summary>Device regex; required for <see cref="ConditionKind.Device"/> / <see cref="ConditionKind.DefaultDevice"/>.</summary>
+    /// <summary>Device pattern; required for <see cref="ConditionKind.Device"/> / <see cref="ConditionKind.DefaultDevice"/>.</summary>
     public string DevicePattern { get; set; } = string.Empty;
 
-    /// <summary>Process/executable regex; required for <see cref="ConditionKind.Application"/>.</summary>
+    /// <summary>How <see cref="DevicePattern"/> is matched.</summary>
+    public PatternMatchMode DeviceMatchMode { get; set; } = PatternMatchMode.Regex;
+
+    /// <summary>Process/executable pattern; required for <see cref="ConditionKind.Application"/>.</summary>
     public string AppPattern { get; set; } = string.Empty;
+
+    /// <summary>How <see cref="AppPattern"/> is matched.</summary>
+    public PatternMatchMode AppMatchMode { get; set; } = PatternMatchMode.Regex;
 
     [JsonIgnore]
     public bool IsApplicationCondition => Kind == ConditionKind.Application;
@@ -100,7 +119,9 @@ public sealed class RuleCondition
         Negate = Negate,
         Flow = Flow,
         DevicePattern = DevicePattern,
+        DeviceMatchMode = DeviceMatchMode,
         AppPattern = AppPattern,
+        AppMatchMode = AppMatchMode,
     };
 }
 
@@ -129,10 +150,19 @@ public sealed class RuleAction
     /// <summary>Required for <see cref="ActionKind.ApplicationDevice"/>.</summary>
     public string AppPattern { get; set; } = string.Empty;
 
+    /// <summary>How <see cref="AppPattern"/> is matched.</summary>
+    public PatternMatchMode AppMatchMode { get; set; } = PatternMatchMode.Regex;
+
     public string DevicePattern { get; set; } = string.Empty;
 
-    /// <summary><see cref="ActionKind.WaveLinkMix"/> only: regex against the Wave Link mix name.</summary>
+    /// <summary>How <see cref="DevicePattern"/> is matched.</summary>
+    public PatternMatchMode DeviceMatchMode { get; set; } = PatternMatchMode.Regex;
+
+    /// <summary><see cref="ActionKind.WaveLinkMix"/> only: matched against the Wave Link mix name.</summary>
     public string MixPattern { get; set; } = string.Empty;
+
+    /// <summary>How <see cref="MixPattern"/> is matched.</summary>
+    public PatternMatchMode MixMatchMode { get; set; } = PatternMatchMode.Regex;
 
     /// <summary><see cref="ActionKind.DeviceVolume"/> only: target volume in [0, 1].</summary>
     public float Volume { get; set; } = 0.5f;
@@ -194,8 +224,11 @@ public sealed class RuleAction
         Membership = Membership,
         Muted = Muted,
         AppPattern = AppPattern,
+        AppMatchMode = AppMatchMode,
         DevicePattern = DevicePattern,
+        DeviceMatchMode = DeviceMatchMode,
         MixPattern = MixPattern,
+        MixMatchMode = MixMatchMode,
         Volume = Volume,
         NewName = NewName,
         SetsDefault = SetsDefault,

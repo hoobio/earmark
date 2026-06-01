@@ -96,9 +96,9 @@ public static class RuleShadowAnalyzer
             case ActionKind.ApplicationDevice:
                 // Claims (flow, pid) only when the target device actually resolves - otherwise the
                 // app route is idle, not competing (mirrors the matcher / evaluator).
-                if (MatchEndpoint(action.DevicePattern, action.Flow, endpoints) is not null)
+                if (MatchEndpoint(action.DevicePattern, action.DeviceMatchMode, action.Flow, endpoints) is not null)
                 {
-                    foreach (var pid in MatchPids(action.AppPattern, sessions))
+                    foreach (var pid in MatchPids(action.AppPattern, action.AppMatchMode, sessions))
                     {
                         keys.Add($"app|{action.Flow}|{pid}");
                     }
@@ -106,7 +106,7 @@ public static class RuleShadowAnalyzer
                 break;
 
             case ActionKind.DefaultDevice:
-                if (MatchEndpoint(action.DevicePattern, action.Flow, endpoints) is not null)
+                if (MatchEndpoint(action.DevicePattern, action.DeviceMatchMode, action.Flow, endpoints) is not null)
                 {
                     if (action.SetsDefault) keys.Add($"def|{action.Flow}|default");
                     if (action.SetsCommunications) keys.Add($"def|{action.Flow}|comms");
@@ -114,14 +114,14 @@ public static class RuleShadowAnalyzer
                 break;
 
             case ActionKind.DeviceVolume:
-                foreach (var endpoint in MatchEndpointsAnyFlow(action.DevicePattern, endpoints))
+                foreach (var endpoint in MatchEndpointsAnyFlow(action.DevicePattern, action.DeviceMatchMode, endpoints))
                 {
                     keys.Add($"vol|{endpoint.Id}");
                 }
                 break;
 
             case ActionKind.DeviceMute:
-                foreach (var endpoint in MatchEndpointsAnyFlow(action.DevicePattern, endpoints))
+                foreach (var endpoint in MatchEndpointsAnyFlow(action.DevicePattern, action.DeviceMatchMode, endpoints))
                 {
                     keys.Add($"mute|{endpoint.Id}");
                 }
@@ -133,25 +133,22 @@ public static class RuleShadowAnalyzer
         return keys;
     }
 
-    private static AudioEndpoint? MatchEndpoint(string pattern, EndpointFlow flow, IReadOnlyList<AudioEndpoint> endpoints)
+    private static AudioEndpoint? MatchEndpoint(string pattern, PatternMatchMode mode, EndpointFlow flow, IReadOnlyList<AudioEndpoint> endpoints)
     {
-        var regex = Compile(pattern);
         return endpoints.FirstOrDefault(e =>
             e.Flow == flow && e.State == EndpointState.Active &&
-            (PatternMatcher.Matches(pattern, regex, e.FriendlyName) || PatternMatcher.Matches(pattern, regex, e.DisplayName)));
+            (PatternMatcher.Matches(mode, pattern, e.FriendlyName) || PatternMatcher.Matches(mode, pattern, e.DisplayName)));
     }
 
-    private static IEnumerable<AudioEndpoint> MatchEndpointsAnyFlow(string pattern, IReadOnlyList<AudioEndpoint> endpoints)
+    private static IEnumerable<AudioEndpoint> MatchEndpointsAnyFlow(string pattern, PatternMatchMode mode, IReadOnlyList<AudioEndpoint> endpoints)
     {
-        var regex = Compile(pattern);
         return endpoints.Where(e =>
             e.State == EndpointState.Active &&
-            (PatternMatcher.Matches(pattern, regex, e.FriendlyName) || PatternMatcher.Matches(pattern, regex, e.DisplayName)));
+            (PatternMatcher.Matches(mode, pattern, e.FriendlyName) || PatternMatcher.Matches(mode, pattern, e.DisplayName)));
     }
 
-    private static IEnumerable<uint> MatchPids(string pattern, IReadOnlyList<AudioSession> sessions)
+    private static IEnumerable<uint> MatchPids(string pattern, PatternMatchMode mode, IReadOnlyList<AudioSession> sessions)
     {
-        var regex = Compile(pattern);
         var seen = new HashSet<uint>();
         foreach (var s in sessions)
         {
@@ -159,12 +156,10 @@ public static class RuleShadowAnalyzer
             {
                 continue;
             }
-            if (PatternMatcher.Matches(pattern, regex, s.ProcessName) || PatternMatcher.Matches(pattern, regex, s.ExecutablePath))
+            if (PatternMatcher.Matches(mode, pattern, s.ProcessName) || PatternMatcher.Matches(mode, pattern, s.ExecutablePath))
             {
                 yield return s.ProcessId;
             }
         }
     }
-
-    private static Regex? Compile(string pattern) => RegexCache.TryGet(pattern, out var regex) ? regex : null;
 }

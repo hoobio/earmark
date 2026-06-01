@@ -768,15 +768,10 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
                 // the device is left wherever the user / Wave Link last put it.
                 if (!ShouldEnact(action, rule.Id, edges)) continue;
 
-                var mixRegex = TryCompile(action.MixPattern);
-                var devRegex = TryCompile(action.DevicePattern);
-                // Exact-match shortcut covers the case where the pattern equals a name
-                // verbatim (e.g. inserted from auto-suggest), so a missing regex isn't fatal.
-
                 WaveLinkMixInfo? matchedMix = null;
                 foreach (var mix in snapshot.Mixes)
                 {
-                    if (MatchPattern(action.MixPattern, mixRegex, mix.Name))
+                    if (PatternMatcher.Matches(action.MixMatchMode, action.MixPattern, mix.Name))
                     {
                         matchedMix = mix;
                         break;
@@ -792,7 +787,7 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
                 foreach (var output in snapshot.OutputDevices)
                 {
                     if (claims.ContainsKey(output.DeviceId)) continue;
-                    var deviceMatches = MatchPattern(action.DevicePattern, devRegex, output.DeviceName);
+                    var deviceMatches = PatternMatcher.Matches(action.DeviceMatchMode, action.DevicePattern, output.DeviceName);
 
                     switch (action.Membership)
                     {
@@ -840,17 +835,6 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
         if (string.IsNullOrEmpty(mixId)) return "(none)";
         return mixes.FirstOrDefault(m => string.Equals(m.Id, mixId, StringComparison.Ordinal))?.Name ?? mixId;
     }
-
-    private static Regex? TryCompile(string pattern)
-    {
-        if (string.IsNullOrWhiteSpace(pattern)) return null;
-        // Reuse the shared compile cache instead of building a fresh regex per endpoint per
-        // rule per apply pass.
-        return RegexCache.TryGet(pattern, out var regex) ? regex : null;
-    }
-
-    private static bool MatchPattern(string pattern, Regex? regex, string input) =>
-        PatternMatcher.Matches(pattern, regex, input);
 
     public void Dispose()
     {
