@@ -89,6 +89,10 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     public partial bool ShowCardDividers { get; set; }
 
+    /// <summary>Whether each device card shows its rules section and no-rules text. Default on.</summary>
+    [ObservableProperty]
+    public partial bool ShowRules { get; set; }
+
     /// <summary>Bound to the theme ComboBox SelectedIndex. Maps 1:1 to <see cref="AppTheme"/>
     /// (System=0, Light=1, Dark=2).</summary>
     [ObservableProperty]
@@ -176,6 +180,7 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
             AppChipLingerSeconds = _settings.Current.AppChipLingerSeconds;
             CardHeightModeIndex = (int)_settings.Current.CardHeight;
             ShowCardDividers = _settings.Current.ShowCardDividers;
+            ShowRules = _settings.Current.ShowRules;
             AppThemeIndex = (int)_settings.Current.Theme;
             BackdropIndex = (int)_settings.Current.Backdrop;
             EnableWaveLink = _settings.Current.EnableWaveLink;
@@ -301,6 +306,7 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     }
     partial void OnCardHeightModeIndexChanged(int value) => Persist(s => s.CardHeight = (CardHeightMode)value);
     partial void OnShowCardDividersChanged(bool value) => Persist(s => s.ShowCardDividers = value);
+    partial void OnShowRulesChanged(bool value) => Persist(s => s.ShowRules = value);
     partial void OnAppThemeIndexChanged(int value) => Persist(s => s.Theme = (AppTheme)value);
     partial void OnBackdropIndexChanged(int value) => Persist(s => s.Backdrop = (BackdropMode)value);
     partial void OnEnableWaveLinkChanged(bool value) => Persist(s => s.EnableWaveLink = value);

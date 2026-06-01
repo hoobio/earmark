@@ -888,6 +888,7 @@
         <Grid.ContextFlyout>
             <MenuFlyout>
                 <ToggleMenuFlyoutItem Text="Show title bar" IsChecked="{x:Bind ViewModel.ShowDevicesHeader, Mode=TwoWay}" />
+                <ToggleMenuFlyoutItem Text="Show rules" IsChecked="{x:Bind ViewModel.ShowRules, Mode=TwoWay}" />
                 <ToggleMenuFlyoutItem Text="Show hidden devices" IsChecked="{x:Bind ViewModel.ShowHiddenDevices, Mode=TwoWay}" />
                 <ToggleMenuFlyoutItem Text="Show disconnected devices" IsChecked="{x:Bind ViewModel.ShowDisconnectedDevices, Mode=TwoWay}" />
                 <ToggleMenuFlyoutItem Text="Lock layout" IsChecked="{x:Bind ViewModel.LockLayout, Mode=TwoWay}" />
@@ -1023,6 +1024,7 @@
             <Button.Flyout>
                 <MenuFlyout Opening="OnOverflowFlyoutOpening" Closed="OnOverflowFlyoutClosed">
                     <ToggleMenuFlyoutItem Text="Show title bar" IsChecked="{x:Bind ViewModel.ShowDevicesHeader, Mode=TwoWay}" />
+                    <ToggleMenuFlyoutItem Text="Show rules" IsChecked="{x:Bind ViewModel.ShowRules, Mode=TwoWay}" />
                     <ToggleMenuFlyoutItem Text="Show hidden devices" IsChecked="{x:Bind ViewModel.ShowHiddenDevices, Mode=TwoWay}" />
                     <ToggleMenuFlyoutItem Text="Show disconnected devices" IsChecked="{x:Bind ViewModel.ShowDisconnectedDevices, Mode=TwoWay}" />
                     <ToggleMenuFlyoutItem Text="Lock layout" IsChecked="{x:Bind ViewModel.LockLayout, Mode=TwoWay}" />

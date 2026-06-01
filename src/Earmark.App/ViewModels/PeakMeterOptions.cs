@@ -55,6 +55,10 @@ public partial class PeakMeterOptions : ObservableObject
     [ObservableProperty]
     public partial bool ShowCardDividers { get; set; } = true;
 
+    /// <summary>Whether device cards show their rules section at all. Default on.</summary>
+    [ObservableProperty]
+    public partial bool ShowRules { get; set; } = true;
+
     /// <summary>True unless the meter is switched off (the card then shows a plain volume slider).</summary>
     public bool ShowMeter => ColourMode != PeakMeterColourMode.Off;
 

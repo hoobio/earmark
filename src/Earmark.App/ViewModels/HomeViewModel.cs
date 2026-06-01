@@ -178,7 +178,9 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         _deviceDefaults.DefaultsApplied += OnAnythingChanged;
         SyncMeterOptions();
         RefreshHiddenApps();
+        ShowDisconnectedDevices = _settings.Current.ShowDisconnectedDevices;
         ShowDevicesHeader = _settings.Current.ShowDevicesPageHeader;
+        ShowRules = _settings.Current.ShowRules;
         LockLayout = _settings.Current.LockDeviceLayout;
 
         IsInitializing = true;
@@ -246,13 +248,19 @@ public partial class HomeViewModel : ObservableObject, IDisposable
 
     partial void OnShowHiddenDevicesChanged(bool value) => SyncBlocks();
 
-    /// <summary>Reveals persisted-but-disconnected devices (dimmed, controls disabled). Session-only
-    /// too, matching <see cref="ShowHiddenDevices"/>, so a fresh launch isn't cluttered by every
-    /// headset ever paired. A change just resyncs (filter + in-place reconcile, no rebuild).</summary>
+    /// <summary>Reveals persisted-but-disconnected devices (dimmed, controls disabled). Persisted so
+    /// the Devices page restores your preferred view on relaunch. A change resyncs (filter +
+    /// in-place reconcile, no rebuild).</summary>
     [ObservableProperty]
     public partial bool ShowDisconnectedDevices { get; set; }
 
-    partial void OnShowDisconnectedDevicesChanged(bool value) => SyncBlocks();
+    partial void OnShowDisconnectedDevicesChanged(bool value)
+    {
+        SyncBlocks();
+        if (_settings.Current.ShowDisconnectedDevices == value) return;
+        _settings.Current.ShowDisconnectedDevices = value;
+        QueueSettingsSave();
+    }
 
     /// <summary>Whether the Devices page header row (the "Devices" title) is shown. Persisted; toggled
     /// from the page's "..." / right-click menu (the "..." stays visible either way).</summary>
@@ -263,6 +271,19 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     {
         if (_settings.Current.ShowDevicesPageHeader == value) return; // no-op (e.g. initial seed)
         _settings.Current.ShowDevicesPageHeader = value;
+        QueueSettingsSave();
+    }
+
+    /// <summary>Whether device cards show their rules section. Persisted; toggled from the Devices
+    /// page background menu and the "..." menu.</summary>
+    [ObservableProperty]
+    public partial bool ShowRules { get; set; }
+
+    partial void OnShowRulesChanged(bool value)
+    {
+        if (_settings.Current.ShowRules == value) return;
+        _settings.Current.ShowRules = value;
+        SyncMeterOptions();
         QueueSettingsSave();
     }
 
@@ -279,9 +300,9 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// Debounces settings writes so rapid toggling of <see cref="ShowHiddenDevices"/> doesn't
-    /// queue a backlog of file writes (each with its 5-attempt retry loop) that could lag the
-    /// displayed state. The latest in-memory value wins.
+    /// Debounces settings writes so rapid toggle changes don't queue a backlog of file writes (each
+    /// with its 5-attempt retry loop) that could lag the displayed state. The latest in-memory
+    /// value wins.
     /// </summary>
     private void QueueSettingsSave()
     {
@@ -820,6 +841,10 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     {
         _dispatcher.Enqueue(() =>
         {
+            if (ShowRules != _settings.Current.ShowRules)
+            {
+                ShowRules = _settings.Current.ShowRules;
+            }
             SyncMeterOptions();
             // The forwarder filter and the app-indicators master toggle both change which chips
             // exist, so a change re-runs the in-place reconcile (not just a restyle). When
@@ -865,6 +890,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         _meterOptions.AlwaysShowPinnedApps = s.AlwaysShowPinnedApps;
         _meterOptions.CardHeight = s.CardHeight;
         _meterOptions.ShowCardDividers = s.ShowCardDividers;
+        _meterOptions.ShowRules = s.ShowRules;
         foreach (var card in _allCards) card.NotifyMeterStyleChanged();
     }
 

@@ -107,6 +107,10 @@ public sealed class AppSettings
     /// sections by spacing alone.</summary>
     public bool ShowCardDividers { get; set; } = true;
 
+    /// <summary>Whether each device card shows its rules section. Default true; off hides the
+    /// rules chips and no-rules text on every card.</summary>
+    public bool ShowRules { get; set; } = true;
+
     /// <summary>How device cards size their height within a row. <see cref="CardHeightMode.Balanced"/>
     /// (default) aligns plain cards to the row's tallest plain card while letting a card with apps /
     /// expanded rules keep its own height; <see cref="CardHeightMode.MatchRow"/> makes every card in a
@@ -129,6 +133,10 @@ public sealed class AppSettings
     /// Devices page (a guard against accidental rearrangement). Toggled from the page's "..." /
     /// right-click menu. Default false.</summary>
     public bool LockDeviceLayout { get; set; }
+
+    /// <summary>Whether disconnected devices are shown on the Devices page. Default false so first
+    /// launch stays focused on currently-present endpoints.</summary>
+    public bool ShowDisconnectedDevices { get; set; }
 
     /// <summary>
     /// Per-device configuration, keyed by <see cref="Earmark.Core.Models.DeviceIdentity"/> device key

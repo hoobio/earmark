@@ -185,10 +185,10 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     /// the rules section is visible.</summary>
     public bool ShowVolumeDivider => MeterOptions.ShowCardDividers && MeterOptions.ShowRules && ShowVolumeRow;
 
-    /// <summary>Whether the hairline between the rules block and the apps row shows: only when the
-    /// user has opted into section dividers AND the apps row below it is present, and only while
-    /// the rules section is visible.</summary>
-    public bool ShowAppsDivider => MeterOptions.ShowCardDividers && MeterOptions.ShowRules && ShowAppsSection;
+    /// <summary>Whether the hairline immediately above the apps row shows: only when the user has
+    /// opted into section dividers AND the apps row is present. This still shows when rules are
+    /// hidden so the apps row remains separated from the volume row.</summary>
+    public bool ShowAppsDivider => MeterOptions.ShowCardDividers && ShowAppsSection;
 
     /// <summary>Tells the page that <see cref="HasApps"/> may have flipped. Raised from
     /// <c>HomeViewModel</c> after it adds/removes chips so the section visibility binding
