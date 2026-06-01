@@ -377,11 +377,13 @@
                   Padding="0,0,28,0"
                   ItemsSource="{x:Bind ViewModel.Items}"
                   SelectionMode="None"
-                  CanReorderItems="True"
                   CanDragItems="True"
                   AllowDrop="True"
                   DragItemsStarting="OnRulesDragStarting"
                   DragItemsCompleted="OnRulesDragCompleted"
+                  DragOver="OnRulesDragOver"
+                  Drop="OnRulesDrop"
+                  ContainerContentChanging="OnItemContainerChanging"
                   Visibility="{x:Bind ViewModel.HasItems, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
             <ListView.ItemContainerStyle>
                 <Style TargetType="ListViewItem">
@@ -532,18 +534,12 @@
                                               CanDragItems="True"
                                               AllowDrop="True"
                                               DragItemsStarting="OnConditionDragStarting"
+                                              DragItemsCompleted="OnItemDragCompleted"
                                               DragOver="OnConditionDragOver"
                                               Drop="OnConditionDrop"
+                                              ContainerContentChanging="OnItemContainerChanging"
                                               ScrollViewer.VerticalScrollMode="Disabled"
                                               ScrollViewer.VerticalScrollBarVisibility="Disabled">
-                                        <!-- Slide a row in / out and bump the others on add / remove /
-                                             drag-reorder, matching the Devices page card motion. -->
-                                        <ListView.ItemContainerTransitions>
-                                            <TransitionCollection>
-                                                <AddDeleteThemeTransition />
-                                                <ReorderThemeTransition />
-                                            </TransitionCollection>
-                                        </ListView.ItemContainerTransitions>
                                         <ListView.ItemsPanel>
                                             <ItemsPanelTemplate>
                                                 <StackPanel />
@@ -590,16 +586,12 @@
                                               CanDragItems="True"
                                               AllowDrop="True"
                                               DragItemsStarting="OnActionDragStarting"
+                                              DragItemsCompleted="OnItemDragCompleted"
                                               DragOver="OnActionDragOver"
                                               Drop="OnActionDrop"
+                                              ContainerContentChanging="OnItemContainerChanging"
                                               ScrollViewer.VerticalScrollMode="Disabled"
                                               ScrollViewer.VerticalScrollBarVisibility="Disabled">
-                                        <ListView.ItemContainerTransitions>
-                                            <TransitionCollection>
-                                                <AddDeleteThemeTransition />
-                                                <ReorderThemeTransition />
-                                            </TransitionCollection>
-                                        </ListView.ItemContainerTransitions>
                                         <ListView.ItemsPanel>
                                             <ItemsPanelTemplate>
                                                 <StackPanel />
@@ -648,16 +640,12 @@
                                               CanDragItems="True"
                                               AllowDrop="True"
                                               DragItemsStarting="OnActionDragStarting"
+                                              DragItemsCompleted="OnItemDragCompleted"
                                               DragOver="OnActionDragOver"
                                               Drop="OnActionDrop"
+                                              ContainerContentChanging="OnItemContainerChanging"
                                               ScrollViewer.VerticalScrollMode="Disabled"
                                               ScrollViewer.VerticalScrollBarVisibility="Disabled">
-                                        <ListView.ItemContainerTransitions>
-                                            <TransitionCollection>
-                                                <AddDeleteThemeTransition />
-                                                <ReorderThemeTransition />
-                                            </TransitionCollection>
-                                        </ListView.ItemContainerTransitions>
                                         <ListView.ItemsPanel>
                                             <ItemsPanelTemplate>
                                                 <StackPanel />

@@ -641,7 +641,7 @@ public partial class ActionRow : ObservableObject, IDisposable, ISyncable<RuleAc
         new ActionKindOption(ActionKind.ApplicationDevice, "Set device for app"),
         new ActionKindOption(ActionKind.DefaultDevice, "Set system default device"),
         new ActionKindOption(ActionKind.WaveLinkMix, "Wave Link mix"),
-        new ActionKindOption(ActionKind.DeviceVolume, "Pin device volume"),
+        new ActionKindOption(ActionKind.DeviceVolume, "Set device volume"),
         new ActionKindOption(ActionKind.DeviceMute, "Mute device"),
         // RenameDevice is parked: it needs an elevated HKLM write (IPropertyStore is blocked even
         // when elevated) and can't ship to the Store, so it's hidden from the picker. The enum,
@@ -767,7 +767,7 @@ public partial class ActionRow : ObservableObject, IDisposable, ISyncable<RuleAc
             MixMembership.Exclusive => "Set mix outputs",
             _ => "Wave Link mix",
         },
-        ActionKind.DeviceVolume => "Pin volume",
+        ActionKind.DeviceVolume => "Set volume",
         ActionKind.DeviceMute => Muted ? "Mute" : "Unmute",
         ActionKind.RenameDevice => "Rename",
         _ => Kind.ToString(),
