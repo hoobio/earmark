@@ -99,6 +99,24 @@ public sealed class WaveLinkStateBrushConverter : IValueConverter
         throw new NotSupportedException();
 }
 
+public sealed class NegatedBooleanConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, string language) =>
+        value is bool b ? !b : true;
+
+    public object ConvertBack(object value, Type targetType, object parameter, string language) =>
+        value is bool b ? !b : true;
+}
+
+public sealed class NegatedBooleanToVisibilityConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, string language) =>
+        value is bool b && !b ? Visibility.Visible : Visibility.Collapsed;
+
+    public object ConvertBack(object value, Type targetType, object parameter, string language) =>
+        throw new NotSupportedException();
+}
+
 public sealed class WaveLinkStateGlyphConverter : IValueConverter
 {
     // Segoe Fluent Icons: CheckMark E73E, Warning E7BA, StatusCircleBlock F140.

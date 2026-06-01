@@ -132,6 +132,9 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         // ShowMeter feeds the row-collapse and off-mode-slider visibility.
         OnPropertyChanged(nameof(ShowVolumeRow));
         OnPropertyChanged(nameof(ShowPlainSlider));
+        // ShowRules feeds the rules section and no-rules fallback visibility.
+        OnPropertyChanged(nameof(ShowRulesSection));
+        OnPropertyChanged(nameof(ShowNoRulesMessage));
         // ShowAppIndicators feeds the apps-row visibility and the layout opt-out.
         OnPropertyChanged(nameof(ShowAppsSection));
         OnPropertyChanged(nameof(IsLayoutCustomSized));
@@ -178,12 +181,14 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     };
 
     /// <summary>Whether the hairline between the volume row and the rules block shows: only when the
-    /// user has opted into section dividers AND the volume row above it is present.</summary>
-    public bool ShowVolumeDivider => MeterOptions.ShowCardDividers && ShowVolumeRow;
+    /// user has opted into section dividers AND the volume row above it is present, and only while
+    /// the rules section is visible.</summary>
+    public bool ShowVolumeDivider => MeterOptions.ShowCardDividers && MeterOptions.ShowRules && ShowVolumeRow;
 
     /// <summary>Whether the hairline between the rules block and the apps row shows: only when the
-    /// user has opted into section dividers AND the apps row below it is present.</summary>
-    public bool ShowAppsDivider => MeterOptions.ShowCardDividers && ShowAppsSection;
+    /// user has opted into section dividers AND the apps row below it is present, and only while
+    /// the rules section is visible.</summary>
+    public bool ShowAppsDivider => MeterOptions.ShowCardDividers && MeterOptions.ShowRules && ShowAppsSection;
 
     /// <summary>Tells the page that <see cref="HasApps"/> may have flipped. Raised from
     /// <c>HomeViewModel</c> after it adds/removes chips so the section visibility binding
@@ -243,6 +248,8 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     public bool HasRules => Rules.Count > 0;
     public bool HasNoRules => Rules.Count == 0;
     public bool HasMultipleRules => Rules.Count > 1;
+    public bool ShowRulesSection => MeterOptions.ShowRules && HasRules;
+    public bool ShowNoRulesMessage => MeterOptions.ShowRules && HasNoRules;
 
     // The slider is editable unless:
     //   - a volume rule pins the level, or
@@ -315,6 +322,10 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     /// <summary>Whether the Bluetooth connect/disconnect button shows on this card.</summary>
     public bool ShowBluetoothButton => IsBluetooth;
 
+    /// <summary>Whether the Bluetooth button is in a connecting state (disabled, spinning for 3 seconds after click).</summary>
+    [ObservableProperty]
+    public partial bool IsBluetoothConnecting { get; set; }
+
     /// <summary>Bluetooth button glyph: the plain Bluetooth mark while connected (tap to disconnect),
     /// the Sync (reconnect) arrows while disconnected (tap to reconnect). The disconnected state is
     /// already signalled by the card dim + "Disconnected" pill, so this just invites the action.</summary>
@@ -322,14 +333,30 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         ? new string((char)0xE702, 1)   // Bluetooth
         : new string((char)0xE895, 1);  // Sync (reconnect)
 
-    public string BluetoothToggleTooltip => IsConnected
-        ? "Disconnect this Bluetooth device"
-        : "Connect this Bluetooth device";
+    public string BluetoothToggleTooltip => IsBluetoothConnecting
+        ? "Connecting..."
+        : (IsConnected
+            ? "Disconnect this Bluetooth device"
+            : "Connect this Bluetooth device");
 
-    /// <summary>Connect (when disconnected) or disconnect (when connected) this Bluetooth device. The
-    /// actual link state settles from the device-arrival events, not this command's return.</summary>
+    /// <summary>Connect (when disconnected) or disconnect (when connected) this Bluetooth device. Disables
+    /// the button for 3 seconds while the request is in flight. The actual link state settles from
+    /// the device-arrival events, not this command's return.</summary>
     [RelayCommand]
-    public void ToggleBluetooth() => _onBluetoothToggle?.Invoke(this);
+    public async Task ToggleBluetooth()
+    {
+        if (IsBluetoothConnecting) return;  // Guard against rapid clicks
+        IsBluetoothConnecting = true;
+        try
+        {
+            _onBluetoothToggle?.Invoke(this);
+            await Task.Delay(TimeSpan.FromSeconds(3));
+        }
+        finally
+        {
+            IsBluetoothConnecting = false;
+        }
+    }
 
     // ---- Persistence-bound state ----
 
@@ -703,6 +730,8 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         OnPropertyChanged(nameof(HasRules));
         OnPropertyChanged(nameof(HasNoRules));
         OnPropertyChanged(nameof(HasMultipleRules));
+        OnPropertyChanged(nameof(ShowRulesSection));
+        OnPropertyChanged(nameof(ShowNoRulesMessage));
         OnPropertyChanged(nameof(FirstRule));
         OnPropertyChanged(nameof(AdditionalRulesLabel));
         OnPropertyChanged(nameof(IsVolumeEditable));

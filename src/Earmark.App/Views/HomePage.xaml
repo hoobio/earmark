@@ -267,7 +267,8 @@
 
                         <!-- Bluetooth connect/disconnect: top-right of the header, sized to the name /
                              id rows. The name / subtitle live in the * column, so they ellipsify to
-                             make room for this button. Shown only on Bluetooth devices. -->
+                             make room for this button. Shown only on Bluetooth devices. Disabled and
+                             shows a spinner for 3 seconds after click. -->
                         <Button Grid.Column="2"
                                 VerticalAlignment="Top"
                                 Width="32" Height="32"
@@ -275,10 +276,16 @@
                                 Background="{ThemeResource SubtleFillColorSecondaryBrush}"
                                 CornerRadius="{ThemeResource ControlCornerRadius}"
                                 Visibility="{x:Bind ShowBluetoothButton, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                IsEnabled="{x:Bind IsBluetoothConnecting, Mode=OneWay, Converter={StaticResource NegatedBooleanConverter}}"
                                 Command="{x:Bind ToggleBluetoothCommand}"
                                 ToolTipService.ToolTip="{x:Bind BluetoothToggleTooltip, Mode=OneWay}"
                                 AutomationProperties.Name="{x:Bind BluetoothToggleTooltip, Mode=OneWay}">
-                            <FontIcon Glyph="{x:Bind BluetoothToggleGlyph, Mode=OneWay}" FontSize="16" />
+                            <Grid>
+                                <FontIcon Glyph="{x:Bind BluetoothToggleGlyph, Mode=OneWay}" FontSize="16"
+                                          Visibility="{x:Bind IsBluetoothConnecting, Mode=OneWay, Converter={StaticResource NegatedBooleanToVisibilityConverter}}" />
+                                <ProgressRing Width="16" Height="16"
+                                              Visibility="{x:Bind IsBluetoothConnecting, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                            </Grid>
                         </Button>
                     </Grid>
 
@@ -430,7 +437,7 @@
                          multiple rules the chip has an inline chevron on the right that
                          toggles a panel beneath with the additional rules. Saves the
                          vertical space a separate "N more rules" Expander would consume. -->
-                    <StackPanel Spacing="{StaticResource SpacingXSmall}" Visibility="{x:Bind HasRules, Mode=OneWay}">
+                    <StackPanel Spacing="{StaticResource SpacingXSmall}" Visibility="{x:Bind ShowRulesSection, Mode=OneWay}">
                         <TextBlock Text="Rules"
                                    Style="{StaticResource CaptionTextBlockStyle}"
                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
@@ -499,7 +506,7 @@
 
                     <TextBlock Text="No rules target this device."
                                Style="{StaticResource MutedCaptionTextStyle}"
-                               Visibility="{x:Bind HasNoRules, Mode=OneWay}" />
+                               Visibility="{x:Bind ShowNoRulesMessage, Mode=OneWay}" />
 
                     <!-- Divider between the rules block and the apps row; opt-in, shows only when the
                          apps row below it is present. -->
