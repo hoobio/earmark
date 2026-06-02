@@ -119,16 +119,9 @@ public sealed class DeviceDefaultsService : IDeviceDefaultsService
         }
 
         var orderHead = new List<string>();
-        var defaultGroup = AddGroup(s, orderHead, DefaultDevicesGroupTitle, group0Members);
+        AddGroup(s, orderHead, DefaultDevicesGroupTitle, group0Members);
         PinAll(s, group0Members);
-        if (defaultGroup is not null)
-        {
-            defaultGroup.PinnedToQuickControls = true;
-        }
-        else
-        {
-            QuickPinAll(s, group0Members);
-        }
+        QuickPinAll(s, group0Members);
 
         // ---- Group 1: Wave Link channels (render/output-only virtual channels), minus group 0 ----
         var channelMap = WaveLinkChannelMap.Build(snapshot, combined);
@@ -171,9 +164,9 @@ public sealed class DeviceDefaultsService : IDeviceDefaultsService
     /// <summary>Adds a group for <paramref name="memberIds"/> (>=2 members) and pushes its id onto the
     /// block-order head. Fewer than two members can't render as a group, so it's skipped (members are
     /// still pinned separately).</summary>
-    private static DeviceGroup? AddGroup(AppSettings s, List<string> orderHead, string title, List<string> memberIds)
+    private static void AddGroup(AppSettings s, List<string> orderHead, string title, List<string> memberIds)
     {
-        if (memberIds.Count < 2) return null;
+        if (memberIds.Count < 2) return;
         var group = new DeviceGroup
         {
             Id = Guid.NewGuid().ToString("N"),
@@ -182,7 +175,6 @@ public sealed class DeviceDefaultsService : IDeviceDefaultsService
         };
         s.DeviceGroups.Add(group);
         orderHead.Add(group.Id);
-        return group;
     }
 
     private static void PinAll(AppSettings s, IEnumerable<string> ids)

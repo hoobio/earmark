@@ -20,14 +20,12 @@ public partial class DeviceGroupCard : ObservableObject, IBlockLayoutInfo
 {
     private readonly Action<DeviceGroupCard>? _onChanged;
     private readonly bool _hideEmptyTitleBand;
-    private readonly bool _insetContent;
     private bool _suppressChanged;
 
-    public DeviceGroupCard(string id, string title, Action<DeviceGroupCard>? onChanged, bool hideEmptyTitleBand = false, bool insetContent = false)
+    public DeviceGroupCard(string id, string title, Action<DeviceGroupCard>? onChanged, bool hideEmptyTitleBand = false)
     {
         Id = id;
         _hideEmptyTitleBand = hideEmptyTitleBand;
-        _insetContent = insetContent;
         _suppressChanged = true;
         Title = title;
         _suppressChanged = false;
@@ -59,19 +57,13 @@ public partial class DeviceGroupCard : ObservableObject, IBlockLayoutInfo
     public partial string Title { get; set; }
 
     public bool HasTitle => !string.IsNullOrWhiteSpace(Title);
+
+    /// <summary>Title visibility as an enum so the Quick Controls flyout can bind it without a
+    /// converter (x:Bind converters can't resolve against a Window-hosted DataTemplate).</summary>
+    public Visibility TitleVisibility => HasTitle ? Visibility.Visible : Visibility.Collapsed;
+
     public bool ShowTitleBand => !_hideEmptyTitleBand || HasTitle || IsEditingTitle;
     public GridLength TitleRowHeight => ShowTitleBand ? new GridLength(28) : new GridLength(0);
-
-    [ObservableProperty]
-    public partial bool IsQuickPinned { get; set; }
-
-    public string QuickPinToggleLabel => IsQuickPinned ? "Unpin from Quick Controls" : "Pin to Quick Controls";
-    public string QuickPinToggleGlyph => IsQuickPinned ? new string((char)0xE840, 1) : new string((char)0xE718, 1);
-
-    [ObservableProperty]
-    public partial bool IsPointerOver { get; set; }
-
-    public bool ShowQuickPinAffordance => HasTitle && IsPointerOver && !IsEditingTitle;
 
     /// <summary>True while the title is being edited (double-tap / Rename): the read-only label swaps
     /// to a text box. The label is the group's drag handle, so editing is entered explicitly.</summary>
@@ -84,10 +76,7 @@ public partial class DeviceGroupCard : ObservableObject, IBlockLayoutInfo
     {
         OnPropertyChanged(nameof(ShowTitleBand));
         OnPropertyChanged(nameof(ShowTitleLabel));
-        OnPropertyChanged(nameof(ShowQuickPinAffordance));
     }
-
-    partial void OnIsPointerOverChanged(bool value) => OnPropertyChanged(nameof(ShowQuickPinAffordance));
 
     /// <summary>Shows the container's dotted outline. The page flips this on every group while a drag
     /// is in flight, so groups read as transparent at rest and reveal their bounds only while dragging.</summary>
@@ -112,25 +101,7 @@ public partial class DeviceGroupCard : ObservableObject, IBlockLayoutInfo
     /// <summary>Inset applied to the members while a drag is in flight, so the dotted outline (drawn
     /// at the group-box bounds) has breathing room around the cards instead of hugging them. Left /
     /// right / bottom only - the title band already supplies the top gap. Zero at rest.</summary>
-    public Thickness ContentPadding
-    {
-        get
-        {
-            var left = _insetContent ? 12 : 0;
-            var top = _insetContent ? 8 : 0;
-            var right = _insetContent ? 12 : 0;
-            var bottom = _insetContent ? 12 : 0;
-
-            if (ShowOutline)
-            {
-                left += 8;
-                right += 8;
-                bottom += 8;
-            }
-
-            return new Thickness(left, top, right, bottom);
-        }
-    }
+    public Thickness ContentPadding => ShowOutline ? new Thickness(8, 0, 8, 8) : new Thickness(0);
 
     partial void OnShowOutlineChanged(bool value)
     {
@@ -142,28 +113,20 @@ public partial class DeviceGroupCard : ObservableObject, IBlockLayoutInfo
 
     /// <summary>Refreshes the title from the persisted record without firing the change callback
     /// (used when reconciling existing group cards on a rebuild).</summary>
-    public void SyncFrom(string title, bool isQuickPinned)
+    public void SyncFrom(string title)
     {
         _suppressChanged = true;
         Title = title;
-        IsQuickPinned = isQuickPinned;
         _suppressChanged = false;
     }
 
     partial void OnTitleChanged(string value)
     {
         OnPropertyChanged(nameof(HasTitle));
+        OnPropertyChanged(nameof(TitleVisibility));
         OnPropertyChanged(nameof(TitleRowHeight));
         OnPropertyChanged(nameof(ShowTitleBand));
         OnPropertyChanged(nameof(ShowTitleLabel));
-        OnPropertyChanged(nameof(ShowQuickPinAffordance));
-        if (!_suppressChanged) _onChanged?.Invoke(this);
-    }
-
-    partial void OnIsQuickPinnedChanged(bool value)
-    {
-        OnPropertyChanged(nameof(QuickPinToggleLabel));
-        OnPropertyChanged(nameof(QuickPinToggleGlyph));
         if (!_suppressChanged) _onChanged?.Invoke(this);
     }
 }

@@ -3,15 +3,42 @@
     x:Class="Earmark.App.Views.QuickControlsWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:vm="using:Earmark.App.ViewModels"
     xmlns:controls="using:Earmark.App.Controls"
     Title="Quick Controls">
 
-        <Border x:Name="Root"
+    <Border x:Name="Root"
             Background="Transparent"
             IsTabStop="True">
         <Border.Resources>
-            <controls:BlockTemplateSelector x:Key="QuickBlockTemplateSelector" />
-            <SolidColorBrush x:Key="GroupTitleBandBackgroundBrush" Color="Transparent" />
+            <!-- Compact card: the shared DeviceCardView with rules suppressed for the flyout. -->
+            <DataTemplate x:Key="QuickCardTemplate" x:DataType="vm:DeviceCard">
+                <Border Style="{StaticResource SectionCardStyle}" Padding="0">
+                    <controls:DeviceCardView Card="{x:Bind}" ShowRules="False" />
+                </Border>
+            </DataTemplate>
+
+            <!-- Compact group: an optional title over a vertical stack of member cards. -->
+            <DataTemplate x:Key="QuickGroupTemplate" x:DataType="vm:DeviceGroupCard">
+                <StackPanel Spacing="8">
+                    <TextBlock Text="{x:Bind Title, Mode=OneWay}"
+                               Margin="2,0,0,0"
+                               FontWeight="SemiBold"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                               TextTrimming="CharacterEllipsis"
+                               Visibility="{x:Bind TitleVisibility, Mode=OneWay}" />
+                    <ItemsRepeater ItemsSource="{x:Bind Members, Mode=OneWay}"
+                                   ItemTemplate="{StaticResource QuickCardTemplate}">
+                        <ItemsRepeater.Layout>
+                            <StackLayout Spacing="8" />
+                        </ItemsRepeater.Layout>
+                    </ItemsRepeater>
+                </StackPanel>
+            </DataTemplate>
+
+            <controls:BlockTemplateSelector x:Key="QuickBlockTemplateSelector"
+                                            CardTemplate="{StaticResource QuickCardTemplate}"
+                                            GroupTemplate="{StaticResource QuickGroupTemplate}" />
         </Border.Resources>
 
         <Grid>
@@ -25,8 +52,7 @@
                           HorizontalScrollBarVisibility="Disabled"
                           IsScrollInertiaEnabled="False"
                           Background="Transparent">
-                <ItemsRepeater x:Name="Repeater"
-                               ElementPrepared="OnRepeaterElementPrepared">
+                <ItemsRepeater x:Name="Repeater">
                     <ItemsRepeater.Layout>
                         <StackLayout Spacing="12" />
                     </ItemsRepeater.Layout>

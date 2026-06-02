@@ -304,8 +304,6 @@ public sealed class DeviceGroup
 
     public string Title { get; set; } = string.Empty;
 
-    public bool PinnedToQuickControls { get; set; }
-
     /// <summary>Member <see cref="Earmark.Core.Models.DeviceIdentity"/> keys, in left-to-right member order.</summary>
     public List<string> MemberIds { get; set; } = new();
 }

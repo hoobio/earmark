@@ -40,13 +40,6 @@ public sealed class NullableToVisibilityConverter : IValueConverter
         throw new NotSupportedException();
 }
 
-public sealed class EnumToStringConverter : IValueConverter
-{
-    public object Convert(object value, Type targetType, object parameter, string language) => value?.ToString() ?? string.Empty;
-
-    public object ConvertBack(object value, Type targetType, object parameter, string language) => throw new NotSupportedException();
-}
-
 public sealed class SatisfiedGlyphConverter : IValueConverter
 {
     // Segoe MDL2 Assets: CheckMark (E73E), Cancel (E711).

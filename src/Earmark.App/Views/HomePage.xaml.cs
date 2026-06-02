@@ -27,21 +27,10 @@ namespace Earmark.App.Views;
 public sealed partial class HomePage : Page
 {
     private readonly ILogger<HomePage>? _logger;
-    private readonly RulesViewModel _rulesViewModel;
-    private readonly MainWindow _mainWindow;
 
-    /// <summary>
-    /// Pre-drag volume / mute captured per slider. Indexed by the Slider instance because
-    /// the same DeviceCard could theoretically host concurrent interactions; in practice this
-    /// also dodges any "card replaced mid-drag" edge cases by keying off the live control.
-    /// </summary>
-    private readonly Dictionary<Slider, (float Volume, bool Muted)> _sliderDragStart = new();
-
-    public HomePage(HomeViewModel viewModel, RulesViewModel rulesViewModel, MainWindow mainWindow)
+    public HomePage(HomeViewModel viewModel)
     {
         ViewModel = viewModel;
-        _rulesViewModel = rulesViewModel;
-        _mainWindow = mainWindow;
         InitializeComponent();
         _logger = App.Current.Services.GetService<ILogger<HomePage>>();
 
@@ -258,81 +247,22 @@ public sealed partial class HomePage : Page
         _ => null,
     };
 
-    private void OnUngroupDeviceClicked(object sender, RoutedEventArgs e)
+    private void OnCardRenameGroupRequested(object? sender, DeviceGroupCard group)
     {
-        if (sender is FrameworkElement { Tag: DeviceCard card })
+        // The card/app-chip "Rename group" already flipped IsEditingTitle; focus the title editor,
+        // which lives in the group header's tree on this page.
+        _editingGroup = group;
+        var idx = ViewModel.Blocks.IndexOf(group);
+        if (idx >= 0 && DevicesRepeater.TryGetElement(idx) is FrameworkElement blockEl)
         {
-            ViewModel.UngroupDevice(card.DeviceKey);
+            FocusTitleEditor(blockEl);
         }
-    }
-
-    private void OnForgetDeviceClicked(object sender, RoutedEventArgs e)
-    {
-        if (sender is FrameworkElement { Tag: DeviceCard card })
-        {
-            ViewModel.ForgetDevice(card);
-        }
-    }
-
-    private async void OnDeviceVisibilityClicked(object sender, RoutedEventArgs e)
-    {
-        if (sender is not FrameworkElement { Tag: DeviceCard card }) return;
-        if (!card.IsEffectivelyHidden && card.IsQuickPinned)
-        {
-            var dialog = new ContentDialog
-            {
-                XamlRoot = XamlRoot,
-                Title = "Hide pinned device?",
-                Content = "This device is pinned to Quick Controls. Hiding it will remove it from Quick Controls.",
-                PrimaryButtonText = "Hide and unpin",
-                CloseButtonText = "Cancel",
-                DefaultButton = ContentDialogButton.Close,
-            };
-
-            if (await dialog.ShowAsync() != ContentDialogResult.Primary)
-            {
-                return;
-            }
-
-            ViewModel.HideAndUnpin(card);
-            return;
-        }
-
-        card.ToggleUserVisibilityCommand.Execute(null);
-    }
-
-    private void OnGroupPointerEntered(object sender, PointerRoutedEventArgs e)
-    {
-        if (sender is FrameworkElement { Tag: DeviceGroupCard group }) group.IsPointerOver = true;
-    }
-
-    private void OnGroupPointerExited(object sender, PointerRoutedEventArgs e)
-    {
-        if (sender is FrameworkElement { Tag: DeviceGroupCard group }) group.IsPointerOver = false;
-    }
-
-    private void OnCustomiseClicked(object sender, RoutedEventArgs e)
-    {
-        if (sender is not FrameworkElement { Tag: DeviceCard card }) return;
-        // Defer so the context MenuFlyout finishes dismissing before the dialog opens.
-        DispatcherQueue.TryEnqueue(async () =>
-        {
-            try
-            {
-                var dialog = BuildCustomiseDialog(card);
-                dialog.XamlRoot = XamlRoot;
-                await dialog.ShowAsync();
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogError(ex, "Customise: dialog threw");
-            }
-        });
     }
 
     private const double CustomiseWidth = 280;
 
-    private static ContentDialog BuildCustomiseDialog(DeviceCard card)
+    // Built here (shared static) and also invoked by DeviceCardView's card context menu.
+    internal static ContentDialog BuildCustomiseDialog(DeviceCard card)
     {
         // Snapshot the saved state. The dialog edits a PENDING copy and only writes it back to the
         // card on Save - the card and its tile are never touched mid-edit, so Cancel is a no-op and
@@ -1197,139 +1127,11 @@ public sealed partial class HomePage : Page
             () => ApplyReorderAnimation(element, true));   // on once placed, for every later move
     }
 
-    /// <summary>Attaches a Composition implicit Offset animation to an app chip's container the first
-    /// time it renders, so a re-sort (active/idle tiering) or a sibling appearing/leaving slides the
-    /// chips to their new spots instead of popping. Offset ONLY - no opacity, so a recycled container
-    /// can't come back stuck transparent (the bug an opacity hide animation caused). Attached after the
-    /// first arrange (Loaded), so a chip's first appearance is instant with no slide-from-origin. The
-    /// animation lives on the container the WrapPanel arranges, not the template root.</summary>
-    private void OnAppChipLoaded(object sender, RoutedEventArgs e)
-    {
-        if (sender is not FrameworkElement border) return;
-        if (VisualTreeHelper.GetParent(border) is not UIElement container) return;
-
-        var visual = ElementCompositionPreview.GetElementVisual(container);
-        var compositor = visual.Compositor;
-
-        var offset = compositor.CreateVector3KeyFrameAnimation();
-        offset.Target = "Offset";
-        offset.InsertExpressionKeyFrame(1.0f, "this.FinalValue");
-        offset.Duration = TimeSpan.FromMilliseconds(220);
-
-        var implicits = compositor.CreateImplicitAnimationCollection();
-        implicits["Offset"] = offset;
-        visual.ImplicitAnimations = implicits;
-    }
-
     private void OnUndoInvoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
     {
         ViewModel.UndoVisibilityChangeCommand.Execute(null);
         args.Handled = true;
     }
-
-    private void OnMuteToggleClicked(object sender, RoutedEventArgs e)
-    {
-        // ItemsRepeater doesn't propagate DataContext to x:Bind templates - the button
-        // carries the DeviceCard via Tag="{x:Bind}" instead.
-        if (sender is not FrameworkElement { Tag: DeviceCard card }) return;
-
-        var prevVolume = card.Volume;
-        var prevMuted = card.IsMuted;
-        card.ToggleMuteCommand.Execute(null);
-        // Mute icon clicks only change IsMuted; carry the unchanged volume so Ctrl+Z
-        // restores both together as one entry.
-        ViewModel.RecordVolumeMuteUndo(card, prevVolume, prevMuted);
-    }
-
-    private void OnRuleChipClicked(object sender, RoutedEventArgs e)
-    {
-        if (sender is not FrameworkElement { DataContext: RuleSummary summary }) return;
-
-        _rulesViewModel.RequestFocusRule(summary.RuleId);
-        _mainWindow.NavigateByTag("Rules");
-    }
-
-    // CA1822 suppressed: XAML event hookup requires instance methods even when the body
-    // doesn't touch instance state.
-#pragma warning disable CA1822
-
-    private void OnSliderPointerPressed(object sender, PointerRoutedEventArgs e)
-    {
-        if (sender is Slider { Tag: DeviceCard card } slider)
-        {
-            _sliderDragStart[slider] = (card.Volume, card.IsMuted);
-        }
-    }
-
-    private void OnSliderReleased(object sender, PointerRoutedEventArgs e)
-    {
-        if (sender is not Slider { Tag: DeviceCard card } slider) return;
-
-        FinaliseSliderInteraction(slider, card);
-        card.PlayPing();
-    }
-
-    private void OnSliderKeyDown(object sender, KeyRoutedEventArgs e)
-    {
-        if (!IsSliderNudgeKey(e.Key)) return;
-        if (sender is Slider { Tag: DeviceCard card } slider &&
-            !_sliderDragStart.ContainsKey(slider))
-        {
-            _sliderDragStart[slider] = (card.Volume, card.IsMuted);
-        }
-    }
-
-    private void OnSliderKeyUp(object sender, KeyRoutedEventArgs e)
-    {
-        if (!IsSliderNudgeKey(e.Key)) return;
-        if (sender is not Slider { Tag: DeviceCard card } slider) return;
-
-        FinaliseSliderInteraction(slider, card);
-        card.PlayPing();
-    }
-
-    private void OnSliderLostFocus(object sender, RoutedEventArgs e)
-    {
-        // Belt-and-suspenders: if focus moves away mid-interaction (e.g. window deactivated),
-        // commit whatever change we have so the undo entry isn't lost.
-        if (sender is Slider { Tag: DeviceCard card } slider)
-        {
-            FinaliseSliderInteraction(slider, card);
-        }
-    }
-
-    private void FinaliseSliderInteraction(Slider slider, DeviceCard card)
-    {
-        if (!_sliderDragStart.TryGetValue(slider, out var start)) return;
-        _sliderDragStart.Remove(slider);
-        ViewModel.RecordVolumeMuteUndo(card, start.Volume, start.Muted);
-    }
-
-    private static bool IsSliderNudgeKey(VirtualKey key) =>
-        key is VirtualKey.Left or VirtualKey.Right
-            or VirtualKey.Up or VirtualKey.Down
-            or VirtualKey.PageUp or VirtualKey.PageDown
-            or VirtualKey.Home or VirtualKey.End;
-
-    private void OnLockedSliderTapped(object sender, TappedRoutedEventArgs e)
-    {
-        if (sender is FrameworkElement { DataContext: DeviceCard card })
-        {
-            card.PlayPing();
-        }
-    }
-
-    // A rule-locked (disabled) slider doesn't capture the pointer the way an enabled one does, so
-    // a press-drag over it would otherwise bubble to the card's CanDrag and start a reorder. The
-    // transparent lock overlay captures the pointer on press (mirroring the enabled slider) to keep
-    // the gesture off the card; the tooltip and tap-to-ping still work.
-    private void OnLockedSliderPointerPressed(object sender, PointerRoutedEventArgs e) =>
-        (sender as UIElement)?.CapturePointer(e.Pointer);
-
-    private void OnLockedSliderPointerReleased(object sender, PointerRoutedEventArgs e) =>
-        (sender as UIElement)?.ReleasePointerCapture(e.Pointer);
-
-#pragma warning restore CA1822
 
     // ---- App chip drag / drop ----
     //
@@ -1343,54 +1145,6 @@ public sealed partial class HomePage : Page
     // target, or dropping back on the source card). No custom cursor work needed.
 
     private const string DragPayloadPrefix = "earmark:chip:";
-
-    private void OnAppChipDragStarting(UIElement sender, DragStartingEventArgs args)
-    {
-        if (sender is not FrameworkElement { Tag: AppChip chip }) return;
-        if (!chip.CanDrag)
-        {
-            args.Cancel = true;
-            return;
-        }
-
-        // Payload is parsed in OnDeviceCardDrop. Keep it small; the AppChip itself doesn't
-        // have to round-trip - the page resolves PID + source endpoint back to the live chip
-        // via the HomeViewModel's card list, which is the source of truth.
-        var payload = $"{DragPayloadPrefix}{chip.ProcessId}|{chip.SourceEndpointId}";
-        args.Data.SetText(payload);
-        args.Data.RequestedOperation = DataPackageOperation.Move;
-
-        SetDragInProgress(true);
-    }
-
-    private void OnAppChipDropCompleted(UIElement sender, DropCompletedEventArgs args)
-    {
-        SetDragInProgress(false);
-    }
-
-    /// <summary>Reveals the chip's "Terminate this app" item only while Shift is held as the context
-    /// menu opens - an Explorer-style hidden power action. The terminate item is the one carrying the
-    /// AppChip as its Tag; its base availability is gated by <see cref="AppChip.ShowProcessActions"/>
-    /// so a System Sounds or closed chip never exposes it even with Shift down. Shift state is read at
-    /// the current input message, which is the right-click that opened the menu.</summary>
-    // CA1822 suppressed: XAML event hookup requires an instance method even though the body is static.
-#pragma warning disable CA1822
-    private void OnAppChipFlyoutOpening(object sender, object e)
-    {
-        if (sender is not MenuFlyout flyout) return;
-        var shiftDown = InputKeyboardSource.GetKeyStateForCurrentThread(VirtualKey.Shift)
-            .HasFlag(CoreVirtualKeyStates.Down);
-        foreach (var item in flyout.Items)
-        {
-            if (item is MenuFlyoutItem { Tag: AppChip chip } terminate)
-            {
-                terminate.Visibility = shiftDown && chip.ShowProcessActions
-                    ? Visibility.Visible
-                    : Visibility.Collapsed;
-            }
-        }
-    }
-#pragma warning restore CA1822
 
     /// <summary>Reveals every group container's dotted outline while a drag is in flight, so groups
     /// read as transparent at rest and show their bounds only while dragging.</summary>
