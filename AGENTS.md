@@ -1,33 +1,32 @@
 # Earmark - per-app audio routing
 
-WinUI 3 / .NET 10 desktop app for Windows that routes individual applications to specific audio endpoints using regex rules. Like Volume Mixer's per-app default device, but driven by patterns rather than per-app dropdowns. Repo: [hoobio/earmark](https://github.com/hoobio/earmark).
+WinUI 3 / .NET 10 desktop app for Windows that routes individual applications to specific audio endpoints using regex rules. Like Volume Mixer's per-app default device, but pattern-driven. Repo: [hoobio/earmark](https://github.com/hoobio/earmark).
 
-## Working directory layout
+## Layout
 
 ```
 Earmark.slnx                  # solution
 global.json                   # pins SDK to 10.0.x
-Directory.Build.props         # central MSBuild settings
+Directory.Build.props         # central MSBuild settings + version stamping
 Directory.Packages.props      # central package versions (CPM)
-version.txt                   # source of truth for the app version (release-please owns this)
-release-please-config.json    # release-please config
+version.txt                   # app version source of truth (release-please owns it)
 .github/workflows/            # release-please.yaml + pr-title-check.yaml
 
 src/
   Earmark.Core/               # models, rule matcher, persistence (no Windows deps in interfaces)
   Earmark.Audio/              # NAudio + Core Audio + IAudioPolicyConfigFactory + IPolicyConfigVista interop
-  Earmark.App/                # WinUI 3 packaged-as-unpackaged app: pages, view-models, hosting, tray, settings
+  Earmark.App/                # WinUI 3 unpackaged app: pages, view-models, hosting, tray, settings
 tests/
-  Earmark.Core.Tests/         # xUnit project (currently scaffolding only)
+  Earmark.Core.Tests/         # xUnit (scaffolding only)
 ```
 
-`Earmark.App` is unpackaged self-contained (`<WindowsPackageType>None</WindowsPackageType>`, `<WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>`). Build outputs land at `src/Earmark.App/bin/x64/Debug/net10.0-windows10.0.26100.0/win-x64/Earmark.App.exe`.
+`Earmark.App` is unpackaged self-contained (`<WindowsPackageType>None</WindowsPackageType>`, `<WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>`). Build output: `src/Earmark.App/bin/x64/Debug/net10.0-windows10.0.26100.0/win-x64/Earmark.App.exe`.
 
-## Build, run, and iterate (THE pattern)
+## Build, run, iterate (THE pattern)
 
-**Rebuild and re-launch after EVERY code change.** Not "after the last change in a batch", not "if it looked like a UI change" - every change to anything that ends up in a binary (`.cs`, `.xaml`, `.csproj`, etc.). A clean `dotnet build` is not verification; the running app is. If you finish a task with only a build, the task is not finished. Report what the relaunched binary actually did (log lines, observed behaviour) before declaring success. Doc-only edits (`.md`, comments-only) are exempt.
+**Rebuild and re-launch after EVERY code change** to anything that ends up in a binary (`.cs`, `.xaml`, `.csproj`). A clean build is not verification; the running app is. Report what the relaunched binary did (log lines, behaviour) before declaring success. Doc-only edits (`.md`, comments) are exempt.
 
-The app holds open file handles on its own DLLs while running, which makes incremental builds fail with `MSB3027`. **Always kill before building.** The whole inner loop is one command: kill -> build -> (only if the build is green) relaunch -> tail the new log.
+The running app holds file handles on its own DLLs, so incremental builds fail with `MSB3027`. **Always kill before building.** The whole loop is one command: kill -> build -> (only if green) relaunch -> tail the new log:
 
 ```bash
 set -o pipefail
@@ -38,240 +37,159 @@ dotnet build src/Earmark.App/Earmark.App.csproj -c Debug -p:Platform=x64 --no-re
        ls -t /c/Users/AlexHoogeveen-Hill/AppData/Local/Earmark/logs/*.log | head -1 | xargs head -20; }
 ```
 
-- `set -o pipefail` makes the `| tail` keep the build's exit code, so the `&&` launch fires only on a green build - you never relaunch a stale binary or read a misleading log after a failed build. On failure the command stops after printing the errors.
-- `taskkill` is harmless when nothing is running (its output is discarded).
-- Always pass `-p:Platform=x64` (also valid: `ARM64`). The csproj declares `<Platforms>x64;ARM64</Platforms>` and has no `AnyCPU` configuration.
-- `--no-restore` keeps the loop fast once dependencies are already pulled.
-- Launch via `nohup ... & disown` so the app is parented to the system, not the shell - the shell can return without killing the app.
-- Drop the trailing `xargs head -20` (the log tail) if you only need to confirm the relaunch. To read the latest log separately, PowerShell handles the Windows path: `Get-ChildItem "$env:LocalAppData\Earmark\logs\*.log" | Sort-Object LastWriteTime -Descending | Select-Object -First 1 | Get-Content`.
-
-If you only edited `Earmark.Core` or `Earmark.Audio` you can build those individually for fast iteration without killing the app, but a final `Earmark.App` build still requires the kill.
+- `set -o pipefail` keeps the build's exit code through `| tail`, so launch fires only on a green build.
+- Always pass `-p:Platform=x64` (or `ARM64`). No `AnyCPU` config exists.
+- Launch via `nohup ... & disown` so the app outlives the shell.
+- Drop the trailing `xargs head -20` if you only need to confirm relaunch. Read latest log via PowerShell: `Get-ChildItem "$env:LocalAppData\Earmark\logs\*.log" | Sort-Object LastWriteTime -Descending | Select-Object -First 1 | Get-Content`.
+- Editing only `Earmark.Core`/`Earmark.Audio` can build individually without killing, but a final `Earmark.App` build still needs the kill.
 
 ## Working alongside other agents
 
-This repo is sometimes edited by more than one agent at once, so a build can go red on changes you never touched. Don't patch around another agent's work-in-progress, and don't treat their error as your blocker. Rebuild first (their tree may already be fixed between attempts), and if a failure clearly isn't from your edits, assume the owning agent will resolve it: wait and re-poll the build rather than "fixing" their half-written code. Only commit or push once the build is green. When asked to commit changes that mix your work with another agent's in the same file, stage the whole file rather than trying to surgically separate the hunks.
+This repo is sometimes edited by multiple agents at once, so a build can go red on changes you never touched. Rebuild first (their tree may already be fixed), and if a failure clearly isn't yours, wait and re-poll rather than patching their WIP. Only commit/push once green. When committing mixed work in one file, stage the whole file.
 
 ## Where state lives
 
 - Rules: `%UserProfile%\Documents\Hoobi\Earmark\rules.json`
 - Settings: `%UserProfile%\Documents\Hoobi\Earmark\settings.json`
-- Logs: `%LocalAppData%\Earmark\logs\earmark-{yyyyMMdd-HHmmss}.log` (one per launch; file logger flushes per call)
+- Logs: `%LocalAppData%\Earmark\logs\earmark-{yyyyMMdd-HHmmss}.log` (one per launch, flushes per call)
 
-Rules and settings live in `Documents` so OneDrive backs them up across machines. Logs stay in `LocalAppData` because they're noisy churn that shouldn't sync. Both stores write atomically with a 5-attempt retry loop to survive the OneDrive sync agent briefly holding the file.
+Rules/settings live in `Documents` for OneDrive backup; logs in `LocalAppData` to avoid syncing churn. Both stores write atomically with a 5-attempt retry to survive OneDrive holding the file.
 
-## How routing actually works (what to know before changing the audio code)
+## How routing works (read before changing audio code)
 
-The "per-app default endpoint" feature is undocumented Windows. Two distinct interfaces are involved:
+The "per-app default endpoint" feature is undocumented Windows. Two interfaces:
 
-1. **Per-app routing** (`ApplicationDevice` actions) uses `IAudioPolicyConfigFactory` (WinRT, IID `ab3d4648-e242-459f-b02f-541c70306324` on Win11 22000+, `2a59116d-...` on older Win10). Activated via `RoGetActivationFactory` against the runtime class name `Windows.Media.Internal.AudioPolicyConfig`. Modern .NET no longer supports `[InterfaceType(InterfaceIsIInspectable)]` marshalling, so the interfaces are declared as `IUnknown`-based with three reserved `IInspectable` methods at the start of the vtable. HSTRING parameters are passed as `IntPtr` and built/freed via `combase!WindowsCreateString` / `WindowsDeleteString`. See `src/Earmark.Audio/Interop/IAudioPolicyConfigFactory.cs` and `HString.cs`.
+1. **Per-app routing** (`ApplicationDevice` actions): `IAudioPolicyConfigFactory` (WinRT, IID `ab3d4648-e242-459f-b02f-541c70306324` on Win11 22000+, `2a59116d-...` on older Win10). Activated via `RoGetActivationFactory` against `Windows.Media.Internal.AudioPolicyConfig`. Declared `IUnknown`-based with three reserved `IInspectable` vtable slots (modern .NET drops `InterfaceIsIInspectable` marshalling). HSTRING params passed as `IntPtr`, built/freed via `combase!WindowsCreateString`/`WindowsDeleteString`. See `Interop/IAudioPolicyConfigFactory.cs`, `HString.cs`.
+2. **System default device** (`DefaultDevice` actions): `IPolicyConfigVista::SetDefaultEndpoint` (IID `568b9108-...`) on `CPolicyConfigClient` (CLSID `294935CE-...`). Plain LPWStr device IDs, classic COM. See `IPolicyConfigVista.cs`.
 
-2. **System default device** (`DefaultDevice` actions) uses the older `IPolicyConfigVista::SetDefaultEndpoint` (IID `568b9108-...`) on the `CPolicyConfigClient` COM class (CLSID `294935CE-...`). Plain LPWStr device IDs, classic COM. See `IPolicyConfigVista.cs`.
+The COM factory is **created once** and cached in `AudioPolicyService` (re-activating per call freezes the UI thread). Per-app `Set` is preceded by `Get` and skipped if the persisted value matches, avoiding an audio glitch.
 
-The COM factory is **created once** and cached in `AudioPolicyService` - re-activating per call is slow enough to make the periodic timer freeze the UI thread. Per-app `Set` is preceded by `Get` and skipped if the persisted value already matches the target, which avoids the brief audio glitch from a redundant `SetPersistedDefaultAudioEndpoint`.
-
-`RoutingApplier` keeps a single dedupe set `_appliedSessionKeys` (per `pid|rule|endpoint|flow`). On a rule change, `OnRulesChanged` re-applies with `force: true`, which clears the set. Default-device dedupe is *not* cached: the Get-before-Set check inside `ApplyDefaultRole` short-circuits if the OS already has our target. `OnDefaultsChanged` therefore just calls `ApplyAllInternalAsync(force: false, skipIfBusy: true)` and lets that check do the work. The 10-second timer is a safety net (also `skipIfBusy: true`).
+`RoutingApplier` keeps a dedupe set `_appliedSessionKeys` (per `pid|rule|endpoint|flow`). `OnRulesChanged` re-applies with `force: true` (clears the set). Default-device dedupe is not cached: the Get-before-Set check in `ApplyDefaultRole` short-circuits if the OS already matches, so `OnDefaultsChanged` just calls `ApplyAllInternalAsync(force: false, skipIfBusy: true)`. The 10s timer is a safety net (also `skipIfBusy: true`).
 
 ## Rule schema
 
-A `RoutingRule` has a name, an enabled bit, a list of **conditions** (AND-ed), and two action lists: **`Actions`** (the main branch) and **`ElseActions`** (the "otherwise" branch). `ConditionsMet` selects the live branch via `ActiveActions(met)` - the single branch-selection point shared by the matcher, resolver, applier, and evaluator. With no conditions a rule is always "met" so only the main branch fires.
+A `RoutingRule` has a name, enabled bit, list of AND-ed **conditions**, and two action lists: **`Actions`** (main branch) and **`ElseActions`** (otherwise). `ConditionsMet` selects the live branch via `ActiveActions(met)` (shared by matcher, resolver, applier, evaluator). No conditions = always met, so only the main branch fires.
 
-**Conditions** - one `Kind` plus a `Negate` polarity flag (so present/missing and running/not-running are one row type with a toggle, not doubled enum values):
+**Conditions** - one `Kind` plus a `Negate` polarity flag:
 
-| `ConditionKind` | `Negate=false` / `Negate=true` | Fields |
+| `ConditionKind` | `Negate=false` / `true` | Fields |
 |---|---|---|
-| `Device` | device present / missing | `DevicePattern`, `Flow` (Any/Render/Capture) |
-| `DefaultDevice` | is / is not the current system default | `DevicePattern`, `Flow` |
+| `Device` | present / missing | `DevicePattern`, `Flow` (Any/Render/Capture) |
+| `DefaultDevice` | is / is not system default | `DevicePattern`, `Flow` |
 | `Application` | running / not running | `AppPattern` |
 
-**Actions** - one `Kind` plus orthogonal mode fields. Binary variants that used to be separate enum values collapse into a mode field, so the editor shows one action with an inline toggle:
+**Actions** - one `Kind` plus mode fields:
 
-| `ActionKind` | Mode field | Required fields | Behaviour |
+| `ActionKind` | Mode field | Required | Behaviour |
 |---|---|---|---|
-| `ApplicationDevice` | `Flow` (Output=Render / Input=Capture) | `AppPattern`, `DevicePattern` | Pin matching processes' per-app endpoint |
-| `DefaultDevice` | `Flow`; `SetsDefault` (Console+Multimedia) / `SetsCommunications` | `DevicePattern`, ≥1 role | Set the system default endpoint |
-| `WaveLinkMix` | `Membership` (Include / Exclude / Exclusive) | `MixPattern`, `DevicePattern` | Add/remove the device to/from a Wave Link mix; Exclusive strips non-matching outputs |
+| `ApplicationDevice` | `Flow` (Output=Render/Input=Capture) | `AppPattern`, `DevicePattern` | Pin matching processes' per-app endpoint |
+| `DefaultDevice` | `Flow`; `SetsDefault` (Console+Multimedia)/`SetsCommunications` | `DevicePattern`, ≥1 role | Set system default endpoint |
+| `WaveLinkMix` | `Membership` (Include/Exclude/Exclusive) | `MixPattern`, `DevicePattern` | Add/remove device to a Wave Link mix; Exclusive strips non-matching outputs |
 | `DeviceVolume` | - | `DevicePattern`, `Volume` 0-1 | Pin a device's volume |
-| `DeviceMute` | `Muted` (true=mute / false=unmute) | `DevicePattern` | Set a device's mute state |
-| `RenameDevice` | - | `DevicePattern`, `NewName` | Parked: needs an elevated registry write, hidden from the picker |
+| `DeviceMute` | `Muted` | `DevicePattern` | Set mute state |
+| `RenameDevice` | - | `DevicePattern`, `NewName` | Parked: needs elevated registry write, hidden from picker |
 
-Every action also carries **`Pinned`** (default true). A **pinned** action is continuously reconciled - external drift (volume flyout, default-device switch, Wave Link move) is reverted to the target. A **one-shot** action (`Pinned=false`) fires only on its rule's *activation edge* - the moment its branch becomes active (conditions flip, rule edit, or startup) - and is then left alone so the user can override it. `RoutingApplier.ComputeActivationEdges` compares each rule's current `ConditionsMet` against the previous cycle; an apply pass enacts an action when `Pinned || edge`. Reconcile passes (external-change / periodic) carry no edges, so they enforce pinned only. The Devices page lock + reconcile honour `Pinned` too (`DeviceRuleResolver` returns it), so a one-shot never locks a slider.
+Every action carries **`Pinned`** (default true). A **pinned** action is continuously reconciled (external drift is reverted). A **one-shot** (`Pinned=false`) fires only on its rule's *activation edge* (conditions flip, edit, or startup), then is left alone. `RoutingApplier.ComputeActivationEdges` compares current `ConditionsMet` against the previous cycle; an apply pass enacts when `Pinned || edge`. Reconcile passes carry no edges (pinned only). `DeviceRuleResolver` returns `Pinned`, so a one-shot never locks a slider.
 
-`AppPattern` is tested against **both** the process name and the full executable path; either match counts. Path is resolved via `QueryFullProcessImageName` (`PROCESS_QUERY_LIMITED_INFORMATION`), which works for almost all processes including anti-cheat-protected games. `Process.MainModule.FileName` does **not** work for those - don't reintroduce it.
+`AppPattern` is tested against **both** process name and full exe path; either matches. Path comes from `QueryFullProcessImageName` (`PROCESS_QUERY_LIMITED_INFORMATION`), which works on anti-cheat games. **Don't reintroduce `Process.MainModule.FileName`** (blocks on protected processes).
 
-Rules apply in **list order** - top of the list wins. There is no priority field; reorder the list to change precedence. On the Rules page, conditions and actions are also drag-reorderable (and draggable between the Actions/Otherwise branches and onto other rules); a drag drop commits immediately, unlike field edits which buffer until Save.
+Rules apply in **list order** - top wins, no priority field. On the Rules page, conditions and actions are drag-reorderable (between branches and onto other rules); a drag-drop commits immediately, unlike field edits which buffer until Save.
 
 ## UI architecture
 
-- `Program.Main` (custom, `DISABLE_XAML_GENERATED_MAIN`) handles single-instance via `Microsoft.Windows.AppLifecycle.AppInstance.FindOrRegisterForKey("Earmark.SingleInstance")`. A second launch redirects activation to the running process, which calls `App.RestoreFromBackground` -> `IWindowChromeManager.RestoreWindow`.
-- `App.OnLaunched` builds the generic host, loads settings + rules, starts the routing applier, attaches `WindowChromeManager` to `MainWindow`, then activates (or hides to tray if "Launch to tray" is on).
-- DI uses `Microsoft.Extensions.Hosting`. Pages and view-models are registered in `HostBuilderExtensions.ConfigureEarmark`.
-- Pages live in `src/Earmark.App/Views/` (namespace `Earmark.App.Views`): `HomePage` (the "Devices" nav item, `Tag="Home"` - per-device cards with volume/meter and a rule-summary chip), `RulesPage` (inline editor - **no dialog**, click a rule to expand and edit, auto-saves 500ms after last keystroke), `SessionsPage`, `SettingsPage`.
-- `RuleRow` is the per-rule view-model. It owns its own debounced `SaveAsync`. When the underlying rules list changes, `RulesViewModel.OnRulesChanged` calls `SyncFromRule` on each existing row in place (preserving expanded state) when the order is unchanged; only on add/delete/reorder does it rebuild `Items`.
-- Tray: `H.NotifyIcon.WinUI`. `WindowChromeManager` subclasses the window with `SetWindowSubclass` to intercept `WM_SYSCOMMAND/SC_MINIMIZE` for "minimize to tray", and handles `Closed` for "close to tray".
+- `Program.Main` (custom, `DISABLE_XAML_GENERATED_MAIN`) handles single-instance via `AppInstance.FindOrRegisterForKey("Earmark.SingleInstance")`. A second launch redirects activation, calling `App.RestoreFromBackground` -> `IWindowChromeManager.RestoreWindow`.
+- `App.OnLaunched` builds the generic host, loads settings + rules, starts the applier, attaches `WindowChromeManager`, then activates (or hides to tray).
+- DI: `Microsoft.Extensions.Hosting`. Pages/VMs registered in `HostBuilderExtensions.ConfigureEarmark`.
+- Pages in `src/Earmark.App/Views/`: `HomePage` (the "Devices" nav item, `Tag="Home"`), `RulesPage` (inline editor, no dialog, auto-saves 500ms after last keystroke), `SessionsPage`, `SettingsPage`.
+- `RuleRow` is the per-rule VM with its own debounced `SaveAsync`. On rules-list change, `RulesViewModel.OnRulesChanged` calls `SyncFromRule` in place when order is unchanged; only add/delete/reorder rebuilds `Items`.
+- Tray: `H.NotifyIcon.WinUI`. `WindowChromeManager` subclasses the window (`SetWindowSubclass`) to intercept `WM_SYSCOMMAND/SC_MINIMIZE` (minimize to tray) and `Closed` (close to tray).
 
 ## Components and custom controls
 
-Reach for UI building blocks in this order, and don't skip a tier without reason:
+Reach for UI building blocks in order: (1) WinUI 3 native control, (2) existing control in `src/Earmark.App/Controls/`, (3) new custom component. New ones go in `Controls/` (namespace `Earmark.App.Controls`), driven by dependency properties, shared not duplicated.
 
-1. **WinUI 3 native control first.** Use the built-in control if it does the job. Note its limits before rejecting it (e.g. `Expander` can't stretch its header content to fill width - that's why `ExpanderPill` exists).
-2. **Existing custom component second.** If a control in `src/Earmark.App/Controls/` already covers it, reuse it. Don't reinvent or inline a one-off copy.
-3. **New custom component last.** Only when neither of the above fits.
-
-When you do build one, make it a **reusable control**, not page-local markup: put it in `src/Earmark.App/Controls/` (namespace `Earmark.App.Controls`, referenced from XAML via `xmlns:controls="using:Earmark.App.Controls"`) and drive it through dependency properties so every page configures it the same way. When two pages need the same affordance, share one component - don't duplicate the XAML and let the copies drift.
-
-Current shared controls:
-- `ExpanderPill` - rounded pill with left content + a full-height chevron (grey box) on the right that toggles `IsExpanded`. Used by the Devices first-rule chip and the Rules row header so both expanders match. Key knobs: `PillBackground` (grey chip on Devices; `Transparent` on Rules so the rule's own card is the surface), `ChevronCornerRadius` (rounds the chevron's right corners to the container radius - 4 for the chip, 8 for the card - so the chevron sits flush to the edge), `PlainChevronWhenExpanded` (Rules: drop the grey box to a plain glyph while expanded so the open editor isn't cluttered; Devices leaves it on since its chip never grows). Toggle is driven by `Tapped` (not a nested `Button.Click`, which swallows the first tap inside a `ListView` item). `ToggleOnBodyTap=false` leaves the body free for its own click (Devices navigates; Rules toggles on the whole pill). Rules dims disabled rows by fading the card *content*, not the card surface - fading the surface lets the `ListViewItem`'s own chrome show through as a nested box.
-- `WrapByRowLayout` - virtualising wrap layout that sizes each row to its own tallest card, so one expanded card grows only its row.
+- `ExpanderPill` - rounded pill with left content + full-height chevron toggling `IsExpanded`. Used by the Devices first-rule chip and Rules row header. Knobs: `PillBackground`, `ChevronCornerRadius`, `PlainChevronWhenExpanded`, `ToggleOnBodyTap`. Toggle via `Tapped` (not nested `Button.Click`, which swallows the first tap in a `ListView`). Rules dims disabled rows by fading card *content*, not surface.
+- `WrapByRowLayout` - virtualising wrap layout sizing each row to its tallest card.
 
 ## Design language (Fluent 2)
 
-The UI follows current [Fluent 2](https://fluent2.microsoft.design) standards. Benchmark against first-party Windows apps (Settings): it should read as native, not bespoke.
+Follows [Fluent 2](https://fluent2.microsoft.design); benchmark against Windows Settings.
 
-- **Spacing:** 4px grid via the `Spacing*` `x:Double` resources in `App.xaml` (`SpacingXXSmall`=2 ... `SpacingXXLarge`=32). Prefer these over ad-hoc numbers and keep values on the grid (nudge stray 10/14 to 8/12/16).
-- **Corner radii:** `{ThemeResource ControlCornerRadius}` (4) for inset controls/chips, `{StaticResource CardCornerRadius}` (8) for cards/tiles/containers. No one-off radii (the old stray `10`s were removed).
-- **Theme:** `AppSettings.Theme` (System/Light/Dark) drives `RootGrid.RequestedTheme` in `MainWindow`, the caption-button colours, and the backdrop tint. Theme-dependent brushes MUST be `{ThemeResource}`: a brush resolved in code (`Application.Current.Resources[key]`) snapshots one theme and renders the wrong variant after a switch. Absolute brand colours (Wave Link channel accents, the white mix tile) are deliberately theme-independent.
-- **Backdrop:** `AppSettings.Backdrop` (`BackdropMode`: Mica (default) / Acrylic / Solid) picks the window material. `MainWindow.ApplyBackdrop` attaches a `MicaController` (`BaseAlt`) or `DesktopAcrylicController` (not `<Window.SystemBackdrop>`) **so the tint follows the Theme setting, not just the OS**, and re-applies only when the material changes. Solid (or any material the OS can't draw) attaches no controller and shows the opaque `SolidBackdrop` border (`SolidBackgroundFillColorBaseBrush`, set in XAML so it re-resolves on a theme switch).
-- **Content width:** content pages (Devices/Rules/Sessions) stretch full-width; Settings uses a ~720 column. A `ContentMaxWidth` token exists if a page ever needs capping, but don't cap the list/grid pages: they're meant to stretch.
+- **Spacing:** 4px grid via `Spacing*` `x:Double` resources in `App.xaml` (`SpacingXXSmall`=2 ... `SpacingXXLarge`=32). No ad-hoc numbers.
+- **Corner radii:** `{ThemeResource ControlCornerRadius}` (4) for inset controls/chips, `{StaticResource CardCornerRadius}` (8) for cards. No one-off radii.
+- **Theme:** `AppSettings.Theme` drives `RootGrid.RequestedTheme`, caption colours, backdrop tint. Theme-dependent brushes MUST be `{ThemeResource}` (code-resolved brushes snapshot one theme). Absolute brand colours (Wave Link accents, white mix tile) are deliberately theme-independent.
+- **Backdrop:** `AppSettings.Backdrop` (Mica default / Acrylic / Solid) picks material. `MainWindow.ApplyBackdrop` attaches a `MicaController` (`BaseAlt`) or `DesktopAcrylicController` so tint follows the Theme setting. Solid shows the opaque `SolidBackdrop` border.
+- **Content width:** Devices/Rules/Sessions stretch full-width; Settings uses a ~720 column. Don't cap the list/grid pages.
 
-## Reactivity preferences
+## Reactivity
 
-- **Event-driven first, polling as fallback.** When the OS exposes a change notification (e.g. `IMMNotificationClient`, `AudioEndpointVolume.OnVolumeNotification`, `IAudioSessionEvents`), prefer subscribing to that and reconciling on the event. Polling is acceptable as a safety net (drift recovery, restart correctness), but the primary path for "external state changed -> reconcile our state" must not depend on a tick interval. New code that adds reactivity should plumb the event path first and only fall back to polling when the OS has no usable notification.
+**Event-driven first, polling as fallback.** When the OS exposes a change notification (`IMMNotificationClient`, `AudioEndpointVolume.OnVolumeNotification`, `IAudioSessionEvents`), subscribe and reconcile on the event. Polling is only a safety net (drift recovery, restart correctness).
 
 ## Common gotchas
 
-- **Don't use `[InterfaceType(InterfaceIsIInspectable)]`** in COM interop. Modern .NET doesn't marshal it. Use `IUnknown` with reserved vtable slots.
-- **Don't use `[MarshalAs(UnmanagedType.HString)]`**. Same reason. Use `IntPtr` + the `HString` helper.
-- **Don't reintroduce `Process.MainModule.FileName`**. It blocks on protected processes (games with anti-cheat). The replacement is `ProcessPath.TryGet` in `Earmark.Audio.Interop`.
-- **Two-way x:Bind on `ComboBox.SelectedItem` against a value-type property** (e.g. an enum) NREs during item-template recycling because the generated code casts null to the value type. Use `Mode=OneWay` plus a `SelectionChanged` event handler that updates the source.
-- **`UnhandledType.UnhandledExceptionEventArgs` is ambiguous** between `Microsoft.UI.Xaml` and `System` namespaces. Always fully-qualify: `Microsoft.UI.Xaml.UnhandledExceptionEventArgs`.
-- **`Padding`/`Margin` want a `Thickness`, not a `double`.** The `Spacing*` resources are `x:Double` (sized for `StackPanel.Spacing` and `Grid.ColumnSpacing`/`RowSpacing`, which are doubles). Binding one to a `Thickness` property throws at page load (`Failed to assign to property ... Border.Padding`) - it is NOT caught at build time. For padding/margins use a `Thickness` resource (`PagePadding`, `SectionPadding`) or a literal (`Padding="16"`). Same trap with an `x:Double PagePadding` bound to `Grid.Padding`.
-- **Editor disposable analyzer rules**: `CA1001`, `CA1816`, `CA1848`, `CA1873` etc are silenced in `.editorconfig`. Don't add them back unless you also fix the call sites.
-- **`Microsoft.Win32.Registry`**: don't add as a separate package. Already provided by the windows TFM (`net10.0-windows10.0.26100.0`); adding the package triggers `NU1510`.
-- **App-notification layout workaround (WinAppSDK 2.x self-contained, [microsoft/WindowsAppSDK#6071](https://github.com/microsoft/WindowsAppSDK/issues/6071))**: an unpackaged self-contained 2.x build omits `Microsoft.WindowsAppRuntime.Insights.Resource.dll`, so `AppNotificationManager.Register` throws `0x8007007E` (MOD_NOT_FOUND) even though `IsSupported()` returns `true`. The `_EarmarkLayoutInsightsResource` target in [Earmark.App.csproj](src/Earmark.App/Earmark.App.csproj) extracts that one DLL from the runtime MSIX into build + publish output; the explicit `Microsoft.WindowsAppSDK.Runtime` PackageReference exists only to expose its package path (`GeneratePathProperty`), not as a fix in itself. **Recheck #6071 on every `Microsoft.WindowsAppSDK` bump**: delete `Microsoft.WindowsAppRuntime.Insights.Resource.dll` from a self-contained build output and relaunch - if `Register()` now succeeds (log shows `AppNotificationManager registered`, no `0x8007007E`), the SDK lays it out itself, so drop the target and the explicit Runtime reference (props + csproj).
+- **Don't use `[InterfaceType(InterfaceIsIInspectable)]`** - modern .NET won't marshal it. Use `IUnknown` with reserved vtable slots.
+- **Don't use `[MarshalAs(UnmanagedType.HString)]`** - same reason. Use `IntPtr` + the `HString` helper.
+- **Don't reintroduce `Process.MainModule.FileName`** - blocks on anti-cheat games. Use `ProcessPath.TryGet`.
+- **Two-way x:Bind on `ComboBox.SelectedItem` against a value-type property** NREs during template recycling. Use `Mode=OneWay` + a `SelectionChanged` handler.
+- **`UnhandledExceptionEventArgs` is ambiguous** - always fully-qualify `Microsoft.UI.Xaml.UnhandledExceptionEventArgs`.
+- **`Padding`/`Margin` want a `Thickness`, not a `double`.** `Spacing*` are `x:Double`; binding one to a `Thickness` throws at page load (not caught at build). Use a `Thickness` resource (`PagePadding`, `SectionPadding`) or literal.
+- **Editor disposable analyzer rules** (`CA1001`, `CA1816`, `CA1848`, `CA1873`) are silenced in `.editorconfig`. Don't re-add without fixing call sites.
+- **`Microsoft.Win32.Registry`** - already in the windows TFM; adding the package triggers `NU1510`.
+- **App-notification layout workaround** ([WindowsAppSDK#6071](https://github.com/microsoft/WindowsAppSDK/issues/6071)): unpackaged self-contained 2.x omits `Microsoft.WindowsAppRuntime.Insights.Resource.dll`, so `AppNotificationManager.Register` throws `0x8007007E` even though `IsSupported()` is true. The `_EarmarkLayoutInsightsResource` target in `Earmark.App.csproj` extracts that DLL from the runtime MSIX. **Recheck #6071 on every `Microsoft.WindowsAppSDK` bump**: delete the DLL from a self-contained build, relaunch; if `Register()` succeeds, drop the target and the explicit Runtime reference.
 
 ## Version, About, and the update check
 
-- The app version is the release-please-managed `version.txt` -> `<Version>` ([Directory.Build.props](Directory.Build.props)), read at runtime by [`Services/AppInfo`](src/Earmark.App/Services/AppInfo.cs). Don't hardcode a version string in the UI.
-- `Directory.Build.props` stamps `AssemblyMetadata("BuildChannel")` plus the git commit (via `SourceRevisionId`) onto **Earmark.App only**. Channel is `Dev` locally, `Release` under GitHub Actions, and `Prerelease` when CI passes `-p:EarmarkBuildChannel=Prerelease` (the release-please PR's MSI publish, which also passes `-p:InformationalVersion=<ver>-pre.<run>` so the build carries its full pre-release identity). `AppInfo.DisplayVersion` turns this into the `(Dev)` / `(Pre-release)` marker in Settings > About.
-- [`IUpdateService`](src/Earmark.App/Services/IUpdateService.cs) reads the releases list (not `releases/latest`) and is **channel-aware**: a `Release`/`Dev` build compares only against stable releases, while a `Prerelease` build tracks the newest release of any kind (a newer stable still wins, by the `SemVer` precedence in that file). It drives the title-bar "Update available" pill and the Settings > About controls, and is **gated to unpackaged builds**: `AppInfo.IsPackaged` (a `GetCurrentPackageFullName` probe) is true for the MSIX/Store build, where the whole update UX is hidden (the Store handles updates) and no network call is made. For `Dev` builds the auto-check is skipped entirely and the shared `CheckForUpdates` setting is never read or written (a dev build shares settings.json with any side-by-side install); the manual "Check now" button still works. Other channels' auto-check honours the setting.
-- The title-bar pill is a **sibling of `AppTitleBarDragRegion`, not a child** - the `SetTitleBar` element swallows pointer input (same reason the pane toggle is a sibling). Its right margin is set from `AppWindow.TitleBar.RightInset` so it clears the caption buttons.
-- Pre-release builds: `build.yaml`'s `pre-release` job runs on the `release-please--branches--main` PR, publishing `v<ver>-pre.<run>` GitHub prereleases (MSIX + MSI) and pruning to the latest 3. These never affect the in-app update check.
+- App version is release-please-managed `version.txt` -> `<Version>` (`Directory.Build.props`), read at runtime by `Services/AppInfo`. Don't hardcode a version string.
+- `Directory.Build.props` stamps `AssemblyMetadata("BuildChannel")` + git commit onto **Earmark.App only**. Channel: `Dev` locally, `Release` under CI, `Prerelease` when CI passes `-p:EarmarkBuildChannel=Prerelease`. `AppInfo.DisplayVersion` produces the `(Dev)`/`(Pre-release)` marker.
+- `IUpdateService` reads the releases list (not `releases/latest`) and is **channel-aware** and **gated to unpackaged builds** (`AppInfo.IsPackaged` hides the UX for MSIX/Store). `Dev` skips auto-check and never touches the `CheckForUpdates` setting; the manual "Check now" still works.
+- The title-bar pill is a **sibling of `AppTitleBarDragRegion`, not a child** (`SetTitleBar` swallows pointer input). Right margin set from `AppWindow.TitleBar.RightInset`.
 
-## Conventional commits & release-please hygiene
+## Conventional commits & release-please
 
-All commits and PR titles MUST follow the [Conventional Commits](https://www.conventionalcommits.org/) specification, because release-please reads the history off `main` to compute the next version and generate the changelog. This repo is **not** associated with an Azure DevOps project, so commits and PRs DO NOT require an `AB#NNNNN` work-item suffix (in contrast to Nintex repos).
+All commits and PR titles MUST follow [Conventional Commits](https://www.conventionalcommits.org/); release-please reads `main` history to compute versions and the changelog. This repo is **not** an ADO project, so **no `AB#NNNNN` suffix** (unlike Nintex repos).
 
-### Required format
+Format: `<type>[optional scope]: <description>`, first line under 72 chars, imperative mood, no trailing period.
 
-```
-<type>[optional scope]: <description>
+| Type | Bump |    | Type | Bump |
+|---|---|---|---|---|
+| `feat` | Minor | | `docs` `style` `refactor` `test` `chore` `build` `ci` | None |
+| `fix` `perf` | Patch | | `revert` | Depends |
 
-[optional body]
+Breaking change (MAJOR): `!` after type (`feat!: ...`) or a `BREAKING CHANGE:` footer.
 
-[optional footer(s)]
-```
+**No emoji / no gitmoji** - they break the conventional-commit regex (`pr-title-check.yaml`), so such commits produce no changelog entry or bump. This overrides the gitmoji preference in personal global instructions for this repo.
 
-### Commit types
+### Multi-change PRs (squash merge)
 
-| Type | Purpose | Version bump |
-|------|---------|-------------|
-| `feat` | New feature | Minor |
-| `fix` | Bug fix | Patch |
-| `perf` | Performance improvement | Patch |
-| `revert` | Revert a previous commit | Depends |
-| `docs` | Documentation only | None |
-| `style` | Formatting, no logic change | None |
-| `refactor` | Code change with no feature/fix | None |
-| `test` | Add/update tests | None |
-| `chore` | Maintenance, dependency bumps, tooling | None |
-| `build` | Build system / external deps | None |
-| `ci` | CI/CD pipeline changes | None |
-
-### Breaking changes (MAJOR bump)
-
-Either form works:
-
-- Add `!` after the type: `feat!: rename rule schema fields`
-- Or include a `BREAKING CHANGE:` footer in the body
-
-### Scope (optional)
-
-Use a parenthesised scope to narrow the area: `feat(rules): add device-present condition`, `fix(audio): release factory on shutdown`.
-
-### Examples
-
-Good:
-
-```
-feat: add device-present and device-missing conditions
-fix(routing): clear dedupe cache on rule change
-chore: bump CommunityToolkit.WinUI to 8.2.250402
-docs: document rule shadowing in CONTRIBUTING.md
-ci: enforce conventional-commit PR titles
-```
-
-Bad (don't use):
-
-```
-🐛 fix bug
-Fixed the lock issue
-WIP
-Update
-```
-
-### Notes
-
-- First line under 72 characters
-- Imperative mood ("add", not "adds" or "added")
-- No trailing period
-- **No emoji / no gitmoji.** They break the conventional-commit regex that release-please and `pr-title-check.yaml` use, so commits with a leading emoji do not produce changelog entries or version bumps. This overrides the gitmoji preference in the personal global instructions for this repo specifically.
-
-### Multi-change PRs (PR description format)
-
-This repo uses **squash merges**, so the PR description body becomes the commit message that release-please parses. To produce multiple changelog entries from a single PR, append additional conventional-commit footers at the **bottom** of the PR description body, **each separated by a blank line**:
+The PR description body becomes the squash commit message release-please parses. To produce multiple changelog entries, append extra bare conventional-commit footers at the **bottom** of the description, **each separated by a blank line**:
 
 ```
 feat: add per-app input routing
 
-Optional body text explaining the PR.
+Optional body text.
 
 ---
 
-<!-- release-please footers: one bare conventional-commit line per
-extra change, separated by blank lines. -->
-
 fix(audio): release COM factory on shutdown
 
-test: cover the new RuleEvaluator shadow logic
+test: cover new RuleEvaluator shadow logic
 
 BREAKING-CHANGE: rename ApplicationOutput field "Priority" to "Order"
 ```
 
-- **Blank line between every footer is required.** release-please's parser groups consecutive non-blank lines into a single paragraph and only treats the first conventional-commit line in each paragraph as an entry. Stacked footers without blank lines produce exactly one extra changelog line (the first), and the rest are silently dropped (this is what bit PR #32).
-- Soft-wrapping the description text *within* a single footer is fine (e.g. GitHub auto-wraps at ~80 chars when you save the PR description). The parser walks the whole paragraph for the conventional-commit prefix - just don't introduce a blank line mid-footer.
-- Each footer must follow the same `type(scope): description` format.
-- `BREAKING-CHANGE:` (or `BREAKING CHANGE:`) triggers a MAJOR bump. Place it as its own blank-line-separated footer.
-- Additional entries must appear **after** any free-form body text, not between paragraphs.
-- Every type produces a changelog entry (`release-please-config.json` sets `hidden: false` for all sections). Only `feat`, `fix`, `perf`, `revert`, and any footer with a breaking-change marker trigger a version bump; `chore` / `docs` / `style` / `refactor` / `test` / `build` / `ci` add a line under their section without bumping the version.
-- Each footer produces its own changelog line.
+- **Blank line between every footer is required** - the parser groups consecutive non-blank lines into one paragraph and keeps only the first conventional-commit line (this bit PR #32). Soft-wrapping within a footer is fine.
+- Footers go **after** any free-form body text.
+- Every type produces a changelog line; only `feat`/`fix`/`perf`/`revert`/breaking trigger a bump.
 
-### Repo CI plumbing
+### CI plumbing
 
-- [pr-title-check.yaml](.github/workflows/pr-title-check.yaml) validates the PR title against the conventional-commits regex. This workflow is required for release-please to work cleanly. The regex deliberately does NOT require an `AB#NNNNN` suffix.
-- [release-please.yaml](.github/workflows/release-please.yaml) runs on push to `main` and needs two repo settings:
-  - Secret `RELEASE_PLEASE_APP_PRIVATE_KEY` (private key for the GitHub App that owns the release)
-  - Variable `RELEASE_PLEASE_APP_ID` (the GitHub App's numeric App ID)
-- [version.txt](version.txt) is the single source of truth for `<Version>` (read by [Directory.Build.props](Directory.Build.props) via `System.IO.File.ReadAllText`). release-please bumps it.
-- Branch model: feature work on `dev`, PR to `main`, release-please drafts a release PR off `main`. Don't push directly to `main`.
+- `pr-title-check.yaml` validates the PR title (no `AB#` required); required for release-please.
+- `release-please.yaml` runs on push to `main`; needs secret `RELEASE_PLEASE_APP_PRIVATE_KEY` and variable `RELEASE_PLEASE_APP_ID`.
+- Branch model: feature work on a branch, PR to `main`, release-please drafts the release PR. Don't push directly to `main`.
 
 ## Verifying behaviour after a change
 
-1. Rebuild via the pattern above, launch the app.
-2. Read the latest log. The interesting lines:
-   - `ApplyAll: N sessions, M rules` (one per cycle)
-   - `Applied rule X to <Process> (pid <P>, <Flow>) -> <Endpoint>` (a rule applied)
-   - `Skip Set ... already pinned to target` (Get-before-Set short-circuited a redundant write)
-   - `Skip re-apply for ... already pinned` (dedupe cache hit)
-   - `Applied default-device rule -> Render = <Endpoint>` (a Default* rule fired)
-3. **If you don't see Skip Set / Skip re-apply lines after the first cycle**, the dedupe is broken - the periodic timer will glitch audio every 10s.
-4. **For UI changes**, the running app must be killed before rebuilding. Don't try to be clever with hot-reload or partial copies.
+1. Rebuild + launch via the pattern above.
+2. Read the latest log. Key lines: `ApplyAll: N sessions, M rules` (per cycle), `Applied rule X to <Process> ...` (rule applied), `Skip Set ... already pinned to target` (Get-before-Set short-circuit), `Skip re-apply for ... already pinned` (dedupe hit), `Applied default-device rule -> ...`.
+3. **If no Skip Set / Skip re-apply lines appear after the first cycle**, dedupe is broken - the timer will glitch audio every 10s.
+4. **For UI changes**, kill before rebuilding. No hot-reload shortcuts.
