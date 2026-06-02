@@ -1780,7 +1780,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     {
         if (!_quickGroupCards.TryGetValue(key, out var group))
         {
-            group = new DeviceGroupCard($"quick-{key}", title, null, hideEmptyTitleBand, insetContent: true);
+            group = new DeviceGroupCard($"quick-{key}", title, null, hideEmptyTitleBand);
             _quickGroupCards[key] = group;
         }
 

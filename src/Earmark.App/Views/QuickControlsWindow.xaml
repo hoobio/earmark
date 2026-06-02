@@ -20,7 +20,7 @@
                     Visibility="Collapsed" />
 
             <ScrollViewer x:Name="Scroller"
-                          VerticalScrollMode="Disabled"
+                          Margin="12"
                           VerticalScrollBarVisibility="Auto"
                           HorizontalScrollBarVisibility="Disabled"
                           IsScrollInertiaEnabled="False"
