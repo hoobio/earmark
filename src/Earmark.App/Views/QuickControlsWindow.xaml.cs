@@ -1,6 +1,5 @@
 using System.Runtime.InteropServices;
 
-using Earmark.App.Controls;
 using Earmark.App.Settings;
 using Earmark.App.ViewModels;
 
@@ -11,9 +10,11 @@ using Microsoft.UI;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 
 using Windows.Graphics;
+using Windows.System;
 
 using WinRT;
 using WinRT.Interop;
@@ -27,34 +28,24 @@ public sealed partial class QuickControlsWindow : Window
     private const int OverlayMargin = 8;
     private const int ScrollOverflowTolerance = 16;
     private const int OverlayWidth = OverlayContentWidth + (OverlayPadding * 2);
-    private static readonly HashSet<string> QuickControlsHiddenElementNames = new(StringComparer.Ordinal)
-    {
-        "RulesDivider",
-        "RulesSection",
-        "NoRulesMessage",
-    };
     private readonly ILogger<QuickControlsWindow> _logger;
     private readonly ISettingsService _settings;
     private readonly nint _hwnd;
-    private readonly Dictionary<FrameworkElement, long> _hiddenElementCallbacks = new();
     private ISystemBackdropControllerWithTargets? _backdropController;
     private readonly SystemBackdropConfiguration _backdropConfig = new() { IsInputActive = true };
     private BackdropMode? _appliedBackdrop;
 
-    public QuickControlsWindow(HomeViewModel viewModel, HomePage homePage, ISettingsService settings, ILogger<QuickControlsWindow> logger)
+    public QuickControlsWindow(HomeViewModel viewModel, ISettingsService settings, ILogger<QuickControlsWindow> logger)
     {
         ViewModel = viewModel;
         _settings = settings;
         _logger = logger;
         InitializeComponent();
         Root.DataContext = ViewModel;
-        var selector = (BlockTemplateSelector)Root.Resources["QuickBlockTemplateSelector"];
-        selector.CardTemplate = (DataTemplate)homePage.Resources["DeviceCardTemplate"];
-        selector.GroupTemplate = (DataTemplate)homePage.Resources["DeviceGroupCardTemplate"];
         _hwnd = WindowNative.GetWindowHandle(this);
-        ExtendsContentIntoTitleBar = true;
         SystemBackdrop = null;
         AppWindow.Title = "Quick Controls";
+        AddEscapeAccelerator();
         ApplySettings();
         ConfigureWindow();
         Hide();
@@ -69,6 +60,21 @@ public sealed partial class QuickControlsWindow : Window
     public nint Hwnd => _hwnd;
 
     public bool IsOpen { get; private set; }
+
+    /// <summary>Raised when the user presses Escape while a flyout panel has focus. The owning service
+    /// hides the whole stack.</summary>
+    public event EventHandler? DismissRequested;
+
+    private void AddEscapeAccelerator()
+    {
+        var escape = new KeyboardAccelerator { Key = VirtualKey.Escape };
+        escape.Invoked += (_, args) =>
+        {
+            args.Handled = true;
+            DismissRequested?.Invoke(this, EventArgs.Empty);
+        };
+        Root.KeyboardAccelerators.Add(escape);
+    }
 
     public int MeasureBlocksHeight(IReadOnlyList<object> blocks, RectInt32 workArea)
     {
@@ -86,24 +92,9 @@ public sealed partial class QuickControlsWindow : Window
         AppWindow.Move(new PointInt32(-40000, -40000));
 
         Root.UpdateLayout();
-        var collapsed = CollapseQuickControlsOnlyElements(Root);
-        Root.UpdateLayout();
         Repeater.Measure(new Windows.Foundation.Size(contentWidth, double.PositiveInfinity));
 
-        var desiredHeight = Math.Max(OverlayPadding * 2, (int)Math.Ceiling(Repeater.DesiredSize.Height) + (OverlayPadding * 2));
-        _logger.LogDebug(
-            "QuickControls window measure: hwnd={Hwnd} blocks={BlockCount} workArea=({X},{Y},{Width},{Height}) width={OverlayWidth} contentWidth={ContentWidth} desiredHeight={DesiredHeight} collapsedRuleElements={Collapsed}",
-            _hwnd,
-            blocks.Count,
-            workArea.X,
-            workArea.Y,
-            workArea.Width,
-            workArea.Height,
-            width,
-            contentWidth,
-            desiredHeight,
-            collapsed);
-        return desiredHeight;
+        return Math.Max(OverlayPadding * 2, (int)Math.Ceiling(Repeater.DesiredSize.Height) + (OverlayPadding * 2));
     }
 
     public int PrepareMeasuredBlocks(RectInt32 workArea, int bottom, int maxHeight, int desiredHeight)
@@ -119,7 +110,6 @@ public sealed partial class QuickControlsWindow : Window
             Math.Max(workArea.X + OverlayMargin, workArea.X + workArea.Width - width - OverlayMargin));
 
         ConfigureWindow();
-        var collapsedBeforeResize = CollapseQuickControlsOnlyElements(Root);
         var height = Math.Min(desiredHeight, boundedMaxHeight);
         Scroller.VerticalScrollBarVisibility = desiredHeight - boundedMaxHeight > ScrollOverflowTolerance
             ? ScrollBarVisibility.Auto
@@ -127,97 +117,21 @@ public sealed partial class QuickControlsWindow : Window
 
         AppWindow.Resize(new SizeInt32(width, height));
         AppWindow.Move(new PointInt32(left, Math.Clamp(boundedBottom - height, workTop, workBottom - height)));
-        var collapsedAfterResize = CollapseQuickControlsOnlyElements(Root);
-        DispatcherQueue.TryEnqueue(() => CollapseQuickControlsOnlyElements(Root));
         Root.UpdateLayout();
-        _logger.LogDebug(
-            "QuickControls window prepare: hwnd={Hwnd} workArea=({X},{Y},{Width},{Height}) requestedBottom={Bottom} boundedBottom={BoundedBottom} maxHeight={MaxHeight} boundedMaxHeight={BoundedMaxHeight} desiredHeight={DesiredHeight} actualHeight={Height} left={Left} top={Top} scrollbar={Scrollbar} collapsedBefore={CollapsedBefore} collapsedAfter={CollapsedAfter}",
-            _hwnd,
-            workArea.X,
-            workArea.Y,
-            workArea.Width,
-            workArea.Height,
-            bottom,
-            boundedBottom,
-            maxHeight,
-            boundedMaxHeight,
-            desiredHeight,
-            height,
-            left,
-            Math.Clamp(boundedBottom - height, workTop, workBottom - height),
-            Scroller.VerticalScrollBarVisibility,
-            collapsedBeforeResize,
-            collapsedAfterResize);
         return height;
-    }
-
-    private void OnRepeaterElementPrepared(ItemsRepeater sender, ItemsRepeaterElementPreparedEventArgs args)
-    {
-        var collapsed = CollapseQuickControlsOnlyElements(args.Element);
-        if (collapsed > 0)
-        {
-            _logger.LogDebug("QuickControls repeater prepared element: collapsedRuleElements={Collapsed}", collapsed);
-        }
-        DispatcherQueue.TryEnqueue(() => CollapseQuickControlsOnlyElements(args.Element));
-    }
-
-    private int CollapseQuickControlsOnlyElements(DependencyObject root)
-    {
-        var collapsed = 0;
-        var count = VisualTreeHelper.GetChildrenCount(root);
-        for (var i = 0; i < count; i++)
-        {
-            var child = VisualTreeHelper.GetChild(root, i);
-            if (child is FrameworkElement element && QuickControlsHiddenElementNames.Contains(element.Name))
-            {
-                HideQuickControlsOnlyElement(element);
-                collapsed++;
-            }
-
-            collapsed += CollapseQuickControlsOnlyElements(child);
-        }
-
-        return collapsed;
-    }
-
-    private void HideQuickControlsOnlyElement(FrameworkElement element)
-    {
-        if (!_hiddenElementCallbacks.ContainsKey(element))
-        {
-            var token = element.RegisterPropertyChangedCallback(UIElement.VisibilityProperty, (_, _) =>
-            {
-                if (element.Visibility != Visibility.Collapsed)
-                {
-                    element.Visibility = Visibility.Collapsed;
-                }
-            });
-            _hiddenElementCallbacks[element] = token;
-        }
-
-        if (element.Visibility != Visibility.Collapsed)
-        {
-            element.Visibility = Visibility.Collapsed;
-        }
     }
 
     public void ShowPrepared()
     {
         AppWindow.Show();
+        // Give the panel focus so the Escape accelerator has an active focus scope (the window has no
+        // title bar to take focus on its own). Pointer focus state avoids drawing the focus rectangle.
+        Root.Focus(FocusState.Pointer);
         IsOpen = true;
-        CollapseRulesAfterLayoutPasses();
-        _logger.LogDebug("QuickControls window show prepared: hwnd={Hwnd}", _hwnd);
-    }
-
-    private void CollapseRulesAfterLayoutPasses(int remainingPasses = 3)
-    {
-        CollapseQuickControlsOnlyElements(Root);
-        if (remainingPasses <= 0) return;
-        DispatcherQueue.TryEnqueue(() => CollapseRulesAfterLayoutPasses(remainingPasses - 1));
     }
 
     public void Hide()
     {
-        _logger.LogDebug("QuickControls window hide: hwnd={Hwnd} wasOpen={WasOpen}", _hwnd, IsOpen);
         AppWindow.Hide();
         Repeater.ItemsSource = null;
         IsOpen = false;

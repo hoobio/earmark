@@ -57,7 +57,6 @@ internal static class HostBuilderExtensions
         builder.Services.AddSingleton<StartupSettingsApplier>();
 
         builder.Services.AddSingleton<MainWindow>();
-        builder.Services.AddSingleton<QuickControlsWindow>();
         builder.Services.AddSingleton<ShellViewModel>();
         builder.Services.AddSingleton<HomeViewModel>();
         builder.Services.AddSingleton<RulesViewModel>();

@@ -25,7 +25,6 @@
 
             <converters:BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
             <converters:NullableToVisibilityConverter x:Key="NullableToVisibilityConverter" />
-            <converters:EnumToStringConverter x:Key="EnumToStringConverter" />
             <converters:ColorToBrushConverter x:Key="ColorToBrushConverter" />
             <converters:SatisfiedGlyphConverter x:Key="SatisfiedGlyphConverter" />
             <converters:SatisfiedBrushConverter x:Key="SatisfiedBrushConverter" />

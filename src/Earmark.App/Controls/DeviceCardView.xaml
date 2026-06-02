@@ -1,0 +1,654 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<UserControl
+    x:Class="Earmark.App.Controls.DeviceCardView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:vm="using:Earmark.App.ViewModels"
+    xmlns:controls="using:Earmark.App.Controls">
+
+    <UserControl.Resources>
+        <!-- Shared chip template - the always-visible "first rule" chip and the items inside the
+             additional-rules panel both use it so the two presentations stay identical. -->
+        <DataTemplate x:Key="RuleChipTemplate" x:DataType="vm:RuleSummary">
+            <Button Style="{StaticResource SubtleRuleChipButtonStyle}"
+                    Margin="0,2,0,0"
+                    Opacity="{x:Bind Opacity}"
+                    Click="OnRuleChipClicked"
+                    ToolTipService.ToolTip="Open in Rules">
+                <StackPanel Spacing="{StaticResource SpacingXXSmall}">
+                    <TextBlock Text="{x:Bind Name}"
+                               Style="{StaticResource BodyStrongTextBlockStyle}"
+                               TextTrimming="CharacterEllipsis"
+                               TextWrapping="NoWrap" />
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <TextBlock Text="{x:Bind StatusMessage}"
+                                   Style="{StaticResource CaptionTextBlockStyle}"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <TextBlock Text="·"
+                                   Style="{StaticResource CaptionTextBlockStyle}"
+                                   Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                   Visibility="{x:Bind HasMatchSummary}" />
+                        <TextBlock Text="{x:Bind MatchSummary}"
+                                   Style="{StaticResource CaptionTextBlockStyle}"
+                                   Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                   Visibility="{x:Bind HasMatchSummary}" />
+                    </StackPanel>
+                </StackPanel>
+            </Button>
+        </DataTemplate>
+    </UserControl.Resources>
+
+    <Grid>
+        <!-- Right-click anywhere on the card for show/hide, quick-pin, customise, and group actions. -->
+        <Grid.ContextFlyout>
+            <MenuFlyout>
+                <MenuFlyoutItem Text="{x:Bind Card.HideToggleTooltip, Mode=OneWay}"
+                                Click="OnDeviceVisibilityClicked"
+                                Tag="{x:Bind Card}">
+                    <MenuFlyoutItem.Icon>
+                        <FontIcon Glyph="{x:Bind Card.HideToggleGlyph, Mode=OneWay}" />
+                    </MenuFlyoutItem.Icon>
+                </MenuFlyoutItem>
+                <MenuFlyoutItem Text="{x:Bind Card.QuickPinToggleLabel, Mode=OneWay}"
+                                Command="{x:Bind Card.ToggleQuickPinCommand}"
+                                Visibility="{x:Bind Card.CanQuickPin, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <MenuFlyoutItem.Icon>
+                        <FontIcon Glyph="{x:Bind Card.QuickPinToggleGlyph, Mode=OneWay}" />
+                    </MenuFlyoutItem.Icon>
+                </MenuFlyoutItem>
+                <MenuFlyoutItem Text="Customise…"
+                                Click="OnCustomiseClicked"
+                                Tag="{x:Bind Card}">
+                    <MenuFlyoutItem.Icon>
+                        <FontIcon Glyph="&#xE790;" />
+                    </MenuFlyoutItem.Icon>
+                </MenuFlyoutItem>
+                <MenuFlyoutItem Text="Forget device"
+                                Click="OnForgetDeviceClicked"
+                                Tag="{x:Bind Card}"
+                                Visibility="{x:Bind Card.ShowDisconnectedBadge, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                ToolTipService.ToolTip="Stop remembering this disconnected device, clearing its saved order, group, and customisation. It returns as new if it reconnects.">
+                    <MenuFlyoutItem.Icon>
+                        <FontIcon Glyph="&#xE74D;" />
+                    </MenuFlyoutItem.Icon>
+                </MenuFlyoutItem>
+                <MenuFlyoutSeparator Visibility="{x:Bind Card.IsGroupMember, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                <MenuFlyoutItem Text="Ungroup device"
+                                Click="OnUngroupDeviceClicked"
+                                Tag="{x:Bind Card}"
+                                Visibility="{x:Bind Card.IsGroupMember, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <MenuFlyoutItem.Icon>
+                        <FontIcon Glyph="&#xF0B4;" />
+                    </MenuFlyoutItem.Icon>
+                </MenuFlyoutItem>
+                <MenuFlyoutSeparator Visibility="{x:Bind Card.IsGroupMember, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                <MenuFlyoutItem Text="Rename group"
+                                Click="OnRenameGroupClicked"
+                                Tag="{x:Bind Card}"
+                                Visibility="{x:Bind Card.IsGroupMember, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <MenuFlyoutItem.Icon>
+                        <FontIcon Glyph="&#xE8AC;" />
+                    </MenuFlyoutItem.Icon>
+                </MenuFlyoutItem>
+                <MenuFlyoutItem Text="Delete group"
+                                Click="OnUngroupAllClicked"
+                                Tag="{x:Bind Card}"
+                                Visibility="{x:Bind Card.IsGroupMember, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <MenuFlyoutItem.Resources>
+                        <SolidColorBrush x:Key="MenuFlyoutItemForeground" Color="{ThemeResource SystemFillColorCritical}" />
+                        <SolidColorBrush x:Key="MenuFlyoutItemForegroundPointerOver" Color="{ThemeResource SystemFillColorCritical}" />
+                        <SolidColorBrush x:Key="MenuFlyoutItemForegroundPressed" Color="{ThemeResource SystemFillColorCritical}" />
+                    </MenuFlyoutItem.Resources>
+                    <MenuFlyoutItem.Icon>
+                        <FontIcon Glyph="&#xE74D;" Foreground="{ThemeResource SystemFillColorCriticalBrush}" />
+                    </MenuFlyoutItem.Icon>
+                </MenuFlyoutItem>
+            </MenuFlyout>
+        </Grid.ContextFlyout>
+
+        <!-- Muted tint fills the whole card; shown only when muted. -->
+        <Border Background="{ThemeResource SystemFillColorCriticalBackgroundBrush}"
+                CornerRadius="{StaticResource CardCornerRadius}"
+                Visibility="{x:Bind Card.IsMuted, Mode=OneWay}" />
+        <StackPanel Spacing="{StaticResource SpacingMedium}" Margin="{StaticResource SectionPadding}">
+            <!-- Header: mute toggle (icon) + name + chips + (Bluetooth) connect/disconnect -->
+            <Grid ColumnSpacing="{StaticResource SpacingSmall}">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <Border Grid.Column="0"
+                        Background="Transparent"
+                        ToolTipService.ToolTip="{x:Bind Card.MuteTooltip, Mode=OneWay}">
+                    <Grid Width="56" Height="56">
+                        <Border CornerRadius="{StaticResource CardCornerRadius}"
+                                Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                                Visibility="{x:Bind Card.ShowDefaultTile, Mode=OneWay}" />
+                        <Border CornerRadius="{StaticResource CardCornerRadius}"
+                                Background="{x:Bind Card.WaveLinkTileBrush, Mode=OneWay}"
+                                Visibility="{x:Bind Card.ShowAccentTile, Mode=OneWay}" />
+                        <Button Width="56" Height="56"
+                                Padding="0"
+                                Background="Transparent"
+                                BorderBrush="Transparent"
+                                CornerRadius="{StaticResource CardCornerRadius}"
+                                Tag="{x:Bind Card}"
+                                IsEnabled="{x:Bind Card.IsMuteToggleEnabled, Mode=OneWay}"
+                                Click="OnMuteToggleClicked"
+                                ToolTipService.ToolTip="{x:Bind Card.MuteTooltip, Mode=OneWay}">
+                            <Button.Resources>
+                                <SolidColorBrush x:Key="ButtonBackground" Color="Transparent" />
+                                <SolidColorBrush x:Key="ButtonBackgroundDisabled" Color="Transparent" />
+                                <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="#20FFFFFF" />
+                                <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="#33FFFFFF" />
+                                <SolidColorBrush x:Key="ButtonBorderBrushDisabled" Color="Transparent" />
+                                <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="Transparent" />
+                                <SolidColorBrush x:Key="ButtonBorderBrushPressed" Color="Transparent" />
+                            </Button.Resources>
+                            <Grid>
+                                <FontIcon Glyph="{x:Bind Card.Glyph, Mode=OneWay}"
+                                          FontSize="28"
+                                          Visibility="{x:Bind Card.GlyphOnAccent, Mode=OneWay}"
+                                          Foreground="{x:Bind Card.GlyphContrastBrush, Mode=OneWay}" />
+                                <FontIcon Glyph="{x:Bind Card.Glyph, Mode=OneWay}"
+                                          FontSize="28"
+                                          Visibility="{x:Bind Card.GlyphNormalThemed, Mode=OneWay}"
+                                          Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                                <FontIcon Glyph="{x:Bind Card.Glyph, Mode=OneWay}"
+                                          FontSize="28"
+                                          Visibility="{x:Bind Card.GlyphMutedThemed, Mode=OneWay}"
+                                          Foreground="{ThemeResource SystemFillColorCriticalBrush}" />
+                                <Image Source="{x:Bind Card.WaveLinkIconSource, Mode=OneWay}"
+                                       Width="40" Height="40"
+                                       Visibility="{x:Bind Card.ShowWaveLinkIcon, Mode=OneWay}" />
+                            </Grid>
+                        </Button>
+                    </Grid>
+                </Border>
+
+                <StackPanel Grid.Column="1" Spacing="{StaticResource SpacingXXSmall}" VerticalAlignment="Center">
+                    <Grid ColumnSpacing="6">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="{x:Bind Card.DeviceNameOnly, Mode=OneWay}"
+                                   Style="{StaticResource BodyStrongTextBlockStyle}"
+                                   TextWrapping="NoWrap"
+                                   TextTrimming="CharacterEllipsis"
+                                   ToolTipService.ToolTip="{x:Bind Card.DisplayName, Mode=OneWay}" />
+                        <Button Grid.Column="1"
+                                Width="16" Height="16"
+                                MinWidth="0" MinHeight="0"
+                                Padding="0"
+                                Background="Transparent"
+                                BorderBrush="Transparent"
+                                BorderThickness="0"
+                                Command="{x:Bind Card.ToggleQuickPinCommand}"
+                                Visibility="{x:Bind Card.ShowQuickPinAffordance, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                ToolTipService.ToolTip="{x:Bind Card.QuickPinToggleLabel, Mode=OneWay}"
+                                AutomationProperties.Name="{x:Bind Card.QuickPinToggleLabel, Mode=OneWay}">
+                            <Button.Resources>
+                                <SolidColorBrush x:Key="ButtonBackground" Color="Transparent" />
+                                <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="Transparent" />
+                                <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="Transparent" />
+                                <SolidColorBrush x:Key="ButtonBackgroundDisabled" Color="Transparent" />
+                                <SolidColorBrush x:Key="ButtonBorderBrush" Color="Transparent" />
+                                <SolidColorBrush x:Key="ButtonBorderBrushPointerOver" Color="Transparent" />
+                                <SolidColorBrush x:Key="ButtonBorderBrushPressed" Color="Transparent" />
+                                <SolidColorBrush x:Key="ButtonBorderBrushDisabled" Color="Transparent" />
+                            </Button.Resources>
+                            <FontIcon Glyph="{x:Bind Card.QuickPinToggleGlyph, Mode=OneWay}"
+                                      FontSize="12"
+                                      Foreground="{x:Bind Card.IsQuickPinned, Mode=OneWay, Converter={StaticResource QuickPinBrushConverter}}" />
+                        </Button>
+                    </Grid>
+                    <TextBlock Text="{x:Bind Card.DeviceIdSubtext, Mode=OneWay}"
+                               Style="{StaticResource CaptionTextBlockStyle}"
+                               Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                               TextWrapping="NoWrap"
+                               TextTrimming="CharacterEllipsis"
+                               Visibility="{x:Bind Card.HasDeviceIdSubtext, Mode=OneWay}" />
+                    <StackPanel Orientation="Horizontal"
+                                Spacing="6"
+                                Margin="-8,4,0,0">
+                        <Border Padding="8,2"
+                                VerticalAlignment="Center"
+                                Visibility="{x:Bind Card.ShowFlowLabel, Mode=OneWay}">
+                            <TextBlock Text="{x:Bind Card.FlowLabel, Mode=OneWay}"
+                                       Style="{StaticResource CaptionTextBlockStyle}"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        </Border>
+                        <Border Style="{StaticResource ChipBorderStyle}"
+                                Visibility="{x:Bind Card.IsDefault, Mode=OneWay}">
+                            <TextBlock Text="{x:Bind Card.DefaultPillText, Mode=OneWay}"
+                                       Style="{StaticResource CaptionTextBlockStyle}" />
+                        </Border>
+                        <Border Style="{StaticResource ChipBorderStyle}"
+                                Visibility="{x:Bind Card.IsDefaultCommunications, Mode=OneWay}">
+                            <TextBlock Text="{x:Bind Card.CommunicationsPillText, Mode=OneWay}"
+                                       Style="{StaticResource CaptionTextBlockStyle}" />
+                        </Border>
+                        <Border Style="{StaticResource ChipBorderStyle}"
+                                Visibility="{x:Bind Card.ShowDisconnectedBadge, Mode=OneWay}"
+                                ToolTipService.ToolTip="This device isn't connected right now. Its settings are remembered and it reactivates when it reconnects.">
+                            <TextBlock Text="Disconnected"
+                                       Style="{StaticResource CaptionTextBlockStyle}"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        </Border>
+                    </StackPanel>
+                </StackPanel>
+
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" VerticalAlignment="Top">
+                    <Button Width="32" Height="32"
+                            Padding="0"
+                            Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                            CornerRadius="{ThemeResource ControlCornerRadius}"
+                            Visibility="{x:Bind Card.ShowBluetoothButton, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
+                            IsEnabled="{x:Bind Card.IsBluetoothConnecting, Mode=OneWay, Converter={StaticResource NegatedBooleanConverter}}"
+                            Command="{x:Bind Card.ToggleBluetoothCommand}"
+                            ToolTipService.ToolTip="{x:Bind Card.BluetoothToggleTooltip, Mode=OneWay}"
+                            AutomationProperties.Name="{x:Bind Card.BluetoothToggleTooltip, Mode=OneWay}">
+                        <Grid>
+                            <FontIcon Glyph="{x:Bind Card.BluetoothToggleGlyph, Mode=OneWay}" FontSize="16"
+                                      Visibility="{x:Bind Card.IsBluetoothConnecting, Mode=OneWay, Converter={StaticResource NegatedBooleanToVisibilityConverter}}" />
+                            <ProgressRing Width="16" Height="16"
+                                          Visibility="{x:Bind Card.IsBluetoothConnecting, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                        </Grid>
+                    </Button>
+                </StackPanel>
+            </Grid>
+
+            <!-- Volume row: peak meter behind a transparent-track slider, or a plain slider when the
+                 meter is Off. Collapses entirely only when both slider and meter are hidden. -->
+            <Grid ColumnSpacing="{StaticResource SpacingSmall}"
+                  Visibility="{x:Bind Card.ShowVolumeRow, Mode=OneWay}">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <Grid Grid.Column="0" Height="28"
+                      Grid.ColumnSpan="{x:Bind Card.VolumeMeterColumnSpan, Mode=OneWay}"
+                      Opacity="{x:Bind Card.VolumeAreaOpacity, Mode=OneWay}">
+
+                    <Grid Visibility="{x:Bind Card.MeterOptions.ShowMeter, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
+                        <controls:ChannelPeakMeter Margin="{x:Bind Card.MeterMargin, Mode=OneWay}"
+                                                   VerticalAlignment="Center"
+                                                   ChannelCount="{x:Bind Card.ChannelCount, Mode=OneWay}"
+                                                   ColourMode="{x:Bind Card.MeterOptions.ColourMode, Mode=OneWay}"
+                                                   SingleColour="{x:Bind Card.MeterOptions.SingleColour, Mode=OneWay}"
+                                                   ChannelMode="{x:Bind Card.MeterOptions.ChannelMode, Mode=OneWay}"
+                                                   ShowHold="{x:Bind Card.MeterOptions.ShowHold, Mode=OneWay}"
+                                                   LeftLevel="{x:Bind Card.LeftLevel, Mode=OneWay}"
+                                                   RightLevel="{x:Bind Card.RightLevel, Mode=OneWay}"
+                                                   CentreLfeLevel="{x:Bind Card.CentreLfeLevel, Mode=OneWay}"
+                                                   LeftHold="{x:Bind Card.LeftHold, Mode=OneWay}"
+                                                   RightHold="{x:Bind Card.RightHold, Mode=OneWay}"
+                                                   CentreLfeHold="{x:Bind Card.CentreLfeHold, Mode=OneWay}"
+                                                   Volume="{x:Bind Card.MeterVolume, Mode=OneWay}" />
+
+                        <Slider Minimum="0"
+                                Maximum="100"
+                                StepFrequency="1"
+                                SmallChange="1"
+                                LargeChange="5"
+                                Margin="0,0,2,0"
+                                Padding="8,0,8,0"
+                                Value="{x:Bind Card.VolumePercent, Mode=TwoWay}"
+                                IsEnabled="{x:Bind Card.IsVolumeEditable, Mode=OneWay}"
+                                Visibility="{x:Bind Card.ShowVolumeControls, Mode=OneWay}"
+                                ToolTipService.ToolTip="{x:Bind Card.ChannelMeterTooltip, Mode=OneWay}"
+                                Tag="{x:Bind Card}"
+                                PointerPressed="OnSliderPointerPressed"
+                                PointerCaptureLost="OnSliderReleased"
+                                KeyDown="OnSliderKeyDown"
+                                KeyUp="OnSliderKeyUp"
+                                LostFocus="OnSliderLostFocus"
+                                VerticalAlignment="Center"
+                                Background="Transparent">
+                            <Slider.Resources>
+                                <SolidColorBrush x:Key="SliderTrackFill" Color="Transparent" />
+                                <SolidColorBrush x:Key="SliderTrackValueFill" Color="Transparent" />
+                                <SolidColorBrush x:Key="SliderTrackFillPointerOver" Color="Transparent" />
+                                <SolidColorBrush x:Key="SliderTrackValueFillPointerOver" Color="Transparent" />
+                                <SolidColorBrush x:Key="SliderTrackFillPressed" Color="Transparent" />
+                                <SolidColorBrush x:Key="SliderTrackValueFillPressed" Color="Transparent" />
+                                <SolidColorBrush x:Key="SliderTrackFillDisabled" Color="Transparent" />
+                                <SolidColorBrush x:Key="SliderTrackValueFillDisabled" Color="Transparent" />
+                                <x:Double x:Key="SliderHorizontalThumbWidth">14</x:Double>
+                                <x:Double x:Key="SliderHorizontalThumbHeight">14</x:Double>
+                            </Slider.Resources>
+                            <Slider.RenderTransform>
+                                <TranslateTransform Y="-2" />
+                            </Slider.RenderTransform>
+                        </Slider>
+
+                        <Border Background="Transparent"
+                                ToolTipService.ToolTip="{x:Bind Card.ChannelMeterTooltip, Mode=OneWay}"
+                                Visibility="{x:Bind Card.IsVolumeControlsHiddenByUser, Mode=OneWay}" />
+                    </Grid>
+
+                    <Slider Minimum="0"
+                            Maximum="100"
+                            StepFrequency="1"
+                            SmallChange="1"
+                            LargeChange="5"
+                            Value="{x:Bind Card.VolumePercent, Mode=TwoWay}"
+                            IsEnabled="{x:Bind Card.IsVolumeEditable, Mode=OneWay}"
+                            Tag="{x:Bind Card}"
+                            PointerPressed="OnSliderPointerPressed"
+                            PointerCaptureLost="OnSliderReleased"
+                            KeyDown="OnSliderKeyDown"
+                            KeyUp="OnSliderKeyUp"
+                            LostFocus="OnSliderLostFocus"
+                            VerticalAlignment="Center"
+                            Visibility="{x:Bind Card.ShowPlainSlider, Mode=OneWay}" />
+
+                    <Border Background="Transparent"
+                            Tapped="OnLockedSliderTapped"
+                            PointerPressed="OnLockedSliderPointerPressed"
+                            PointerReleased="OnLockedSliderPointerReleased"
+                            ToolTipService.ToolTip="{x:Bind Card.VolumeLockedTooltip, Mode=OneWay}"
+                            Visibility="{x:Bind Card.ShowVolumeLockOverlay, Mode=OneWay}" />
+                </Grid>
+
+                <TextBlock Grid.Column="1"
+                           Text="{x:Bind Card.VolumePercentText, Mode=OneWay}"
+                           Style="{StaticResource CaptionTextBlockStyle}"
+                           MinWidth="38"
+                           TextAlignment="Right"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                           VerticalAlignment="Center"
+                           Visibility="{x:Bind Card.ShowVolumeControls, Mode=OneWay}" />
+
+                <FontIcon Grid.Column="2"
+                          Glyph="&#xE72E;" FontSize="12"
+                          Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                          VerticalAlignment="Center"
+                          ToolTipService.ToolTip="{x:Bind Card.VolumeLockedTooltip, Mode=OneWay}"
+                          Visibility="{x:Bind Card.ShowVolumeLockIcon, Mode=OneWay}" />
+            </Grid>
+
+            <!-- Rules divider. Hidden in the Quick Controls flyout (ShowRules=false). -->
+            <Border Height="1" Margin="-16,0,-16,-6"
+                    Background="{ThemeResource CardStrokeColorDefaultBrush}"
+                    Visibility="{x:Bind RuleVis(ShowRules, Card.ShowVolumeDivider), Mode=OneWay}" />
+
+            <!-- Rules section. First rule chip always visible; the chevron toggles the rest. -->
+            <StackPanel Spacing="{StaticResource SpacingXSmall}"
+                        Visibility="{x:Bind RuleVis(ShowRules, Card.ShowRulesSection), Mode=OneWay}">
+                <TextBlock Text="Rules"
+                           Style="{StaticResource CaptionTextBlockStyle}"
+                           Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+
+                <controls:ExpanderPill Margin="0,2,0,0"
+                                       IsExpanded="{x:Bind Card.IsRulesExpanded, Mode=TwoWay}"
+                                       ChevronVisible="{x:Bind Card.HasMultipleRules, Mode=OneWay}"
+                                       ToggleTooltip="{x:Bind Card.AdditionalRulesLabel}"
+                                       ToggleOnBodyTap="False">
+                    <controls:ExpanderPill.PillContent>
+                        <Button Style="{StaticResource SubtleRuleChipButtonStyle}"
+                                Background="Transparent"
+                                Opacity="{x:Bind Card.FirstRule.Opacity, FallbackValue=1.0, Mode=OneWay}"
+                                DataContext="{x:Bind Card.FirstRule, Mode=OneWay}"
+                                Click="OnRuleChipClicked"
+                                ToolTipService.ToolTip="Open in Rules">
+                            <StackPanel Spacing="{StaticResource SpacingXXSmall}">
+                                <TextBlock Text="{x:Bind Card.FirstRule.Name, Mode=OneWay, FallbackValue=''}"
+                                           Style="{StaticResource BodyStrongTextBlockStyle}"
+                                           TextTrimming="CharacterEllipsis"
+                                           TextWrapping="NoWrap" />
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <TextBlock Text="{x:Bind Card.FirstRule.StatusMessage, Mode=OneWay, FallbackValue=''}"
+                                               Style="{StaticResource CaptionTextBlockStyle}"
+                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                    <TextBlock Text="·"
+                                               Style="{StaticResource CaptionTextBlockStyle}"
+                                               Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                               Visibility="{x:Bind Card.FirstRule.HasMatchSummary, Mode=OneWay, FallbackValue=Collapsed}" />
+                                    <TextBlock Text="{x:Bind Card.FirstRule.MatchSummary, Mode=OneWay, FallbackValue=''}"
+                                               Style="{StaticResource CaptionTextBlockStyle}"
+                                               Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                               Visibility="{x:Bind Card.FirstRule.HasMatchSummary, Mode=OneWay, FallbackValue=Collapsed}" />
+                                </StackPanel>
+                            </StackPanel>
+                        </Button>
+                    </controls:ExpanderPill.PillContent>
+                </controls:ExpanderPill>
+
+                <ItemsControl ItemsSource="{x:Bind Card.AdditionalRules}"
+                              HorizontalAlignment="Stretch"
+                              HorizontalContentAlignment="Stretch"
+                              Visibility="{x:Bind Card.IsRulesExpanded, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <ItemsControl.ItemContainerStyle>
+                        <Style TargetType="ContentPresenter">
+                            <Setter Property="HorizontalAlignment" Value="Stretch" />
+                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                        </Style>
+                    </ItemsControl.ItemContainerStyle>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:RuleSummary">
+                            <ContentControl HorizontalAlignment="Stretch"
+                                            HorizontalContentAlignment="Stretch"
+                                            Content="{x:Bind}"
+                                            ContentTemplate="{StaticResource RuleChipTemplate}" />
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+
+            <TextBlock Text="No rules target this device."
+                       Style="{StaticResource MutedCaptionTextStyle}"
+                       Visibility="{x:Bind RuleVis(ShowRules, Card.ShowNoRulesMessage), Mode=OneWay}" />
+
+            <!-- Divider between rules and apps; shows only when the apps row is present. -->
+            <Border Height="1" Margin="-16,0"
+                    Background="{ThemeResource CardStrokeColorDefaultBrush}"
+                    Visibility="{x:Bind Card.ShowAppsDivider, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
+
+            <!-- Apps row. Each chip is the app's icon with a peak underbar; drag a chip onto another
+                 render card to move the app's output there (the drop is handled by the host Border). -->
+            <StackPanel Spacing="{StaticResource SpacingXSmall}" Visibility="{x:Bind Card.ShowAppsSection, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
+                <ItemsControl ItemsSource="{x:Bind Card.Apps}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <controls:WrapPanel HorizontalSpacing="{StaticResource SpacingMedium}" VerticalSpacing="{StaticResource SpacingSmall}" />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:AppChip">
+                            <Border Width="32"
+                                    Background="Transparent"
+                                    Padding="0"
+                                    CanDrag="{x:Bind CanDrag}"
+                                    Tag="{x:Bind}"
+                                    Loaded="OnAppChipLoaded"
+                                    DragStarting="OnAppChipDragStarting"
+                                    DropCompleted="OnAppChipDropCompleted"
+                                    AutomationProperties.Name="{x:Bind DisplayLabel, Mode=OneWay}"
+                                    ToolTipService.ToolTip="{x:Bind Tooltip}">
+                                <Border.ContextFlyout>
+                                    <MenuFlyout Opening="OnAppChipFlyoutOpening">
+                                        <MenuFlyoutSubItem Text="Hide this app">
+                                            <MenuFlyoutSubItem.Icon>
+                                                <FontIcon Glyph="&#xED1A;" />
+                                            </MenuFlyoutSubItem.Icon>
+                                            <MenuFlyoutItem Text="On this device"
+                                                            Command="{x:Bind HideOnDeviceCommand}"
+                                                            ToolTipService.ToolTip="Hide this app's chip on this device only; it stays on other devices. Unhide it from Settings &#x2192; App indicators." />
+                                            <MenuFlyoutItem Text="Everywhere"
+                                                            Command="{x:Bind HideCommand}"
+                                                            ToolTipService.ToolTip="Permanently hide this app's chip from every device. Unhide it from Settings &#x2192; App indicators." />
+                                        </MenuFlyoutSubItem>
+                                        <MenuFlyoutItem Text="{x:Bind CloseActionLabel, Mode=OneWay}"
+                                                        Command="{x:Bind CloseCommand}"
+                                                        IsEnabled="{x:Bind CanCloseProcess, Mode=OneWay}"
+                                                        Visibility="{x:Bind ShowProcessActions, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                                        ToolTipService.ToolTip="Ask this app to close, like clicking its X (it can save or prompt first).">
+                                            <MenuFlyoutItem.Icon>
+                                                <FontIcon Glyph="&#xE711;" />
+                                            </MenuFlyoutItem.Icon>
+                                        </MenuFlyoutItem>
+                                        <MenuFlyoutItem Text="{x:Bind TerminateActionLabel, Mode=OneWay}"
+                                                        Command="{x:Bind TerminateCommand}"
+                                                        IsEnabled="{x:Bind CanControlProcess, Mode=OneWay}"
+                                                        Visibility="Collapsed"
+                                                        Tag="{x:Bind}"
+                                                        ToolTipService.ToolTip="Force this app to quit now. Unsaved work is lost.">
+                                            <MenuFlyoutItem.Resources>
+                                                <SolidColorBrush x:Key="MenuFlyoutItemForeground" Color="{ThemeResource SystemFillColorCritical}" />
+                                                <SolidColorBrush x:Key="MenuFlyoutItemForegroundPointerOver" Color="{ThemeResource SystemFillColorCritical}" />
+                                                <SolidColorBrush x:Key="MenuFlyoutItemForegroundPressed" Color="{ThemeResource SystemFillColorCritical}" />
+                                            </MenuFlyoutItem.Resources>
+                                            <MenuFlyoutItem.Icon>
+                                                <FontIcon Glyph="&#xE733;" Foreground="{ThemeResource SystemFillColorCriticalBrush}" />
+                                            </MenuFlyoutItem.Icon>
+                                        </MenuFlyoutItem>
+                                        <MenuFlyoutSeparator />
+                                        <MenuFlyoutItem Text="{x:Bind OwnerCard.HideToggleTooltip, Mode=OneWay}"
+                                                        Click="OnDeviceVisibilityClicked"
+                                                        Tag="{x:Bind OwnerCard}">
+                                            <MenuFlyoutItem.Icon>
+                                                <FontIcon Glyph="{x:Bind OwnerCard.HideToggleGlyph, Mode=OneWay}" />
+                                            </MenuFlyoutItem.Icon>
+                                        </MenuFlyoutItem>
+                                        <MenuFlyoutItem Text="{x:Bind OwnerCard.QuickPinToggleLabel, Mode=OneWay}"
+                                                        Command="{x:Bind OwnerCard.ToggleQuickPinCommand}"
+                                                        Visibility="{x:Bind OwnerCard.CanQuickPin, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                            <MenuFlyoutItem.Icon>
+                                                <FontIcon Glyph="{x:Bind OwnerCard.QuickPinToggleGlyph, Mode=OneWay}" />
+                                            </MenuFlyoutItem.Icon>
+                                        </MenuFlyoutItem>
+                                        <MenuFlyoutItem Text="{x:Bind OwnerCard.VolumeControlsToggleLabel, Mode=OneWay}"
+                                                        Command="{x:Bind OwnerCard.ToggleVolumeControlsCommand}">
+                                            <MenuFlyoutItem.Icon>
+                                                <FontIcon Glyph="{x:Bind OwnerCard.VolumeControlsToggleGlyph, Mode=OneWay}" />
+                                            </MenuFlyoutItem.Icon>
+                                        </MenuFlyoutItem>
+                                        <MenuFlyoutSeparator Visibility="{x:Bind OwnerCard.IsGroupMember, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                        <MenuFlyoutItem Text="Ungroup device"
+                                                        Click="OnUngroupDeviceClicked"
+                                                        Tag="{x:Bind OwnerCard}"
+                                                        Visibility="{x:Bind OwnerCard.IsGroupMember, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                            <MenuFlyoutItem.Icon>
+                                                <FontIcon Glyph="&#xF0B4;" />
+                                            </MenuFlyoutItem.Icon>
+                                        </MenuFlyoutItem>
+                                        <MenuFlyoutSeparator Visibility="{x:Bind OwnerCard.IsGroupMember, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                        <MenuFlyoutItem Text="Rename group"
+                                                        Click="OnRenameGroupClicked"
+                                                        Tag="{x:Bind OwnerCard}"
+                                                        Visibility="{x:Bind OwnerCard.IsGroupMember, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                            <MenuFlyoutItem.Icon>
+                                                <FontIcon Glyph="&#xE8AC;" />
+                                            </MenuFlyoutItem.Icon>
+                                        </MenuFlyoutItem>
+                                        <MenuFlyoutItem Text="Delete group"
+                                                        Click="OnUngroupAllClicked"
+                                                        Tag="{x:Bind OwnerCard}"
+                                                        Visibility="{x:Bind OwnerCard.IsGroupMember, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                            <MenuFlyoutItem.Resources>
+                                                <SolidColorBrush x:Key="MenuFlyoutItemForeground" Color="{ThemeResource SystemFillColorCritical}" />
+                                                <SolidColorBrush x:Key="MenuFlyoutItemForegroundPointerOver" Color="{ThemeResource SystemFillColorCritical}" />
+                                                <SolidColorBrush x:Key="MenuFlyoutItemForegroundPressed" Color="{ThemeResource SystemFillColorCritical}" />
+                                            </MenuFlyoutItem.Resources>
+                                            <MenuFlyoutItem.Icon>
+                                                <FontIcon Glyph="&#xE74D;" Foreground="{ThemeResource SystemFillColorCriticalBrush}" />
+                                            </MenuFlyoutItem.Icon>
+                                        </MenuFlyoutItem>
+                                    </MenuFlyout>
+                                </Border.ContextFlyout>
+                                <Grid Opacity="{x:Bind ChipOpacity, Mode=OneWay}">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="35" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+
+                                    <Grid Grid.Row="0">
+                                        <FontIcon Glyph="{x:Bind FallbackGlyph}" FontSize="26"
+                                                  Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                  Visibility="{x:Bind HasNoIcon, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                        <Image Source="{x:Bind Icon, Mode=OneWay}"
+                                               Stretch="Uniform"
+                                               HorizontalAlignment="Center"
+                                               VerticalAlignment="Center"
+                                               Visibility="{x:Bind HasIcon, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                    </Grid>
+
+                                    <controls:ChannelPeakMeter Grid.Row="1"
+                                                               Margin="0,2,0,0"
+                                                               ChannelCount="1"
+                                                               BarHeightOverride="3"
+                                                               ShowHold="False"
+                                                               Volume="1.0"
+                                                               Visibility="{x:Bind MeterOptions.ShowAppMeters, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
+                                                               LeftLevel="{x:Bind PeakLevelScalar, Mode=OneWay}" />
+
+                                    <Border Grid.Row="0"
+                                            Background="{ThemeResource SmokeFillColorDefaultBrush}"
+                                            CornerRadius="7"
+                                            Width="14" Height="14"
+                                            HorizontalAlignment="Right"
+                                            VerticalAlignment="Top"
+                                            Margin="0,-3,-3,0"
+                                            ToolTipService.ToolTip="{x:Bind LockTooltip}"
+                                            Visibility="{x:Bind LockBadgeVisibility(MeterOptions.AlwaysShowPinnedApps), Mode=OneWay}">
+                                        <FontIcon Glyph="&#xE72E;"
+                                                  FontSize="8"
+                                                  Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                                                  HorizontalAlignment="Center"
+                                                  VerticalAlignment="Center" />
+                                    </Border>
+
+                                    <Border Grid.Row="0"
+                                            Background="{ThemeResource SmokeFillColorDefaultBrush}"
+                                            CornerRadius="7"
+                                            Width="14" Height="14"
+                                            HorizontalAlignment="Left"
+                                            VerticalAlignment="Top"
+                                            Margin="-3,-3,0,0"
+                                            ToolTipService.ToolTip="App closed - no longer running"
+                                            Visibility="{x:Bind ShowClosedBadge, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                        <FontIcon Glyph="&#xE711;"
+                                                  FontSize="9"
+                                                  Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                  HorizontalAlignment="Center"
+                                                  VerticalAlignment="Center" />
+                                    </Border>
+
+                                    <Border Grid.Row="0"
+                                            Background="{ThemeResource SmokeFillColorDefaultBrush}"
+                                            CornerRadius="7"
+                                            Width="14" Height="14"
+                                            HorizontalAlignment="Right"
+                                            VerticalAlignment="Bottom"
+                                            Margin="0,0,-3,-3"
+                                            ToolTipService.ToolTip="Running as administrator (elevated)"
+                                            Visibility="{x:Bind IsElevated, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
+                                        <FontIcon Glyph="&#xEA18;"
+                                                  FontSize="9"
+                                                  Foreground="{ThemeResource SystemFillColorCautionBrush}"
+                                                  HorizontalAlignment="Center"
+                                                  VerticalAlignment="Center" />
+                                    </Border>
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+        </StackPanel>
+
+        <!-- Transient accent dotted outline shown while a drag hovers this card's centre to group. -->
+        <Rectangle RadiusX="{StaticResource CardCornerRadiusValue}" RadiusY="{StaticResource CardCornerRadiusValue}"
+                   Stroke="{ThemeResource AccentFillColorDefaultBrush}"
+                   StrokeThickness="2"
+                   StrokeDashArray="3,3"
+                   IsHitTestVisible="False"
+                   Visibility="{x:Bind Card.IsGroupDropTarget, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
+    </Grid>
+</UserControl>
