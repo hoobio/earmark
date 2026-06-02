@@ -20,12 +20,14 @@ public partial class DeviceGroupCard : ObservableObject, IBlockLayoutInfo
 {
     private readonly Action<DeviceGroupCard>? _onChanged;
     private readonly bool _hideEmptyTitleBand;
+    private readonly bool _insetContent;
     private bool _suppressChanged;
 
-    public DeviceGroupCard(string id, string title, Action<DeviceGroupCard>? onChanged, bool hideEmptyTitleBand = false)
+    public DeviceGroupCard(string id, string title, Action<DeviceGroupCard>? onChanged, bool hideEmptyTitleBand = false, bool insetContent = false)
     {
         Id = id;
         _hideEmptyTitleBand = hideEmptyTitleBand;
+        _insetContent = insetContent;
         _suppressChanged = true;
         Title = title;
         _suppressChanged = false;
@@ -110,7 +112,25 @@ public partial class DeviceGroupCard : ObservableObject, IBlockLayoutInfo
     /// <summary>Inset applied to the members while a drag is in flight, so the dotted outline (drawn
     /// at the group-box bounds) has breathing room around the cards instead of hugging them. Left /
     /// right / bottom only - the title band already supplies the top gap. Zero at rest.</summary>
-    public Thickness ContentPadding => ShowOutline ? new Thickness(8, 0, 8, 8) : new Thickness(0);
+    public Thickness ContentPadding
+    {
+        get
+        {
+            var left = _insetContent ? 12 : 0;
+            var top = _insetContent ? 8 : 0;
+            var right = _insetContent ? 12 : 0;
+            var bottom = _insetContent ? 12 : 0;
+
+            if (ShowOutline)
+            {
+                left += 8;
+                right += 8;
+                bottom += 8;
+            }
+
+            return new Thickness(left, top, right, bottom);
+        }
+    }
 
     partial void OnShowOutlineChanged(bool value)
     {

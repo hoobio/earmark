@@ -11,6 +11,7 @@ using Microsoft.UI;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 
 using Windows.Graphics;
@@ -23,10 +24,11 @@ namespace Earmark.App.Views;
 public sealed partial class QuickControlsWindow : Window
 {
     private const int OverlayContentWidth = 400;
-    private const int OverlayPadding = 12;
     private const int OverlayMargin = 8;
     private const int ScrollOverflowTolerance = 16;
-    private const int OverlayWidth = OverlayContentWidth + (OverlayPadding * 2);
+    private const int OverlayWidth = OverlayContentWidth;
+    private const double SmoothScrollRatio = 0.28;
+    private const double SmoothScrollStopDistance = 0.75;
     private static readonly HashSet<string> QuickControlsHiddenElementNames = new(StringComparer.Ordinal)
     {
         "RulesDivider",
@@ -37,22 +39,27 @@ public sealed partial class QuickControlsWindow : Window
     private readonly ISettingsService _settings;
     private readonly nint _hwnd;
     private readonly Dictionary<FrameworkElement, long> _hiddenElementCallbacks = new();
+    private readonly DispatcherTimer _smoothScrollTimer = new() { Interval = TimeSpan.FromMilliseconds(16) };
+    private readonly PointerEventHandler _smoothWheelHandler;
     private ISystemBackdropControllerWithTargets? _backdropController;
     private readonly SystemBackdropConfiguration _backdropConfig = new() { IsInputActive = true };
     private BackdropMode? _appliedBackdrop;
+    private double? _smoothScrollTarget;
 
     public QuickControlsWindow(HomeViewModel viewModel, HomePage homePage, ISettingsService settings, ILogger<QuickControlsWindow> logger)
     {
         ViewModel = viewModel;
         _settings = settings;
         _logger = logger;
+        _smoothWheelHandler = OnRootPointerWheelChanged;
         InitializeComponent();
         Root.DataContext = ViewModel;
+        Root.AddHandler(UIElement.PointerWheelChangedEvent, _smoothWheelHandler, handledEventsToo: true);
         var selector = (BlockTemplateSelector)Root.Resources["QuickBlockTemplateSelector"];
         selector.CardTemplate = (DataTemplate)homePage.Resources["DeviceCardTemplate"];
         selector.GroupTemplate = (DataTemplate)homePage.Resources["DeviceGroupCardTemplate"];
         _hwnd = WindowNative.GetWindowHandle(this);
-        ExtendsContentIntoTitleBar = true;
+        ExtendsContentIntoTitleBar = false;
         SystemBackdrop = null;
         AppWindow.Title = "Quick Controls";
         ApplySettings();
@@ -61,6 +68,7 @@ public sealed partial class QuickControlsWindow : Window
         Activated += OnActivated;
         Root.ActualThemeChanged += OnRootActualThemeChanged;
         _settings.SettingsChanged += OnSettingsChanged;
+        _smoothScrollTimer.Tick += OnSmoothScrollTick;
         Closed += OnClosed;
     }
 
@@ -75,7 +83,7 @@ public sealed partial class QuickControlsWindow : Window
         ArgumentNullException.ThrowIfNull(blocks);
 
         var width = Math.Min(OverlayWidth, Math.Max(1, workArea.Width - (OverlayMargin * 2)));
-        var contentWidth = Math.Max(1, width - (OverlayPadding * 2));
+        var contentWidth = Math.Max(1, width);
 
         ConfigureWindow();
         Repeater.ItemsSource = null;
@@ -90,7 +98,7 @@ public sealed partial class QuickControlsWindow : Window
         Root.UpdateLayout();
         Repeater.Measure(new Windows.Foundation.Size(contentWidth, double.PositiveInfinity));
 
-        var desiredHeight = Math.Max(OverlayPadding * 2, (int)Math.Ceiling(Repeater.DesiredSize.Height) + (OverlayPadding * 2));
+        var desiredHeight = Math.Max(1, (int)Math.Ceiling(Repeater.DesiredSize.Height));
         _logger.LogDebug(
             "QuickControls window measure: hwnd={Hwnd} blocks={BlockCount} workArea=({X},{Y},{Width},{Height}) width={OverlayWidth} contentWidth={ContentWidth} desiredHeight={DesiredHeight} collapsedRuleElements={Collapsed}",
             _hwnd,
@@ -159,6 +167,45 @@ public sealed partial class QuickControlsWindow : Window
             _logger.LogDebug("QuickControls repeater prepared element: collapsedRuleElements={Collapsed}", collapsed);
         }
         DispatcherQueue.TryEnqueue(() => CollapseQuickControlsOnlyElements(args.Element));
+    }
+
+    private void OnRootPointerWheelChanged(object sender, PointerRoutedEventArgs args)
+    {
+        if (Scroller.ScrollableHeight <= 0) return;
+
+        var wheelDelta = args.GetCurrentPoint(Scroller).Properties.MouseWheelDelta;
+        if (wheelDelta == 0) return;
+
+        var currentTarget = _smoothScrollTarget ?? Scroller.VerticalOffset;
+        _smoothScrollTarget = Math.Clamp(currentTarget - wheelDelta, 0, Scroller.ScrollableHeight);
+        if (!_smoothScrollTimer.IsEnabled)
+        {
+            _smoothScrollTimer.Start();
+        }
+
+        args.Handled = true;
+    }
+
+    private void OnSmoothScrollTick(object? sender, object e)
+    {
+        if (_smoothScrollTarget is not { } target)
+        {
+            _smoothScrollTimer.Stop();
+            return;
+        }
+
+        target = Math.Clamp(target, 0, Scroller.ScrollableHeight);
+        var offset = Scroller.VerticalOffset;
+        var remaining = target - offset;
+        if (Math.Abs(remaining) <= SmoothScrollStopDistance)
+        {
+            Scroller.ChangeView(null, target, null, disableAnimation: true);
+            _smoothScrollTarget = null;
+            _smoothScrollTimer.Stop();
+            return;
+        }
+
+        Scroller.ChangeView(null, offset + (remaining * SmoothScrollRatio), null, disableAnimation: true);
     }
 
     private int CollapseQuickControlsOnlyElements(DependencyObject root)
@@ -325,6 +372,9 @@ public sealed partial class QuickControlsWindow : Window
     {
         _settings.SettingsChanged -= OnSettingsChanged;
         Root.ActualThemeChanged -= OnRootActualThemeChanged;
+        Root.RemoveHandler(UIElement.PointerWheelChangedEvent, _smoothWheelHandler);
+        _smoothScrollTimer.Stop();
+        _smoothScrollTimer.Tick -= OnSmoothScrollTick;
         _backdropController?.Dispose();
         _backdropController = null;
     }
