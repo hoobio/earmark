@@ -30,6 +30,7 @@ public sealed record DeviceCardSnapshot(
     IReadOnlyList<RuleSummary> Rules,
     bool IsHiddenByUser,
     bool IsPinnedByUser,
+    bool IsQuickPinned,
     bool IsVolumeControlsHiddenByUser,
     string? UserGlyphOverride,
     Color? UserAccent,

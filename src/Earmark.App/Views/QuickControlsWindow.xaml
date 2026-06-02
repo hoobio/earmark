@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Window
+    x:Class="Earmark.App.Views.QuickControlsWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:Earmark.App.Controls"
+    Title="Quick Controls">
+
+        <Border x:Name="Root"
+            Background="Transparent"
+            IsTabStop="True">
+        <Border.Resources>
+            <controls:BlockTemplateSelector x:Key="QuickBlockTemplateSelector" />
+            <SolidColorBrush x:Key="GroupTitleBandBackgroundBrush" Color="Transparent" />
+        </Border.Resources>
+
+        <Grid>
+            <Border x:Name="SolidBackdrop"
+                    Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+                    Visibility="Collapsed" />
+
+            <ScrollViewer x:Name="Scroller"
+                          VerticalScrollMode="Disabled"
+                          VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled"
+                          IsScrollInertiaEnabled="False"
+                          Background="Transparent">
+                <ItemsRepeater x:Name="Repeater"
+                               ElementPrepared="OnRepeaterElementPrepared">
+                    <ItemsRepeater.Layout>
+                        <StackLayout Spacing="12" />
+                    </ItemsRepeater.Layout>
+                    <ItemsRepeater.ItemTemplate>
+                        <StaticResource ResourceKey="QuickBlockTemplateSelector" />
+                    </ItemsRepeater.ItemTemplate>
+                </ItemsRepeater>
+            </ScrollViewer>
+        </Grid>
+    </Border>
+</Window>

@@ -51,6 +51,40 @@
                     <ToggleSwitch IsOn="{x:Bind ViewModel.LaunchOnStartup, Mode=TwoWay}" />
                 </ctrl:SettingsCard>
 
+                <ctrl:SettingsExpander Header="Quick Controls"
+                                       Description="A floating device-control overlay for pinned devices and groups."
+                                       IsExpanded="{x:Bind ViewModel.QuickControlsEnabled, Mode=OneWay}">
+                    <ctrl:SettingsExpander.HeaderIcon>
+                        <FontIcon Glyph="&#xE718;" />
+                    </ctrl:SettingsExpander.HeaderIcon>
+                    <ToggleSwitch IsOn="{x:Bind ViewModel.QuickControlsEnabled, Mode=TwoWay}"
+                                  AutomationProperties.Name="Enable Quick Controls" />
+                    <ctrl:SettingsExpander.Items>
+                        <ctrl:SettingsCard Header="Shortcut"
+                                           Description="{x:Bind ViewModel.QuickControlsHotkeyStatus, Mode=OneWay}">
+                            <Button Content="Change shortcut"
+                                    Click="OnChangeQuickControlsShortcut"
+                                    AutomationProperties.Name="Change Quick Controls shortcut" />
+                        </ctrl:SettingsCard>
+                        <ctrl:SettingsCard Header="Appearance"
+                                           Description="Choose the background material for Quick Controls, or inherit the app's Backdrop setting.">
+                            <ComboBox SelectedIndex="{x:Bind ViewModel.QuickControlsBackdropIndex, Mode=TwoWay}" MinWidth="170">
+                                <ComboBoxItem Content="Solid" />
+                                <ComboBoxItem Content="Acrylic" />
+                                <ComboBoxItem Content="Mica" />
+                                <ComboBoxItem Content="Use app appearance" />
+                            </ComboBox>
+                        </ctrl:SettingsCard>
+                        <ctrl:SettingsCard Header="Display"
+                                           Description="Choose where Quick Controls opens.">
+                            <ComboBox SelectedIndex="{x:Bind ViewModel.QuickControlsDisplayIndex, Mode=TwoWay}" MinWidth="170">
+                                <ComboBoxItem Content="Currently active" />
+                                <ComboBoxItem Content="Default display" />
+                            </ComboBox>
+                        </ctrl:SettingsCard>
+                    </ctrl:SettingsExpander.Items>
+                </ctrl:SettingsExpander>
+
                 <TextBlock Text="Appearance" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,16,0,0" />
                 <ctrl:SettingsCard Header="Theme" Description="Choose a light or dark appearance, or follow the Windows setting.">
                     <ComboBox SelectedIndex="{x:Bind ViewModel.AppThemeIndex, Mode=TwoWay}" MinWidth="140">

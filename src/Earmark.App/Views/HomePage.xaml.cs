@@ -95,6 +95,16 @@ public sealed partial class HomePage : Page
 
     private BlockWrapLayout? Layout => DevicesRepeater.Layout as BlockWrapLayout;
 
+    private void OnDeviceCardPointerEntered(object sender, PointerRoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: DeviceCard card }) card.IsPointerOver = true;
+    }
+
+    private void OnDeviceCardPointerExited(object sender, PointerRoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: DeviceCard card }) card.IsPointerOver = false;
+    }
+
     // ---- Block reorder + move-whole-group ----
     //
     // The top level is a list of blocks (a lone DeviceCard or a DeviceGroupCard section). A reorder
@@ -262,6 +272,43 @@ public sealed partial class HomePage : Page
         {
             ViewModel.ForgetDevice(card);
         }
+    }
+
+    private async void OnDeviceVisibilityClicked(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: DeviceCard card }) return;
+        if (!card.IsEffectivelyHidden && card.IsQuickPinned)
+        {
+            var dialog = new ContentDialog
+            {
+                XamlRoot = XamlRoot,
+                Title = "Hide pinned device?",
+                Content = "This device is pinned to Quick Controls. Hiding it will remove it from Quick Controls.",
+                PrimaryButtonText = "Hide and unpin",
+                CloseButtonText = "Cancel",
+                DefaultButton = ContentDialogButton.Close,
+            };
+
+            if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+            {
+                return;
+            }
+
+            ViewModel.HideAndUnpin(card);
+            return;
+        }
+
+        card.ToggleUserVisibilityCommand.Execute(null);
+    }
+
+    private void OnGroupPointerEntered(object sender, PointerRoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: DeviceGroupCard group }) group.IsPointerOver = true;
+    }
+
+    private void OnGroupPointerExited(object sender, PointerRoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: DeviceGroupCard group }) group.IsPointerOver = false;
     }
 
     private void OnCustomiseClicked(object sender, RoutedEventArgs e)

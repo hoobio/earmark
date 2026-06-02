@@ -86,6 +86,10 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     private CancellationTokenSource? _sessionsSyncCts;
     private static readonly TimeSpan SessionsInPlaceDebounce = TimeSpan.FromMilliseconds(200);
     private DispatcherTimer? _peakTimer;
+    private bool _homePageVisible = true;
+    private bool _quickControlsVisible;
+    private bool _quickControlProjectionQueued;
+    private string _quickControlProjectionReason = string.Empty;
 
     public HomeViewModel(
         IRulesService rules,
@@ -193,6 +197,10 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     /// never split it and a lone card can never land inside it.</summary>
     public ObservableCollection<object> Blocks { get; } = new();
 
+    public ObservableCollection<object> QuickControlBlocks { get; } = new();
+
+    public bool HasQuickControlBlocks => QuickControlBlocks.Count > 0;
+
     /// <summary>Flat list of the currently-visible cards (lone cards + group members), kept in sync
     /// with <see cref="Blocks"/>. The peak / meter / app-chip machinery iterates this instead of the
     /// heterogeneous <see cref="Blocks"/>.</summary>
@@ -204,14 +212,24 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     /// bindings (section visibility, layout opt-out, dividers). Called wherever a chip is added /
     /// removed. The resulting reflow is animated by the page's always-on block slide, so there's no
     /// signal to raise here.</summary>
-    private static void NotifyCardApps(DeviceCard card)
+    private void NotifyCardApps(DeviceCard card)
     {
         card.NotifyAppsChanged();
+        if (card.IsQuickPinned)
+        {
+            _logger.LogDebug(
+                "QuickControls content changed: card='{Card}' key='{Key}' appCount={AppCount} hasApps={HasApps}",
+                card.DisplayName,
+                card.DeviceKey,
+                card.Apps.Count,
+                card.HasApps);
+        }
     }
 
     /// <summary>Group container VMs by id, reused across rebuilds so an in-progress title edit and
     /// the member card instances survive.</summary>
     private readonly Dictionary<string, DeviceGroupCard> _groupCards = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, DeviceGroupCard> _quickGroupCards = new(StringComparer.OrdinalIgnoreCase);
 
     public bool HasItems => Blocks.Count > 0;
     public bool IsEmpty => Blocks.Count == 0;
@@ -330,10 +348,36 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     /// <summary>Stops the 20Hz peak/meter poll. Called when the Home page leaves the visual
     /// tree so its per-tick UI-thread COM reads don't starve the page-transition animation
     /// (the tiles otherwise linger ~500ms on navigate-away) or burn CPU while it's off-screen.</summary>
-    public void PausePeakPolling() => _peakTimer?.Stop();
+    public void PausePeakPolling()
+    {
+        _homePageVisible = false;
+        UpdatePeakPollingState();
+    }
 
     /// <summary>Resumes peak polling when the Home page is shown again.</summary>
-    public void ResumePeakPolling() => _peakTimer?.Start();
+    public void ResumePeakPolling()
+    {
+        _homePageVisible = true;
+        UpdatePeakPollingState();
+    }
+
+    public void ResumePeakPollingForQuickControls()
+    {
+        _quickControlsVisible = true;
+        UpdatePeakPollingState();
+    }
+
+    public void PausePeakPollingForQuickControls()
+    {
+        _quickControlsVisible = false;
+        UpdatePeakPollingState();
+    }
+
+    private void UpdatePeakPollingState()
+    {
+        if (_homePageVisible || _quickControlsVisible) _peakTimer?.Start();
+        else _peakTimer?.Stop();
+    }
 
     private void OnPeakTick(object? sender, object e)
     {
@@ -747,6 +791,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             //    for new keys, drop the rest. Reusing instances is what lets the ItemsRepeater keep
             //    its elements so the block slide animates a connect/disconnect (no rebuild flash).
             ReconcileAllCards(built.Snapshots);
+            MaybeSeedQuickControlsPins();
             SyncBlocks();
             SyncAllCardsApps();
             _ = ApplyWaveLinkVisualsAsync(ct);
@@ -803,6 +848,44 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         if (changed) QueueSettingsSave();
     }
 
+    private void MaybeSeedQuickControlsPins()
+    {
+        var s = _settings.Current;
+        if (s.SettingsSchemaVersion >= AppSettings.QuickControlsSeedSchemaVersion) return;
+        if (s.DeviceGroups.Any(g => g.PinnedToQuickControls) || s.Devices.Values.Any(d => d.PinnedToQuickControls == true))
+        {
+            s.SettingsSchemaVersion = AppSettings.QuickControlsSeedSchemaVersion;
+            QueueSettingsSave();
+            return;
+        }
+
+        var defaultKeys = _allCards
+            .Where(c => c.IsDefault || c.IsDefaultCommunications)
+            .Select(c => c.DeviceKey)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (defaultKeys.Count == 0)
+        {
+            s.SettingsSchemaVersion = AppSettings.QuickControlsSeedSchemaVersion;
+            QueueSettingsSave();
+            return;
+        }
+
+        foreach (var key in defaultKeys)
+        {
+            if (!s.Devices.TryGetValue(key, out var cfg))
+            {
+                cfg = new DeviceConfig();
+                s.Devices[key] = cfg;
+            }
+            cfg.PinnedToQuickControls = true;
+            FindCardByKey(key)?.SetQuickPin(true);
+        }
+
+        s.SettingsSchemaVersion = AppSettings.QuickControlsSeedSchemaVersion;
+        QueueSettingsSave();
+    }
+
     /// <summary>Reconciles <see cref="_allCards"/> with the fresh snapshot set by device key: a
     /// surviving device's existing <see cref="DeviceCard"/> is reused and refreshed in place; a new
     /// key gets a new instance; a device on neither list is dropped. Order follows the snapshots.</summary>
@@ -827,7 +910,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             {
                 card = new DeviceCard(
                     _endpoints, _writer, _meterOptions, snap,
-                    OnCardVisibilityToggled, OnCardVolumeControlsToggled, OnCardCustomisationChanged,
+                    OnCardVisibilityToggled, OnCardQuickPinToggled, OnCardVolumeControlsToggled, OnCardCustomisationChanged,
                     OnCardBluetoothToggle);
             }
             rebuilt.Add(card);
@@ -1199,6 +1282,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             Rules: summary.Rules,
             IsHiddenByUser: cfg?.Hidden == true,
             IsPinnedByUser: cfg?.Pinned == true,
+            IsQuickPinned: cfg?.PinnedToQuickControls == true,
             IsVolumeControlsHiddenByUser: cfg?.VolumeControlsHidden == true,
             UserGlyphOverride: cfg?.Glyph,
             UserAccent: Controls.DeviceAccentPalette.TryParseHex(cfg?.AccentColour),
@@ -1362,6 +1446,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         if (record is null) return;
         record.Title = card.Title;
         QueueSettingsSave();
+        SyncQuickControlBlocks();
     }
 
     /// <summary>
@@ -1435,10 +1520,17 @@ public partial class HomeViewModel : ObservableObject, IDisposable
                 gc = new DeviceGroupCard(group.Id, group.Title, OnGroupCardChanged);
                 _groupCards[group.Id] = gc;
             }
-            else
+            if (group.PinnedToQuickControls)
             {
-                gc.SyncFrom(group.Title);
+                group.PinnedToQuickControls = false;
+                foreach (var member in members)
+                {
+                    member.IsQuickPinned = true;
+                    UpdateDeviceConfig(member);
+                }
+                QueueSettingsSave();
             }
+            gc.SyncFrom(group.Title, isQuickPinned: false);
             liveGroupCardById[group.Id] = gc;
             desiredMembers[gc] = members;
         }
@@ -1502,7 +1594,251 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         IsInitializing = false;
         OnPropertyChanged(nameof(ShowEmptyState));
         OnPropertyChanged(nameof(ShowFilteredEmptyState));
+        SyncQuickControlBlocks();
     }
+
+    private void SyncQuickControlBlocks()
+    {
+        var startedAt = DateTime.UtcNow;
+        var debug = _logger.IsEnabled(LogLevel.Debug);
+        if (debug)
+        {
+            _logger.LogDebug(
+                "QuickControls projection start: blocks={BlockCount} quickBlocks={QuickBlockCount} cachedGroups={CachedGroupCount} visibleCards={VisibleCardCount} pinnedCards={PinnedCardCount} input=[{InputBlocks}]",
+                Blocks.Count,
+                QuickControlBlocks.Count,
+                _quickGroupCards.Count,
+                _visibleCards.Count,
+                _visibleCards.Count(card => card.IsQuickPinned),
+                FormatQuickControlBlocks(Blocks));
+        }
+
+        var desired = new List<object>();
+        var desiredMembers = new Dictionary<DeviceGroupCard, List<DeviceCard>>();
+        var liveQuickGroups = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var usedQuickCardKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var pendingUngroupedCards = new List<DeviceCard>();
+        var pseudoGroupIndex = 0;
+
+        void FlushUngroupedCards()
+        {
+            if (pendingUngroupedCards.Count == 1)
+            {
+                desired.Add(pendingUngroupedCards[0]);
+            }
+            else if (pendingUngroupedCards.Count > 1)
+            {
+                var key = $"pseudo-{pseudoGroupIndex++}:{pendingUngroupedCards[0].DeviceKey}";
+                var group = GetQuickControlGroup(key, string.Empty, hideEmptyTitleBand: true);
+                desired.Add(group);
+                desiredMembers[group] = pendingUngroupedCards
+                    .DistinctBy(card => card.DeviceKey, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                liveQuickGroups.Add(key);
+            }
+
+            if (debug && pendingUngroupedCards.Count > 0)
+            {
+                _logger.LogDebug(
+                    "QuickControls projection flush: pendingUngrouped={Count} emitted={Emitted}",
+                    pendingUngroupedCards.Count,
+                    desired.Count > 0 ? FormatQuickControlBlock(desired[^1]) : "none");
+            }
+
+            pendingUngroupedCards.Clear();
+        }
+
+        foreach (var block in Blocks)
+        {
+            switch (block)
+            {
+                case DeviceGroupCard group:
+                    FlushUngroupedCards();
+                    var pinnedMembers = group.Members
+                        .Where(card => card.IsQuickPinned && TryUseQuickCard(card, $"group '{group.Title}'"))
+                        .DistinctBy(card => card.DeviceKey, StringComparer.OrdinalIgnoreCase)
+                        .ToList();
+                    if (debug)
+                    {
+                        _logger.LogDebug(
+                            "QuickControls projection group: title='{Title}' id='{Id}' members={MemberCount} pinnedMembers={PinnedCount} pinned=[{PinnedMembers}]",
+                            group.Title,
+                            group.Id,
+                            group.Members.Count,
+                            pinnedMembers.Count,
+                            FormatQuickControlCards(pinnedMembers));
+                    }
+
+                    if (pinnedMembers.Count > 0)
+                    {
+                        var quickGroup = GetQuickControlGroup($"group:{group.Id}", group.Title, hideEmptyTitleBand: false);
+                        desired.Add(quickGroup);
+                        desiredMembers[quickGroup] = pinnedMembers;
+                        liveQuickGroups.Add($"group:{group.Id}");
+                    }
+                    break;
+                case DeviceCard card when card.IsQuickPinned:
+                    if (!TryUseQuickCard(card, "ungrouped"))
+                    {
+                        break;
+                    }
+
+                    if (debug)
+                    {
+                        _logger.LogDebug(
+                            "QuickControls projection ungrouped pinned card: '{Card}' key='{Key}' flow={Flow} apps={AppCount}",
+                            card.DisplayName,
+                            card.DeviceKey,
+                            card.Endpoint.Flow,
+                            card.Apps.Count);
+                    }
+
+                    pendingUngroupedCards.Add(card);
+                    break;
+                case DeviceCard card when debug:
+                    _logger.LogDebug(
+                        "QuickControls projection skip unpinned card: '{Card}' key='{Key}' hidden={Hidden} groupMember={GroupMember}",
+                        card.DisplayName,
+                        card.DeviceKey,
+                        card.IsEffectivelyHidden,
+                        card.IsGroupMember);
+                    break;
+            }
+        }
+
+        FlushUngroupedCards();
+
+        if (debug)
+        {
+            _logger.LogDebug(
+                "QuickControls projection desired: desiredBlocks={DesiredCount} desired=[{DesiredBlocks}] groups=[{Groups}] oldQuick=[{OldQuickBlocks}]",
+                desired.Count,
+                FormatQuickControlBlocks(desired),
+                FormatQuickControlGroups(desiredMembers),
+                FormatQuickControlBlocks(QuickControlBlocks));
+        }
+
+        foreach (var group in _quickGroupCards.Values)
+        {
+            group.Members.Clear();
+        }
+
+        foreach (var (group, members) in desiredMembers)
+        {
+            foreach (var member in members)
+            {
+                group.Members.Add(member);
+            }
+        }
+
+        QuickControlBlocks.Clear();
+        foreach (var block in desired)
+        {
+            QuickControlBlocks.Add(block);
+        }
+
+        foreach (var goneId in _quickGroupCards.Keys.Where(id => !liveQuickGroups.Contains(id)).ToList())
+        {
+            if (debug)
+            {
+                _logger.LogDebug("QuickControls projection remove cached group: key='{Key}'", goneId);
+            }
+
+            _quickGroupCards.Remove(goneId);
+        }
+
+        if (debug)
+        {
+            _logger.LogDebug(
+                "QuickControls projection complete: elapsedMs={ElapsedMs} quickBlocks={QuickBlockCount} cachedGroups={CachedGroupCount} quick=[{QuickBlocks}]",
+                (DateTime.UtcNow - startedAt).TotalMilliseconds,
+                QuickControlBlocks.Count,
+                _quickGroupCards.Count,
+                FormatQuickControlBlocks(QuickControlBlocks));
+            LogQuickControlDuplicateCards();
+        }
+
+        OnPropertyChanged(nameof(HasQuickControlBlocks));
+
+        bool TryUseQuickCard(DeviceCard card, string location)
+        {
+            if (usedQuickCardKeys.Add(card.DeviceKey)) return true;
+
+            _logger.LogWarning(
+                "QuickControls projection skipped duplicate card: '{Card}' key='{Key}' duplicateLocation={Location}",
+                card.DisplayName,
+                card.DeviceKey,
+                location);
+            return false;
+        }
+    }
+
+    private DeviceGroupCard GetQuickControlGroup(
+        string key,
+        string title,
+        bool hideEmptyTitleBand)
+    {
+        if (!_quickGroupCards.TryGetValue(key, out var group))
+        {
+            group = new DeviceGroupCard($"quick-{key}", title, null, hideEmptyTitleBand, insetContent: true);
+            _quickGroupCards[key] = group;
+        }
+
+        group.SyncFrom(title, isQuickPinned: false);
+        return group;
+    }
+
+    private void LogQuickControlDuplicateCards()
+    {
+        var seen = new Dictionary<DeviceCard, string>();
+        foreach (var block in QuickControlBlocks)
+        {
+            switch (block)
+            {
+                case DeviceCard card:
+                    Add(card, "top-level");
+                    break;
+                case DeviceGroupCard group:
+                    foreach (var member in group.Members)
+                    {
+                        Add(member, $"group '{group.Title}' ({group.Id})");
+                    }
+                    break;
+            }
+        }
+
+        void Add(DeviceCard card, string location)
+        {
+            if (seen.TryGetValue(card, out var firstLocation))
+            {
+                _logger.LogWarning(
+                    "QuickControls projection duplicate card: '{Card}' key='{Key}' first={FirstLocation} duplicate={DuplicateLocation}",
+                    card.DisplayName,
+                    card.DeviceKey,
+                    firstLocation,
+                    location);
+                return;
+            }
+
+            seen[card] = location;
+        }
+    }
+
+    private static string FormatQuickControlBlocks(IEnumerable<object> blocks) =>
+        string.Join(" | ", blocks.Select(FormatQuickControlBlock));
+
+    private static string FormatQuickControlBlock(object block) => block switch
+    {
+        DeviceCard card => $"card:'{card.DisplayName}' key='{card.DeviceKey}' quick={card.IsQuickPinned} apps={card.Apps.Count}",
+        DeviceGroupCard group => $"group:'{group.Title}' id='{group.Id}' members=[{FormatQuickControlCards(group.Members)}]",
+        _ => block.GetType().Name,
+    };
+
+    private static string FormatQuickControlGroups(Dictionary<DeviceGroupCard, List<DeviceCard>> groups) =>
+        string.Join(" | ", groups.Select(pair => $"'{pair.Key.Title}'/{pair.Key.Id} -> [{FormatQuickControlCards(pair.Value)}]"));
+
+    private static string FormatQuickControlCards(IEnumerable<DeviceCard> cards) =>
+        string.Join(", ", cards.Select(card => $"'{card.DisplayName}' key='{card.DeviceKey}' quick={card.IsQuickPinned} apps={card.Apps.Count}"));
 
     /// <summary>Removal half of the two-phase reconcile: drops from <paramref name="target"/> any item
     /// not in <paramref name="keep"/>, plus any duplicate occurrences (keeps one). Running all removals
@@ -1879,7 +2215,63 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         {
             RemoveMemberFromGroupRecord(card.DeviceKey);
         }
+        if (card.IsHiddenByUser && card.IsQuickPinned)
+        {
+            card.IsQuickPinned = false;
+        }
         PersistAndResync(card);
+    }
+
+    private void OnCardQuickPinToggled(DeviceCard card)
+    {
+        _logger.LogDebug(
+            "QuickControls pin toggled: card='{Card}' key='{Key}' quickPinned={QuickPinned} hidden={Hidden} groupMember={GroupMember} appCount={AppCount}",
+            card.DisplayName,
+            card.DeviceKey,
+            card.IsQuickPinned,
+            card.IsEffectivelyHidden,
+            card.IsGroupMember,
+            card.Apps.Count);
+        UpdateDeviceConfig(card);
+        QueueSettingsSave();
+        QueueQuickControlProjectionSync($"quick pin toggled: {card.DeviceKey}");
+    }
+
+    private void QueueQuickControlProjectionSync(string reason)
+    {
+        _quickControlProjectionReason = string.IsNullOrWhiteSpace(_quickControlProjectionReason)
+            ? reason
+            : $"{_quickControlProjectionReason}; {reason}";
+
+        if (_quickControlProjectionQueued)
+        {
+            _logger.LogDebug("QuickControls deferred projection already queued: reason='{Reason}'", _quickControlProjectionReason);
+            return;
+        }
+
+        _quickControlProjectionQueued = true;
+        _logger.LogDebug("QuickControls deferred projection queued: reason='{Reason}'", _quickControlProjectionReason);
+        _dispatcher.Queue.TryEnqueue(() =>
+        {
+            var queuedReason = _quickControlProjectionReason;
+            _quickControlProjectionReason = string.Empty;
+            _quickControlProjectionQueued = false;
+            _logger.LogDebug("QuickControls deferred projection running: reason='{Reason}'", queuedReason);
+            SyncQuickControlBlocks();
+        });
+    }
+
+    public void HideAndUnpin(DeviceCard card)
+    {
+        _ = _settings;
+        if (!card.IsQuickPinned || card.IsEffectivelyHidden)
+        {
+            card.ToggleUserVisibilityCommand.Execute(null);
+            return;
+        }
+
+        card.SetQuickPin(false);
+        card.ToggleUserVisibilityCommand.Execute(null);
     }
 
     private void OnCardVolumeControlsToggled(DeviceCard card)
@@ -2009,9 +2401,23 @@ public partial class HomeViewModel : ObservableObject, IDisposable
 
     private void PersistAndResync(DeviceCard card)
     {
+        var startedAt = DateTime.UtcNow;
+        _logger.LogDebug(
+            "PersistAndResync start: card='{Card}' key='{Key}' hidden={Hidden} pinned={Pinned} quickPinned={QuickPinned} volumeControlsHidden={VolumeControlsHidden}",
+            card.DisplayName,
+            card.DeviceKey,
+            card.IsHiddenByUser,
+            card.IsPinnedByUser,
+            card.IsQuickPinned,
+            card.IsVolumeControlsHiddenByUser);
         UpdateDeviceConfig(card);
         QueueSettingsSave();
         SyncBlocks();
+        _logger.LogDebug(
+            "PersistAndResync complete: card='{Card}' key='{Key}' elapsedMs={ElapsedMs}",
+            card.DisplayName,
+            card.DeviceKey,
+            (DateTime.UtcNow - startedAt).TotalMilliseconds);
     }
 
     /// <summary>Writes the card's current per-device flags into the <see cref="AppSettings.Devices"/>
@@ -2023,12 +2429,25 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         {
             Hidden = card.IsHiddenByUser ? true : null,
             Pinned = card.IsPinnedByUser ? true : null,
+            PinnedToQuickControls = card.IsQuickPinned ? true : null,
             VolumeControlsHidden = card.IsVolumeControlsHiddenByUser ? true : null,
             Glyph = card.CurrentGlyphOverride,
             AccentColour = card.AccentOverrideHex,
         };
         if (cfg.IsDefault) map.Remove(card.DeviceKey);
         else map[card.DeviceKey] = cfg;
+        _logger.LogDebug(
+            "Device config updated: card='{Card}' key='{Key}' default={Default} hidden={Hidden} pinned={Pinned} quickPinned={QuickPinned} volumeControlsHidden={VolumeControlsHidden} glyph='{Glyph}' accent='{Accent}' stored={Stored}",
+            card.DisplayName,
+            card.DeviceKey,
+            cfg.IsDefault,
+            cfg.Hidden,
+            cfg.Pinned,
+            cfg.PinnedToQuickControls,
+            cfg.VolumeControlsHidden,
+            cfg.Glyph,
+            cfg.AccentColour,
+            !cfg.IsDefault);
     }
 
     public void Dispose()
