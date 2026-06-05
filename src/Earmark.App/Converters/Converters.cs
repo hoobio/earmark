@@ -31,6 +31,29 @@ public sealed class BooleanToVisibilityConverter : IValueConverter
         value is Visibility v && v == Visibility.Visible;
 }
 
+/// <summary>Formats a seconds value (double) as a media timestamp: "m:ss", or "h:mm:ss" past an hour.
+/// Used for the now-playing seek slider's thumb tooltip (its Value is the position in seconds).</summary>
+public sealed class SecondsToTimestampConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, string language)
+    {
+        var seconds = value switch
+        {
+            double d => d,
+            int i => i,
+            _ => 0d,
+        };
+        if (double.IsNaN(seconds) || seconds < 0) seconds = 0;
+        var t = TimeSpan.FromSeconds(seconds);
+        return t.TotalHours >= 1
+            ? $"{(int)t.TotalHours}:{t.Minutes:00}:{t.Seconds:00}"
+            : $"{t.Minutes}:{t.Seconds:00}";
+    }
+
+    public object ConvertBack(object value, Type targetType, object parameter, string language) =>
+        throw new NotSupportedException();
+}
+
 public sealed class NullableToVisibilityConverter : IValueConverter
 {
     public object Convert(object value, Type targetType, object parameter, string language) =>

@@ -56,6 +56,8 @@
          $(PkgMicrosoft_WindowsAppSDK_Runtime) so the target can read the runtime MSIX. -->
     <PackageReference Include="Microsoft.WindowsAppSDK.Runtime" GeneratePathProperty="true" />
     <PackageReference Include="CommunityToolkit.Mvvm" />
+    <!-- Win2D: Gaussian blur for the now-playing strip's low-res-artwork backdrop. -->
+    <PackageReference Include="Microsoft.Graphics.Win2D" />
     <PackageReference Include="CommunityToolkit.WinUI.Controls.SettingsControls" />
     <PackageReference Include="CommunityToolkit.WinUI.Behaviors" />
     <PackageReference Include="CommunityToolkit.WinUI.Animations" />
@@ -157,6 +159,23 @@
            Include="Microsoft.WindowsAppRuntime.Insights.Resource.dll"
            OverwriteReadOnlyFiles="true"
            Condition="'@(_EarmarkRuntimeMsix)' != '' and '$(PublishDir)' != '' and Exists('$(PublishDir)')" />
+  </Target>
+
+  <!--
+    Win2D ships Microsoft.Graphics.Canvas.winmd via WindowsMetadataReference, which both
+    registers its activatable classes in the appx manifest (good) and packs the winmd file
+    (bad). The winmd references Microsoft.UI.* types that aren't in the package, so WACK's
+    "General metadata correctness" fails. Per the WinUI guidance, a winmd implemented by a
+    DLL inside the package must not appear in the package; runtime activation uses the
+    manifest registration + Microsoft.Graphics.Canvas.dll, not the winmd. Drop only the winmd
+    file from the payload (the registration, generated earlier from WindowsMetadataReference,
+    is left intact). WebView2's winmd is left alone: it passes WACK.
+  -->
+  <Target Name="_EarmarkExcludeWin2DWinmdFromPackage" BeforeTargets="_GenerateAppxPackageRecipe">
+    <ItemGroup>
+      <AppxPackagePayload Remove="@(AppxPackagePayload)"
+          Condition="'%(AppxPackagePayload.TargetPath)' == 'Microsoft.Graphics.Canvas.winmd'" />
+    </ItemGroup>
   </Target>
 
 </Project>

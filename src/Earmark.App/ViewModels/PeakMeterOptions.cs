@@ -59,6 +59,21 @@ public partial class PeakMeterOptions : ObservableObject
     [ObservableProperty]
     public partial bool ShowRules { get; set; } = true;
 
+    /// <summary>Whether device cards show the now-playing strip when an app exposes SMTC media info.
+    /// Default on. Shared/observable so toggling the setting shows or hides every card's strip live.</summary>
+    [ObservableProperty]
+    public partial bool ShowNowPlaying { get; set; } = true;
+
+    /// <summary>How the now-playing strip blurs low-resolution artwork. Read by the artwork builder
+    /// when a strip's backdrop is (re)processed.</summary>
+    [ObservableProperty]
+    public partial NowPlayingBackdropBlurMode NowPlayingBlur { get; set; } = NowPlayingBackdropBlurMode.Gaussian;
+
+    /// <summary>Whether the primary now-playing artwork fills the whole card as a dimmed background.
+    /// Default off. Shared/observable so toggling the setting updates every card live.</summary>
+    [ObservableProperty]
+    public partial bool NowPlayingCardBackground { get; set; }
+
     /// <summary>True unless the meter is switched off (the card then shows a plain volume slider).</summary>
     public bool ShowMeter => ColourMode != PeakMeterColourMode.Off;
 

@@ -53,6 +53,7 @@ internal static class HostBuilderExtensions
         builder.Services.AddSingleton<ISessionIconService, SessionIconService>();
         builder.Services.AddSingleton<IWaveLinkNameReconciler, WaveLinkNameReconciler>();
         builder.Services.AddSingleton<IWaveLinkVisualService, WaveLinkVisualService>();
+        builder.Services.AddSingleton<INowPlayingArtworkService, NowPlayingArtworkService>();
         builder.Services.AddSingleton<IDeviceDefaultsService, DeviceDefaultsService>();
         builder.Services.AddSingleton<StartupSettingsApplier>();
 

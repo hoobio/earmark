@@ -142,6 +142,9 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         // ShowAppIndicators feeds the apps-row visibility and the layout opt-out.
         OnPropertyChanged(nameof(ShowAppsSection));
         OnPropertyChanged(nameof(IsLayoutCustomSized));
+        // ShowNowPlaying / card-background feed the now-playing visuals.
+        OnPropertyChanged(nameof(ShowNowPlaying));
+        OnPropertyChanged(nameof(ShowCardBackground));
         // Section-divider toggle (and the rows they bracket) may have changed.
         OnPropertyChanged(nameof(ShowVolumeDivider));
         OnPropertyChanged(nameof(ShowAppsDivider));
@@ -156,9 +159,52 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
 
     public bool HasApps => Apps.Count > 0;
 
-    /// <summary>Whether the apps row actually renders: there are chips AND the user hasn't turned
+    /// <summary>One now-playing strip per app on this card that exposes SMTC media info (a media app
+    /// reports a single SMTC session even across multiple tabs, so e.g. two browser tabs are one row;
+    /// distinct apps each get a row). Reconciled in place by <c>HomeViewModel.SyncNowPlaying</c>; each
+    /// matched app's chip is shown inside its strip and hidden from the apps row.</summary>
+    public ObservableCollection<NowPlayingStrip> NowPlayingStrips { get; } = new();
+
+    /// <summary>The strip whose artwork backs the whole card when "fill card background" is on - the
+    /// primary (playing, top) now-playing row, or null when none. Set by <c>HomeViewModel</c>.</summary>
+    [ObservableProperty]
+    public partial NowPlayingStrip? PrimaryNowPlaying { get; set; }
+
+    partial void OnPrimaryNowPlayingChanged(NowPlayingStrip? value) => OnPropertyChanged(nameof(ShowCardBackground));
+
+    /// <summary>Raises the now-playing visibility flags after the strip collection is reconciled.</summary>
+    public void NotifyNowPlayingChanged()
+    {
+        OnPropertyChanged(nameof(ShowNowPlaying));
+        OnPropertyChanged(nameof(ShowCardBackground));
+    }
+
+    /// <summary>Whether the now-playing section renders: at least one strip AND the user hasn't turned
+    /// the feature off globally.</summary>
+    public bool ShowNowPlaying => NowPlayingStrips.Count > 0 && MeterOptions.ShowNowPlaying;
+
+    /// <summary>Whether the card paints the primary now-playing artwork as its full background: the
+    /// feature and the card-background option are both on AND a primary strip exists.</summary>
+    public bool ShowCardBackground => MeterOptions.ShowNowPlaying && MeterOptions.NowPlayingCardBackground && PrimaryNowPlaying is not null;
+
+    /// <summary>Whether any chip would actually show in the apps row (i.e. isn't currently hoisted into
+    /// the now-playing strip). The matched now-playing chip is collapsed out of the row, so a card whose
+    /// only app is the one playing shouldn't render an empty apps row (or its divider).</summary>
+    public bool HasRowApps
+    {
+        get
+        {
+            foreach (var app in Apps)
+            {
+                if (!app.IsInNowPlaying) return true;
+            }
+            return false;
+        }
+    }
+
+    /// <summary>Whether the apps row actually renders: there are row chips AND the user hasn't turned
     /// app indicators off globally. Drives the section visibility and the layout opt-out.</summary>
-    public bool ShowAppsSection => HasApps && MeterOptions.ShowAppIndicators;
+    public bool ShowAppsSection => HasRowApps && MeterOptions.ShowAppIndicators;
 
     /// <summary>
     /// Opt-out from the wrap layouts' row-baseline sizing (consumed by both
@@ -200,6 +246,7 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     public void NotifyAppsChanged()
     {
         OnPropertyChanged(nameof(HasApps));
+        OnPropertyChanged(nameof(HasRowApps));
         OnPropertyChanged(nameof(ShowAppsSection));
         OnPropertyChanged(nameof(IsLayoutCustomSized));
         OnPropertyChanged(nameof(ShowAppsDivider));

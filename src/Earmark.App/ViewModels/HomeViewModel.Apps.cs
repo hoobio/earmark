@@ -1,5 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
+using System.IO;
+using System.Linq;
 
 using Earmark.App.Services;
 using Earmark.App.Settings;
@@ -553,5 +555,134 @@ public partial class HomeViewModel
                 }
             }
         }
+    }
+
+    // ---- Now playing strip (SMTC) ----
+
+    /// <summary>
+    /// Ties each render card's app chips to the SMTC now-playing snapshot: every chip that maps to a
+    /// distinct session gets a strip row (a media app reports one SMTC session even across tabs, so a
+    /// browser is a single row; different apps each get their own). Matched chips are hidden from the
+    /// apps row. Runs at the tail of <see cref="SyncAllCardsApps"/> so it sees the freshly-reconciled
+    /// chips; existing strips are updated/reordered in place so a track change doesn't rebuild the row.
+    /// </summary>
+    private void SyncNowPlaying()
+    {
+        var enabled = _meterOptions.ShowNowPlaying;
+        IReadOnlyList<NowPlayingInfo> sessions = enabled ? _nowPlaying.GetSessions() : Array.Empty<NowPlayingInfo>();
+
+        foreach (var card in _allCards)
+        {
+            var matches = new List<(AppChip Chip, NowPlayingInfo Info)>();
+            if (enabled && card.Endpoint.Flow == EndpointFlow.Render)
+            {
+                var usedSessions = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var chip in card.Apps)
+                {
+                    if (chip.IsClosed) continue;
+                    var info = MatchNowPlaying(chip, sessions);
+                    if (info is null) continue;
+                    // One row per session: a session already shown (matched a likelier chip) is skipped.
+                    if (!usedSessions.Add(info.SessionKey)) continue;
+                    matches.Add((chip, info));
+                }
+                // Playing sessions first, then a stable order by title, so rows don't reshuffle on ticks.
+                matches = matches
+                    .OrderByDescending(m => m.Info.IsPlaying)
+                    .ThenBy(m => m.Info.Title, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+            }
+
+            ReconcileNowPlaying(card, matches);
+        }
+    }
+
+    /// <summary>Reconciles a card's <see cref="DeviceCard.NowPlayingStrips"/> against the matched
+    /// (chip, session) set: hides matched chips from the apps row, removes vanished strips, updates
+    /// surviving ones in place, inserts new ones, and reorders to the desired order.</summary>
+    private void ReconcileNowPlaying(DeviceCard card, List<(AppChip Chip, NowPlayingInfo Info)> matches)
+    {
+        var matchedChips = new HashSet<AppChip>(matches.Select(m => m.Chip));
+
+        var rowChanged = false;
+        foreach (var chip in card.Apps)
+        {
+            var want = matchedChips.Contains(chip);
+            if (chip.IsInNowPlaying != want) { chip.IsInNowPlaying = want; rowChanged = true; }
+        }
+        if (rowChanged) NotifyCardApps(card);
+
+        var strips = card.NowPlayingStrips;
+        var before = strips.Count;
+
+        // Drop strips whose app no longer has a now-playing session.
+        for (var i = strips.Count - 1; i >= 0; i--)
+        {
+            if (!matchedChips.Contains(strips[i].Chip)) strips.RemoveAt(i);
+        }
+
+        // Update / insert / reorder to match the desired order.
+        for (var idx = 0; idx < matches.Count; idx++)
+        {
+            var (chip, info) = matches[idx];
+            var cur = IndexOfStrip(strips, chip);
+            if (cur < 0)
+            {
+                strips.Insert(Math.Min(idx, strips.Count), new NowPlayingStrip(chip, info, _nowPlaying, _nowPlayingArtwork, _meterOptions));
+            }
+            else
+            {
+                strips[cur].Update(info);
+                if (cur != idx) strips.Move(cur, idx);
+            }
+        }
+
+        // The primary strip (top row = playing-first) backs the whole card when that option is on.
+        card.PrimaryNowPlaying = strips.Count > 0 ? strips[0] : null;
+
+        if (strips.Count != before) card.NotifyNowPlayingChanged();
+    }
+
+    private static int IndexOfStrip(ObservableCollection<NowPlayingStrip> strips, AppChip chip)
+    {
+        for (var i = 0; i < strips.Count; i++)
+        {
+            if (ReferenceEquals(strips[i].Chip, chip)) return i;
+        }
+        return -1;
+    }
+
+    /// <summary>Best-effort match of a chip's app to a now-playing session. SMTC keys on an AUMID
+    /// (<see cref="NowPlayingInfo.AppMatchToken"/>, normalised to an exe-ish stem) which we compare
+    /// against the chip's process name / executable stem / display name. Heuristic by nature - see the
+    /// research doc on AUMID-to-process aliasing - but it covers Spotify, browsers, and common media
+    /// players. Returns the best match (a playing session wins over a paused one), or null.</summary>
+    private static NowPlayingInfo? MatchNowPlaying(AppChip chip, IReadOnlyList<NowPlayingInfo> sessions)
+    {
+        if (sessions.Count == 0) return null;
+        var procStem = StripExe(chip.Session.ProcessName);
+        var exeStem = StripExe(Path.GetFileName(chip.Session.ExecutablePath));
+        var display = (chip.Session.DisplayName ?? string.Empty).ToLowerInvariant();
+
+        NowPlayingInfo? best = null;
+        foreach (var info in sessions)
+        {
+            var token = info.AppMatchToken;
+            if (token.Length < 3) continue;
+            var hit =
+                token == procStem || token == exeStem ||
+                (procStem.Length >= 3 && (procStem.Contains(token, StringComparison.Ordinal) || token.Contains(procStem, StringComparison.Ordinal))) ||
+                (display.Length > 0 && display.Contains(token, StringComparison.Ordinal));
+            if (!hit) continue;
+            if (best is null || (info.IsPlaying && !best.IsPlaying)) best = info;
+        }
+        return best;
+    }
+
+    private static string StripExe(string? name)
+    {
+        var s = (name ?? string.Empty).ToLowerInvariant();
+        if (s.EndsWith(".exe", StringComparison.Ordinal)) s = s[..^4];
+        return s;
     }
 }
