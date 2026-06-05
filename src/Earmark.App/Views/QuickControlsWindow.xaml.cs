@@ -32,6 +32,10 @@ public sealed partial class QuickControlsWindow : Window
     private readonly ISettingsService _settings;
     private readonly nint _hwnd;
     private ISystemBackdropControllerWithTargets? _backdropController;
+    // Overlay windows render as a stack and are shown one after another, so all but the
+    // last-activated window would otherwise sit deactivated and Acrylic/Mica would paint its
+    // opaque fallback colour. Pin the backdrop input state active so every window keeps its
+    // translucent material instead of falling back to solid.
     private readonly SystemBackdropConfiguration _backdropConfig = new() { IsInputActive = true };
     private BackdropMode? _appliedBackdrop;
 
@@ -49,7 +53,6 @@ public sealed partial class QuickControlsWindow : Window
         ApplySettings();
         ConfigureWindow();
         Hide();
-        Activated += OnActivated;
         Root.ActualThemeChanged += OnRootActualThemeChanged;
         _settings.SettingsChanged += OnSettingsChanged;
         Closed += OnClosed;
@@ -80,8 +83,9 @@ public sealed partial class QuickControlsWindow : Window
     {
         ArgumentNullException.ThrowIfNull(blocks);
 
-        var width = Math.Min(OverlayWidth, Math.Max(1, workArea.Width - (OverlayMargin * 2)));
-        var contentWidth = Math.Max(1, width - (OverlayPadding * 2));
+        var scale = GetScale(workArea);
+        var width = ResolveOverlayWidth(workArea, scale);
+        var contentWidth = Math.Max(1, (width / scale) - (OverlayPadding * 2));
 
         ConfigureWindow();
         Repeater.ItemsSource = null;
@@ -94,12 +98,13 @@ public sealed partial class QuickControlsWindow : Window
         Root.UpdateLayout();
         Repeater.Measure(new Windows.Foundation.Size(contentWidth, double.PositiveInfinity));
 
-        return Math.Max(OverlayPadding * 2, (int)Math.Ceiling(Repeater.DesiredSize.Height) + (OverlayPadding * 2));
+        var desiredDip = Repeater.DesiredSize.Height + (OverlayPadding * 2);
+        return Math.Max((int)Math.Ceiling(OverlayPadding * 2 * scale), (int)Math.Ceiling(desiredDip * scale));
     }
 
     public int PrepareMeasuredBlocks(RectInt32 workArea, int bottom, int maxHeight, int desiredHeight)
     {
-        var width = Math.Min(OverlayWidth, Math.Max(1, workArea.Width - (OverlayMargin * 2)));
+        var width = ResolveOverlayWidth(workArea, GetScale(workArea));
         var workTop = workArea.Y + OverlayMargin;
         var workBottom = workArea.Y + workArea.Height - OverlayMargin;
         var boundedBottom = Math.Clamp(bottom, workTop + 1, workBottom);
@@ -145,6 +150,21 @@ public sealed partial class QuickControlsWindow : Window
         Close();
     }
 
+    private static int ResolveOverlayWidth(RectInt32 workArea, double scale) =>
+        Math.Min((int)Math.Ceiling(OverlayWidth * scale), Math.Max(1, workArea.Width - (OverlayMargin * 2)));
+
+    private static double GetScale(RectInt32 workArea)
+    {
+        var center = new POINT { X = workArea.X + (workArea.Width / 2), Y = workArea.Y + (workArea.Height / 2) };
+        var monitor = MonitorFromPoint(center, MONITOR_DEFAULTTONEAREST);
+        if (GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, out var dpiX, out _) == 0 && dpiX > 0)
+        {
+            return dpiX / 96.0;
+        }
+
+        return 1.0;
+    }
+
     private void ConfigureWindow()
     {
         if (AppWindow.Presenter is OverlappedPresenter presenter)
@@ -157,11 +177,6 @@ public sealed partial class QuickControlsWindow : Window
         }
 
         ConfigureToolWindow();
-    }
-
-    private void OnActivated(object sender, WindowActivatedEventArgs args)
-    {
-        _backdropConfig.IsInputActive = args.WindowActivationState != WindowActivationState.Deactivated;
     }
 
     private void ApplySettings()
@@ -282,6 +297,21 @@ public sealed partial class QuickControlsWindow : Window
     private const int DwmWindowBorderColor = 34;
     private const int DwmWindowCornerPreference = 33;
     private const int DwmWindowCornerPreferenceRound = 2;
+    private const uint MONITOR_DEFAULTTONEAREST = 2;
+    private const int MDT_EFFECTIVE_DPI = 0;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct POINT
+    {
+        public int X;
+        public int Y;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern nint MonitorFromPoint(POINT pt, uint dwFlags);
+
+    [DllImport("Shcore.dll")]
+    private static extern int GetDpiForMonitor(nint hmonitor, int dpiType, out uint dpiX, out uint dpiY);
 
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW", SetLastError = true)]
     private static extern nint GetWindowLongPtr(nint hWnd, int nIndex);
