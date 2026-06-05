@@ -123,6 +123,19 @@ public sealed class AppSettings
     /// rules chips and no-rules text on every card.</summary>
     public bool ShowRules { get; set; } = true;
 
+    /// <summary>Whether a device card shows the "now playing" strip when an app on it exposes media
+    /// transport info (title / artwork / controls) via Windows' SMTC. Default true; off hides the
+    /// strip and returns the app's chip to the regular apps row.</summary>
+    public bool ShowNowPlaying { get; set; } = true;
+
+    /// <summary>How the now-playing strip blurs low-resolution artwork to fill its backdrop. High-res
+    /// art fills sharp regardless of this setting.</summary>
+    public NowPlayingBackdropBlurMode NowPlayingBackdropBlur { get; set; } = NowPlayingBackdropBlurMode.Gaussian;
+
+    /// <summary>Whether the primary now-playing artwork also fills the whole device card as a dimmed
+    /// background (the playing session wins when a card has several). Default off.</summary>
+    public bool NowPlayingCardBackground { get; set; }
+
     /// <summary>How device cards size their height within a row. <see cref="CardHeightMode.Balanced"/>
     /// (default) aligns plain cards to the row's tallest plain card while letting a card with apps /
     /// expanded rules keep its own height; <see cref="CardHeightMode.MatchRow"/> makes every card in a

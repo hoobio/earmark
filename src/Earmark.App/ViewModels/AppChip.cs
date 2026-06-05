@@ -310,6 +310,13 @@ public partial class AppChip : ObservableObject, IWrapOrdered
         OnPropertyChanged(nameof(HasNoIcon));
     }
 
+    /// <summary>True while this app's chip is rendered inside the card's now-playing strip (top-left)
+    /// instead of the regular apps row. The apps-row container binds its visibility to the negation of
+    /// this, so a collapsed chip measures zero and leaves the row, while the same instance drives the
+    /// strip via <c>NowPlayingStrip.Chip</c>. Set by <c>HomeViewModel.SyncNowPlaying</c>.</summary>
+    [ObservableProperty]
+    public partial bool IsInNowPlaying { get; set; }
+
     [ObservableProperty]
     public partial float PeakLevel { get; set; }
 

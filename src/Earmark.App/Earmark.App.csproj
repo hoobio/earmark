@@ -56,6 +56,8 @@
          $(PkgMicrosoft_WindowsAppSDK_Runtime) so the target can read the runtime MSIX. -->
     <PackageReference Include="Microsoft.WindowsAppSDK.Runtime" GeneratePathProperty="true" />
     <PackageReference Include="CommunityToolkit.Mvvm" />
+    <!-- Win2D: Gaussian blur for the now-playing strip's low-res-artwork backdrop. -->
+    <PackageReference Include="Microsoft.Graphics.Win2D" />
     <PackageReference Include="CommunityToolkit.WinUI.Controls.SettingsControls" />
     <PackageReference Include="CommunityToolkit.WinUI.Behaviors" />
     <PackageReference Include="CommunityToolkit.WinUI.Animations" />

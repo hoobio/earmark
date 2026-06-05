@@ -112,6 +112,24 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     public partial bool ShowRules { get; set; }
 
+    /// <summary>Whether device cards show the now-playing strip when an app exposes SMTC media info.</summary>
+    [ObservableProperty]
+    public partial bool ShowNowPlaying { get; set; }
+
+    /// <summary>Now-playing artwork blur ComboBox index. Maps 1:1 to
+    /// <see cref="NowPlayingBackdropBlurMode"/> (Gaussian=0, Downscale=1). Only meaningful when
+    /// <see cref="ShowNowPlaying"/> is on.</summary>
+    [ObservableProperty]
+    public partial int NowPlayingBlurIndex { get; set; }
+
+    /// <summary>Whether the primary now-playing artwork fills the whole card as a dimmed background.
+    /// Only meaningful when <see cref="ShowNowPlaying"/> is on.</summary>
+    [ObservableProperty]
+    public partial bool NowPlayingCardBackground { get; set; }
+
+    /// <summary>Gates the now-playing child setting (blur mode) - only matters while the strip shows.</summary>
+    public bool NowPlayingChildrenEnabled => ShowNowPlaying;
+
     /// <summary>Bound to the theme ComboBox SelectedIndex. Maps 1:1 to <see cref="AppTheme"/>
     /// (System=0, Light=1, Dark=2).</summary>
     [ObservableProperty]
@@ -204,6 +222,9 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
             CardHeightModeIndex = (int)_settings.Current.CardHeight;
             ShowCardDividers = _settings.Current.ShowCardDividers;
             ShowRules = _settings.Current.ShowRules;
+            ShowNowPlaying = _settings.Current.ShowNowPlaying;
+            NowPlayingBlurIndex = (int)_settings.Current.NowPlayingBackdropBlur;
+            NowPlayingCardBackground = _settings.Current.NowPlayingCardBackground;
             AppThemeIndex = (int)_settings.Current.Theme;
             BackdropIndex = (int)_settings.Current.Backdrop;
             EnableWaveLink = _settings.Current.EnableWaveLink;
@@ -355,6 +376,13 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     partial void OnCardHeightModeIndexChanged(int value) => Persist(s => s.CardHeight = (CardHeightMode)value);
     partial void OnShowCardDividersChanged(bool value) => Persist(s => s.ShowCardDividers = value);
     partial void OnShowRulesChanged(bool value) => Persist(s => s.ShowRules = value);
+    partial void OnShowNowPlayingChanged(bool value)
+    {
+        Persist(s => s.ShowNowPlaying = value);
+        OnPropertyChanged(nameof(NowPlayingChildrenEnabled));
+    }
+    partial void OnNowPlayingBlurIndexChanged(int value) => Persist(s => s.NowPlayingBackdropBlur = (NowPlayingBackdropBlurMode)value);
+    partial void OnNowPlayingCardBackgroundChanged(bool value) => Persist(s => s.NowPlayingCardBackground = value);
     partial void OnAppThemeIndexChanged(int value) => Persist(s => s.Theme = (AppTheme)value);
     partial void OnBackdropIndexChanged(int value) => Persist(s => s.Backdrop = (BackdropMode)value);
     partial void OnEnableWaveLinkChanged(bool value) => Persist(s => s.EnableWaveLink = value);

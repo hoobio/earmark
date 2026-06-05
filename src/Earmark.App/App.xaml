@@ -14,12 +14,20 @@
             <ResourceDictionary.ThemeDictionaries>
                 <ResourceDictionary x:Key="Default">
                     <SolidColorBrush x:Key="ContentSurfaceBrush" Color="{ThemeResource SystemBaseLowColor}" Opacity="0.55" />
+                    <!-- Now-playing artwork scrim: a theme-aware translucent veil so the card's standard
+                         theme-coloured text/controls stay legible over the art while the art shows through.
+                         Dark veil in dark theme (light text), light veil in light theme (dark text); a
+                         solid window colour under High Contrast. WinUI has no built-in adaptive scrim, so
+                         this is the one place a brush is defined; everything on top uses theme brushes. -->
+                    <SolidColorBrush x:Key="NowPlayingScrimBrush" Color="#000000" Opacity="0.50" />
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="Light">
                     <SolidColorBrush x:Key="ContentSurfaceBrush" Color="{ThemeResource SystemBaseLowColor}" Opacity="0.45" />
+                    <SolidColorBrush x:Key="NowPlayingScrimBrush" Color="#FFFFFF" Opacity="0.58" />
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="HighContrast">
                     <SolidColorBrush x:Key="ContentSurfaceBrush" Color="{ThemeResource SystemColorWindowColor}" />
+                    <SolidColorBrush x:Key="NowPlayingScrimBrush" Color="{ThemeResource SystemColorWindowColor}" />
                 </ResourceDictionary>
             </ResourceDictionary.ThemeDictionaries>
 
@@ -38,6 +46,7 @@
             <converters:MutedBrushConverter x:Key="MutedBrushConverter" />
             <converters:MuteLockedBackgroundConverter x:Key="MuteLockedBackgroundConverter" />
             <converters:PeakLevelToBrushConverter x:Key="PeakLevelToBrushConverter" />
+            <converters:SecondsToTimestampConverter x:Key="SecondsToTimestampConverter" />
 
             <!-- Fluent 2 spacing scale (4px grid). size20/40/80/120/160/200/240/320. -->
             <x:Double x:Key="SpacingXXSmall">2</x:Double>

@@ -75,6 +75,9 @@ public sealed partial class WrapPanel : Panel
         double x = 0, y = 0, rowHeight = 0, maxRowWidth = 0;
         foreach (var child in OrderedChildren())
         {
+            // A collapsed child (e.g. a chip hoisted into the now-playing strip) takes no slot and
+            // must not contribute spacing, or it leaves a phantom gap in the row.
+            if (child.Visibility == Visibility.Collapsed) continue;
             var d = child.DesiredSize;
 
             if (x > 0 && x + HorizontalSpacing + d.Width > maxWidth)
@@ -102,6 +105,7 @@ public sealed partial class WrapPanel : Panel
         double x = 0, y = 0, rowHeight = 0;
         foreach (var child in OrderedChildren())
         {
+            if (child.Visibility == Visibility.Collapsed) continue;
             var d = child.DesiredSize;
 
             if (x > 0 && x + HorizontalSpacing + d.Width > maxWidth)

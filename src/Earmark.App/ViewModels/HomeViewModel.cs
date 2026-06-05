@@ -58,10 +58,14 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     private readonly IDispatcherQueueProvider _dispatcher;
     private readonly IDeviceDefaultsService _deviceDefaults;
     private readonly IBluetoothAudioControl _bluetoothControl;
+    private readonly INowPlayingService _nowPlaying;
+    private readonly INowPlayingArtworkService _nowPlayingArtwork;
     private WaveLinkChannelStyle? _lastAppliedStyle;
     private bool? _lastFilterForwarders;
     private bool? _lastShowAppIndicators;
     private bool? _lastAlwaysShowPinned;
+    private bool? _lastShowNowPlaying;
+    private NowPlayingBackdropBlurMode? _lastNowPlayingBlur;
     private int? _lastHiddenAppsCount;
     private int? _lastHiddenAppsOnDeviceCount;
     /// <summary>Identity keys of apps the user has permanently hidden from the chip rows, mirrored
@@ -111,6 +115,8 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         IDispatcherQueueProvider dispatcher,
         IDeviceDefaultsService deviceDefaults,
         IBluetoothAudioControl bluetoothControl,
+        INowPlayingService nowPlaying,
+        INowPlayingArtworkService nowPlayingArtwork,
         ILogger<HomeViewModel> logger)
     {
         _rules = rules ?? throw new ArgumentNullException(nameof(rules));
@@ -133,6 +139,8 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         _dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
         _deviceDefaults = deviceDefaults ?? throw new ArgumentNullException(nameof(deviceDefaults));
         _bluetoothControl = bluetoothControl ?? throw new ArgumentNullException(nameof(bluetoothControl));
+        _nowPlaying = nowPlaying ?? throw new ArgumentNullException(nameof(nowPlaying));
+        _nowPlayingArtwork = nowPlayingArtwork ?? throw new ArgumentNullException(nameof(nowPlayingArtwork));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
         // Show-hidden is session-only: defaults to off on every launch.
@@ -159,6 +167,10 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         // gets a dimmed chip on its target card, and loses it when the process exits.
         _processes.ProcessStarted += OnProcessSetChanged;
         _processes.ProcessStopped += OnProcessSetChanged;
+        // SMTC now-playing changes (track / metadata / playback / timeline) reconcile the strips via
+        // the same debounced in-place path as session changes. Arrives on a background thread; the
+        // reconcile re-marshals to the UI thread itself.
+        _nowPlaying.Changed += OnNowPlayingChanged;
         // After a route is applied (rule reapply, per-app default change, drag-drop), the
         // meter cache often holds stale IAudioSessionControl handles that report 0 peak on
         // the now-correct endpoint and lingering peak on the old one - which leaves the
@@ -389,6 +401,15 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         if (_meterOptions.ShowAppIndicators)
         {
             TickAppMeters();
+        }
+
+        // Advance each visible card's now-playing progress lines between SMTC snapshots.
+        if (_meterOptions.ShowNowPlaying)
+        {
+            foreach (var card in _visibleCards)
+            {
+                foreach (var strip in card.NowPlayingStrips) strip.Tick();
+            }
         }
     }
 
@@ -633,6 +654,8 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     // Process start/stop (from the running-process watcher, off a timer thread) shares the same
     // debounced in-place reconcile - a burst of starts at login collapses into one SyncAllCardsApps.
     private void OnProcessSetChanged(object? sender, RunningProcessEvent e) => QueueAppsReconcile();
+
+    private void OnNowPlayingChanged(object? sender, EventArgs e) => QueueAppsReconcile();
 
     private void QueueAppsReconcile()
     {
@@ -934,11 +957,15 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             if (hiddenAppsChanged ||
                 _settings.Current.FilterAudioForwarders != _lastFilterForwarders ||
                 _settings.Current.ShowAppIndicators != _lastShowAppIndicators ||
-                _settings.Current.AlwaysShowPinnedApps != _lastAlwaysShowPinned)
+                _settings.Current.AlwaysShowPinnedApps != _lastAlwaysShowPinned ||
+                _settings.Current.ShowNowPlaying != _lastShowNowPlaying ||
+                _settings.Current.NowPlayingBackdropBlur != _lastNowPlayingBlur)
             {
                 _lastFilterForwarders = _settings.Current.FilterAudioForwarders;
                 _lastShowAppIndicators = _settings.Current.ShowAppIndicators;
                 _lastAlwaysShowPinned = _settings.Current.AlwaysShowPinnedApps;
+                _lastShowNowPlaying = _settings.Current.ShowNowPlaying;
+                _lastNowPlayingBlur = _settings.Current.NowPlayingBackdropBlur;
                 QueueAppsReconcile();
             }
             if (_settings.Current.WaveLinkChannelStyle == _lastAppliedStyle) return;
@@ -961,6 +988,9 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         _meterOptions.CardHeight = s.CardHeight;
         _meterOptions.ShowCardDividers = s.ShowCardDividers;
         _meterOptions.ShowRules = s.ShowRules;
+        _meterOptions.ShowNowPlaying = s.ShowNowPlaying;
+        _meterOptions.NowPlayingBlur = s.NowPlayingBackdropBlur;
+        _meterOptions.NowPlayingCardBackground = s.NowPlayingCardBackground;
         foreach (var card in _allCards) card.NotifyMeterStyleChanged();
     }
 
@@ -1114,6 +1144,8 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         {
             SyncCardApps(card, effectiveSessions, routeByPid, existsIdentities, liveSessionByIdentity, alwaysShowPinned);
         }
+
+        SyncNowPlaying();
     }
 
     /// <summary>

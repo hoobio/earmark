@@ -69,6 +69,11 @@ public sealed partial class DeviceCardView : UserControl
     public Visibility RuleVis(bool showRules, bool cardWants) =>
         showRules && cardWants ? Visibility.Visible : Visibility.Collapsed;
 
+    /// <summary>x:Bind function: the external volume->rules divider hides while the now-playing section
+    /// shows, so no divider sits directly above or below the strip (the dark band is its own separator).</summary>
+    public Visibility VolumeRulesDividerVis(bool showRules, bool showVolumeDivider, bool showNowPlaying) =>
+        showRules && showVolumeDivider && !showNowPlaying ? Visibility.Visible : Visibility.Collapsed;
+
     /// <summary>Raised when "Rename group" is picked from a card/app-chip menu, so the host can focus
     /// the group's title editor (which lives in the page's tree, not here).</summary>
     public event EventHandler<DeviceGroupCard>? RenameGroupRequested;
@@ -221,6 +226,51 @@ public sealed partial class DeviceCardView : UserControl
                     : Visibility.Collapsed;
             }
         }
+    }
+
+    // ---- Now-playing seek slider (freeze position while dragging, seek on release) ----
+
+    // Grabbing the Slider's Thumb marks the pointer events handled, so plain XAML handlers never fire.
+    // Wiring them with handledEventsToo:true (and on the Thumb's drag, via PointerCaptureLost for the
+    // end) makes the freeze engage whether the user grabs the thumb or clicks the track.
+    private void OnSeekSliderLoaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Slider slider) return;
+        slider.AddHandler(PointerPressedEvent, new PointerEventHandler(OnSeekSliderPressed), handledEventsToo: true);
+        slider.AddHandler(PointerReleasedEvent, new PointerEventHandler(OnSeekSliderReleased), handledEventsToo: true);
+        slider.AddHandler(PointerCaptureLostEvent, new PointerEventHandler(OnSeekSliderReleased), handledEventsToo: true);
+        slider.AddHandler(KeyDownEvent, new KeyEventHandler(OnSeekSliderKeyDown), handledEventsToo: true);
+        slider.AddHandler(KeyUpEvent, new KeyEventHandler(OnSeekSliderKeyUp), handledEventsToo: true);
+    }
+
+    private void OnSeekSliderPressed(object sender, PointerRoutedEventArgs e)
+    {
+        if (sender is not Slider { Tag: NowPlayingStrip strip } slider) return;
+        strip.BeginSeek();
+        // Focus the slider so Escape (to cancel the drag) reaches its KeyDown while the pointer is held.
+        slider.Focus(FocusState.Pointer);
+    }
+
+    private void OnSeekSliderReleased(object sender, PointerRoutedEventArgs e)
+    {
+        if (sender is Slider { Tag: NowPlayingStrip strip } slider) _ = strip.EndSeekAsync(slider.Value);
+    }
+
+    private void OnSeekSliderKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (sender is not Slider { Tag: NowPlayingStrip strip }) return;
+        if (e.Key == VirtualKey.Escape)
+        {
+            strip.CancelSeek();
+            e.Handled = true;
+            return;
+        }
+        if (IsSliderNudgeKey(e.Key)) strip.BeginSeek();
+    }
+
+    private void OnSeekSliderKeyUp(object sender, KeyRoutedEventArgs e)
+    {
+        if (IsSliderNudgeKey(e.Key) && sender is Slider { Tag: NowPlayingStrip strip } slider) _ = strip.EndSeekAsync(slider.Value);
     }
 
     // ---- Context-menu actions (the device + app-chip menus share these) ----
