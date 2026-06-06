@@ -347,6 +347,10 @@ jobs:
   wack:
     name: WACK (${{ matrix.platform }})
     needs: [build-msix]
+    # build-msix runs via `if: always()` (it overrides the skipped release-please job on PRs). Without
+    # an explicit condition here, that upstream skip propagates through and skips WACK too. Gate on
+    # build-msix's actual result so WACK runs whenever the package was built, and skips with it.
+    if: always() && needs.build-msix.result == 'success'
     runs-on: windows-latest
     strategy:
       fail-fast: false
