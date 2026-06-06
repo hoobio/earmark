@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 
 using Earmark.App.Services;
 using Earmark.App.Settings;
@@ -32,9 +33,15 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         _defaults = defaults ?? throw new ArgumentNullException(nameof(defaults));
         _hotkey = hotkey ?? throw new ArgumentNullException(nameof(hotkey));
         _waveLink.StateChanged += OnWaveLinkStateChanged;
+        _settings.SettingsChanged += OnSettingsServiceChanged;
         SyncFromSettings();
         SyncFromWaveLink();
     }
+
+    // The Customise dialog (Home page) writes per-device overrides through the same settings store,
+    // so refresh the override counts when it saves - this singleton VM otherwise only syncs once.
+    private void OnSettingsServiceChanged(object? sender, EventArgs e) =>
+        _dispatcher.Enqueue(RefreshOverrideCounts);
 
     /// <summary>Restores the Devices page to its default groups, order, and visibility. Rules and all
     /// other settings are left untouched. The Devices page rebuilds via the service's event.</summary>
@@ -193,6 +200,108 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         _ => "TextFillColorTertiaryBrush",
     };
 
+    // ---- Per-device display overrides (warnings shown under the matching global toggles) ----
+
+    /// <summary>Friendly names of the devices whose config sets the given override (non-null),
+    /// sorted for a stable tooltip. Names come from the known-devices table; a device not seen
+    /// since (no entry) falls back to its raw key.</summary>
+    private List<string> OverrideDeviceNames(Func<DeviceConfig, bool?> selector)
+    {
+        var known = _settings.Current.KnownDevices;
+        var names = new List<string>();
+        foreach (var (key, cfg) in _settings.Current.Devices)
+        {
+            if (selector(cfg) is null) continue;
+            var match = known.FirstOrDefault(k => string.Equals(k.Key, key, StringComparison.OrdinalIgnoreCase));
+            names.Add(string.IsNullOrEmpty(match?.FriendlyName) ? key : match!.FriendlyName);
+        }
+        names.Sort(StringComparer.OrdinalIgnoreCase);
+        return names;
+    }
+
+    private static string OverrideMessage(int count) =>
+        count == 1 ? "1 device overrides this setting" : $"{count} devices override this setting";
+
+    public int NowPlayingOverrideCount => OverrideDeviceNames(c => c.ShowNowPlaying).Count;
+    public bool HasNowPlayingOverrides => NowPlayingOverrideCount > 0;
+    public string NowPlayingOverrideMessage => OverrideMessage(NowPlayingOverrideCount);
+    public string NowPlayingOverrideTooltip => string.Join("\n", OverrideDeviceNames(c => c.ShowNowPlaying));
+
+    public int NowPlayingFillOverrideCount => OverrideDeviceNames(c => c.NowPlayingFill).Count;
+    public bool HasNowPlayingFillOverrides => NowPlayingFillOverrideCount > 0;
+    public string NowPlayingFillOverrideMessage => OverrideMessage(NowPlayingFillOverrideCount);
+    public string NowPlayingFillOverrideTooltip => string.Join("\n", OverrideDeviceNames(c => c.NowPlayingFill));
+
+    public int AppIndicatorsOverrideCount => OverrideDeviceNames(c => c.ShowAppIndicators).Count;
+    public bool HasAppIndicatorsOverrides => AppIndicatorsOverrideCount > 0;
+    public string AppIndicatorsOverrideMessage => OverrideMessage(AppIndicatorsOverrideCount);
+    public string AppIndicatorsOverrideTooltip => string.Join("\n", OverrideDeviceNames(c => c.ShowAppIndicators));
+
+    public int AppMetersOverrideCount => OverrideDeviceNames(c => c.ShowAppMeters).Count;
+    public bool HasAppMetersOverrides => AppMetersOverrideCount > 0;
+    public string AppMetersOverrideMessage => OverrideMessage(AppMetersOverrideCount);
+    public string AppMetersOverrideTooltip => string.Join("\n", OverrideDeviceNames(c => c.ShowAppMeters));
+
+    public int MeterEnabledOverrideCount => OverrideDeviceNames(c => c.MeterEnabled).Count;
+    public bool HasMeterEnabledOverrides => MeterEnabledOverrideCount > 0;
+    public string MeterEnabledOverrideMessage => OverrideMessage(MeterEnabledOverrideCount);
+    public string MeterEnabledOverrideTooltip => string.Join("\n", OverrideDeviceNames(c => c.MeterEnabled));
+
+    public int PeakIndicatorOverrideCount => OverrideDeviceNames(c => c.ShowPeakIndicator).Count;
+    public bool HasPeakIndicatorOverrides => PeakIndicatorOverrideCount > 0;
+    public string PeakIndicatorOverrideMessage => OverrideMessage(PeakIndicatorOverrideCount);
+    public string PeakIndicatorOverrideTooltip => string.Join("\n", OverrideDeviceNames(c => c.ShowPeakIndicator));
+
+    public int RulesOverrideCount => OverrideDeviceNames(c => c.ShowRules).Count;
+    public bool HasRulesOverrides => RulesOverrideCount > 0;
+    public string RulesOverrideMessage => OverrideMessage(RulesOverrideCount);
+    public string RulesOverrideTooltip => string.Join("\n", OverrideDeviceNames(c => c.ShowRules));
+
+    /// <summary>Clears one override across every device config, prunes any entry that becomes
+    /// default, and saves. The save fires SettingsChanged, which the Home view-model handles by
+    /// re-reading each card's overrides (so the live cards revert to following the global).</summary>
+    private void ClearOverrides(Action<DeviceConfig> clear)
+    {
+        Persist(s =>
+        {
+            var prune = new List<string>();
+            foreach (var (key, cfg) in s.Devices)
+            {
+                clear(cfg);
+                if (cfg.IsDefault) prune.Add(key);
+            }
+            foreach (var key in prune) s.Devices.Remove(key);
+        });
+        RefreshOverrideCounts();
+    }
+
+    [RelayCommand] private void ClearNowPlayingOverrides() => ClearOverrides(c => c.ShowNowPlaying = null);
+    [RelayCommand] private void ClearNowPlayingFillOverrides() => ClearOverrides(c => c.NowPlayingFill = null);
+    [RelayCommand] private void ClearAppIndicatorsOverrides() => ClearOverrides(c => c.ShowAppIndicators = null);
+    [RelayCommand] private void ClearAppMetersOverrides() => ClearOverrides(c => c.ShowAppMeters = null);
+    [RelayCommand] private void ClearMeterEnabledOverrides() => ClearOverrides(c => c.MeterEnabled = null);
+    [RelayCommand] private void ClearPeakIndicatorOverrides() => ClearOverrides(c => c.ShowPeakIndicator = null);
+    [RelayCommand] private void ClearRulesOverrides() => ClearOverrides(c => c.ShowRules = null);
+
+    /// <summary>Re-raises every override count / message / tooltip / visibility binding. Called on
+    /// load and whenever the settings store changes (e.g. a Customise-dialog save).</summary>
+    private void RefreshOverrideCounts()
+    {
+        foreach (var name in new[]
+        {
+            nameof(NowPlayingOverrideCount), nameof(HasNowPlayingOverrides), nameof(NowPlayingOverrideMessage), nameof(NowPlayingOverrideTooltip),
+            nameof(NowPlayingFillOverrideCount), nameof(HasNowPlayingFillOverrides), nameof(NowPlayingFillOverrideMessage), nameof(NowPlayingFillOverrideTooltip),
+            nameof(AppIndicatorsOverrideCount), nameof(HasAppIndicatorsOverrides), nameof(AppIndicatorsOverrideMessage), nameof(AppIndicatorsOverrideTooltip),
+            nameof(AppMetersOverrideCount), nameof(HasAppMetersOverrides), nameof(AppMetersOverrideMessage), nameof(AppMetersOverrideTooltip),
+            nameof(MeterEnabledOverrideCount), nameof(HasMeterEnabledOverrides), nameof(MeterEnabledOverrideMessage), nameof(MeterEnabledOverrideTooltip),
+            nameof(PeakIndicatorOverrideCount), nameof(HasPeakIndicatorOverrides), nameof(PeakIndicatorOverrideMessage), nameof(PeakIndicatorOverrideTooltip),
+            nameof(RulesOverrideCount), nameof(HasRulesOverrides), nameof(RulesOverrideMessage), nameof(RulesOverrideTooltip),
+        })
+        {
+            OnPropertyChanged(name);
+        }
+    }
+
     public void SyncFromSettings()
     {
         _suppress = true;
@@ -232,6 +341,7 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         {
             _suppress = false;
         }
+        RefreshOverrideCounts();
     }
 
     private void SyncFromWaveLink() => WaveLinkState = _waveLink.State;
@@ -417,6 +527,7 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     public void Dispose()
     {
         _waveLink.StateChanged -= OnWaveLinkStateChanged;
+        _settings.SettingsChanged -= OnSettingsServiceChanged;
     }
 }
 

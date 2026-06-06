@@ -287,11 +287,43 @@ public sealed class DeviceConfig
     /// the default tile when there is none).</summary>
     public string? AccentColour { get; set; }
 
+    // ---- Per-device display overrides ----
+    //
+    // Each mirrors a global display setting but is tri-state: null = follow the global setting,
+    // true / false = force on / off for this device alone. Resolved by the card's effective
+    // PeakMeterOptions (override ?? global). Null entries are omitted from the JSON.
+
+    /// <summary>Override for the now-playing strip (global <see cref="AppSettings.ShowNowPlaying"/>).</summary>
+    public bool? ShowNowPlaying { get; set; }
+
+    /// <summary>Override for now-playing fill-card-background vs strip-only
+    /// (global <see cref="AppSettings.NowPlayingCardBackground"/>).</summary>
+    public bool? NowPlayingFill { get; set; }
+
+    /// <summary>Override for the app-indicator chips row (global <see cref="AppSettings.ShowAppIndicators"/>).</summary>
+    public bool? ShowAppIndicators { get; set; }
+
+    /// <summary>Override for the per-chip peak-level underbar (global <see cref="AppSettings.ShowAppPeakMeters"/>).</summary>
+    public bool? ShowAppMeters { get; set; }
+
+    /// <summary>Override for the volume-slider level meter itself - on/off (global is the
+    /// <see cref="AppSettings.PeakMeterColourMode"/>: Off = meter hidden). Forcing it on while the
+    /// global mode is Off uses the Gradient style for this device.</summary>
+    public bool? MeterEnabled { get; set; }
+
+    /// <summary>Override for the volume-slider peak-hold indicator (global <see cref="AppSettings.PeakMeterShowHold"/>).</summary>
+    public bool? ShowPeakIndicator { get; set; }
+
+    /// <summary>Override for the rules section (global <see cref="AppSettings.ShowRules"/>).</summary>
+    public bool? ShowRules { get; set; }
+
     /// <summary>True when every flag is unset/false, so the entry carries no information and can be
     /// pruned from the map on save. Not serialised (it's a derived helper, not stored state).</summary>
     [JsonIgnore]
     public bool IsDefault => Hidden is not true && Pinned is not true && VolumeControlsHidden is not true
-        && PinnedToQuickControls is not true && Glyph is null && AccentColour is null;
+        && PinnedToQuickControls is not true && Glyph is null && AccentColour is null
+        && ShowNowPlaying is null && NowPlayingFill is null && ShowAppIndicators is null
+        && ShowAppMeters is null && MeterEnabled is null && ShowPeakIndicator is null && ShowRules is null;
 }
 
 /// <summary>

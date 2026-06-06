@@ -34,4 +34,11 @@ public sealed record DeviceCardSnapshot(
     bool IsVolumeControlsHiddenByUser,
     string? UserGlyphOverride,
     Color? UserAccent,
-    bool UserAccentNone);
+    bool UserAccentNone,
+    bool? ShowNowPlayingOverride,
+    bool? NowPlayingFillOverride,
+    bool? ShowAppIndicatorsOverride,
+    bool? ShowAppMetersOverride,
+    bool? MeterEnabledOverride,
+    bool? ShowPeakIndicatorOverride,
+    bool? ShowRulesOverride);

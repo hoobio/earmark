@@ -259,7 +259,7 @@ public sealed partial class HomePage : Page
         }
     }
 
-    private const double CustomiseWidth = 280;
+    private const double CustomiseWidth = 340;
 
     // Built here (shared static) and also invoked by DeviceCardView's card context menu.
     internal static ContentDialog BuildCustomiseDialog(DeviceCard card)
@@ -277,6 +277,23 @@ public sealed partial class HomePage : Page
         var pendingAccent = origAccent;
         var pendingNone = origNone;
         var pendingVolumeHidden = origVolumeHidden;
+
+        // Per-device display overrides (tri-state: null = follow global, true/false = force on/off).
+        var origNowPlaying = card.ShowNowPlayingOverride;
+        var origFill = card.NowPlayingFillOverride;
+        var origAppChips = card.ShowAppIndicatorsOverride;
+        var origAppMeters = card.ShowAppMetersOverride;
+        var origMeterEnabled = card.MeterEnabledOverride;
+        var origPeak = card.ShowPeakIndicatorOverride;
+        var origShowRules = card.ShowRulesOverride;
+
+        var pendingNowPlaying = origNowPlaying;
+        var pendingFill = origFill;
+        var pendingAppChips = origAppChips;
+        var pendingAppMeters = origAppMeters;
+        var pendingMeterEnabled = origMeterEnabled;
+        var pendingPeak = origPeak;
+        var pendingShowRules = origShowRules;
 
         var accentBrushRes = (Brush)Application.Current.Resources["AccentFillColorDefaultBrush"];
         var strokeBrushRes = (Brush)Application.Current.Resources["ControlStrokeColorDefaultBrush"];
@@ -338,16 +355,28 @@ public sealed partial class HomePage : Page
         Button saveBtn = null!;
         Button resetBtn = null!;
         var suppressColour = false;
+        // The six override combos, kept for the dependency enable/disable and the reset path.
+        ComboBox nowPlayingCombo = null!, fillCombo = null!, appChipsCombo = null!,
+            appMetersCombo = null!, meterCombo = null!, peakCombo = null!, rulesCombo = null!;
 
         bool IsDirty() =>
             pendingGlyph != origGlyph
             || pendingAccent != origAccent
             || pendingNone != origNone
-            || pendingVolumeHidden != origVolumeHidden;
+            || pendingVolumeHidden != origVolumeHidden
+            || pendingNowPlaying != origNowPlaying
+            || pendingFill != origFill
+            || pendingAppChips != origAppChips
+            || pendingAppMeters != origAppMeters
+            || pendingMeterEnabled != origMeterEnabled
+            || pendingPeak != origPeak
+            || pendingShowRules != origShowRules;
 
         // "Reset to default" only does something when the pending state isn't already fully default.
         bool PendingIsDefault() =>
-            pendingGlyph is null && pendingAccent is null && !pendingNone && !pendingVolumeHidden;
+            pendingGlyph is null && pendingAccent is null && !pendingNone && !pendingVolumeHidden
+            && pendingNowPlaying is null && pendingFill is null && pendingAppChips is null
+            && pendingAppMeters is null && pendingMeterEnabled is null && pendingPeak is null && pendingShowRules is null;
 
         void RefreshAll()
         {
@@ -373,6 +402,14 @@ public sealed partial class HomePage : Page
             // runtime. Reset is disabled when there's nothing to reset, so it never reads as a no-op.
             if (saveBtn is not null) saveBtn.IsEnabled = IsDirty();
             if (resetBtn is not null) resetBtn.IsEnabled = !PendingIsDefault();
+
+            // Mirror the Settings page dependencies: fill only matters while the strip shows, and
+            // the app-chip meter only while the chips show - resolved against the pending override
+            // or the global default it follows.
+            if (fillCombo is not null) fillCombo.IsEnabled = pendingNowPlaying ?? card.GlobalShowNowPlaying;
+            if (appMetersCombo is not null) appMetersCombo.IsEnabled = pendingAppChips ?? card.GlobalShowAppIndicators;
+            // The peak-hold tick only matters while the meter shows.
+            if (peakCombo is not null) peakCombo.IsEnabled = pendingMeterEnabled ?? card.GlobalMeterEnabled;
         }
 
         root.Children.Add(SectionCaption("Glyph"));
@@ -434,24 +471,111 @@ public sealed partial class HomePage : Page
         };
         root.Children.Add(colourPicker);
 
-        // ---- Volume controls toggle (moved off the context menu) ----
+        // The volume-slider toggle (per-device, no global equivalent) lives inside the Overrides
+        // section under "Volume slider". A 2-item Show/Hide combo rather than a checkbox so it
+        // matches the override rows around it (no "use global" - there's no global counterpart).
+        var volumeCombo = new ComboBox { MinWidth = 124, HorizontalAlignment = HorizontalAlignment.Right };
+        volumeCombo.Items.Add(new ComboBoxItem { Content = "Show" });
+        volumeCombo.Items.Add(new ComboBoxItem { Content = "Hide" });
+        volumeCombo.SelectedIndex = pendingVolumeHidden ? 1 : 0;
+        ToolTipService.SetToolTip(volumeCombo,
+            "Hide the slider for devices whose volume Windows can set but that ignore it (e.g. a USB DAC/amp with its own knob). The icon stays a mute toggle.");
+        volumeCombo.SelectionChanged += (_, _) => { pendingVolumeHidden = volumeCombo.SelectedIndex == 1; RefreshAll(); };
+
+        // ---- Per-device overrides (collapsed by default to keep the panel tidy) ----
+        // Each display row is a tri-state ComboBox: follow the global setting / force On / force Off.
+        // The section starts expanded only when the device already has at least one override, so an
+        // existing customisation is visible without hunting for it.
+        var overridesPanel = new StackPanel { Spacing = 4 };
+
+        // Builds one label + tri-state ComboBox row. Index 0 follows the global (labelled with the
+        // current global value), 1 forces on, 2 forces off. onChange maps the index back to a bool?.
+        ComboBox MakeOverrideCombo(bool global, bool? initial, Action<bool?> onChange)
+        {
+            var combo = new ComboBox { MinWidth = 124, HorizontalAlignment = HorizontalAlignment.Right };
+            combo.Items.Add(new ComboBoxItem { Content = global ? "Use global (On)" : "Use global (Off)" });
+            combo.Items.Add(new ComboBoxItem { Content = "On" });
+            combo.Items.Add(new ComboBoxItem { Content = "Off" });
+            combo.SelectedIndex = initial is null ? 0 : initial.Value ? 1 : 2;
+            combo.SelectionChanged += (_, _) =>
+            {
+                onChange(combo.SelectedIndex switch { 1 => true, 2 => false, _ => (bool?)null });
+                RefreshAll();
+            };
+            return combo;
+        }
+
+        // isChild indents the label so a dependent setting (e.g. peak indicator under metering)
+        // reads as nested beneath the option it relies on.
+        void AddOverrideRow(string label, ComboBox combo, bool isChild = false)
+        {
+            var rowGrid = new Grid { ColumnSpacing = 12 };
+            rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            rowGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var text = new TextBlock
+            {
+                Text = label,
+                VerticalAlignment = VerticalAlignment.Center,
+                TextWrapping = TextWrapping.Wrap,
+                Margin = isChild ? new Thickness(16, 0, 0, 0) : new Thickness(0),
+            };
+            Grid.SetColumn(text, 0);
+            Grid.SetColumn(combo, 1);
+            rowGrid.Children.Add(text);
+            rowGrid.Children.Add(combo);
+            overridesPanel.Children.Add(rowGrid);
+        }
+
+        nowPlayingCombo = MakeOverrideCombo(card.GlobalShowNowPlaying, pendingNowPlaying, v => pendingNowPlaying = v);
+        fillCombo = MakeOverrideCombo(card.GlobalNowPlayingFill, pendingFill, v => pendingFill = v);
+        appChipsCombo = MakeOverrideCombo(card.GlobalShowAppIndicators, pendingAppChips, v => pendingAppChips = v);
+        appMetersCombo = MakeOverrideCombo(card.GlobalShowAppMeters, pendingAppMeters, v => pendingAppMeters = v);
+        meterCombo = MakeOverrideCombo(card.GlobalMeterEnabled, pendingMeterEnabled, v => pendingMeterEnabled = v);
+        peakCombo = MakeOverrideCombo(card.GlobalShowPeakIndicator, pendingPeak, v => pendingPeak = v);
+        rulesCombo = MakeOverrideCombo(card.GlobalShowRules, pendingShowRules, v => pendingShowRules = v);
+
+        // Sub-grouped to mirror the Settings page (and make the child relationships - fill under
+        // now-playing, metering under chips - read at a glance). Captions are cheap; the whole
+        // section sits behind the collapsed expander, so this adds no default clutter.
+        void AddOverrideCaption(string text)
+        {
+            var caption = SectionCaption(text);
+            if (overridesPanel.Children.Count > 0) caption.Margin = new Thickness(0, 6, 0, 0);
+            overridesPanel.Children.Add(caption);
+        }
+
+        AddOverrideCaption("Now playing");
+        AddOverrideRow("Strip", nowPlayingCombo);
+        AddOverrideRow("Fill background", fillCombo, isChild: true);
+        AddOverrideCaption("App chips");
+        AddOverrideRow("Chips", appChipsCombo);
+        AddOverrideRow("Metering bars", appMetersCombo, isChild: true);
+        AddOverrideCaption("Volume");
+        AddOverrideRow("Show slider", volumeCombo);
+        AddOverrideRow("Metering", meterCombo);
+        AddOverrideRow("Peak indicator", peakCombo, isChild: true);
+        AddOverrideCaption("Rules");
+        AddOverrideRow("Show rules section", rulesCombo);
+
+        // Auto-expand when the device already deviates from defaults on any axis in this section
+        // (including the volume-slider toggle), so an existing customisation is immediately visible.
+        var hasAnyOverride = origNowPlaying is not null || origFill is not null || origAppChips is not null
+            || origAppMeters is not null || origMeterEnabled is not null || origPeak is not null
+            || origShowRules is not null || origVolumeHidden;
         root.Children.Add(new Border
         {
             Height = 1,
             Background = (Brush)Application.Current.Resources["DividerStrokeColorDefaultBrush"],
             HorizontalAlignment = HorizontalAlignment.Stretch,
         });
-        var volumeCheck = new CheckBox
+        root.Children.Add(new Expander
         {
-            // Just the slider - the icon tile stays a working mute toggle regardless of this.
-            Content = "Show volume slider",
-            IsChecked = !pendingVolumeHidden,
-        };
-        ToolTipService.SetToolTip(volumeCheck,
-            "Hide the slider for devices whose volume Windows can set but that ignore it (e.g. a USB DAC/amp with its own knob). The icon stays a mute toggle.");
-        volumeCheck.Checked += (_, _) => { pendingVolumeHidden = false; RefreshAll(); };
-        volumeCheck.Unchecked += (_, _) => { pendingVolumeHidden = true; RefreshAll(); };
-        root.Children.Add(volumeCheck);
+            Header = "Overrides",
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            IsExpanded = hasAnyOverride,
+            Content = overridesPanel,
+        });
 
         // ---- Custom button row (pinned below the scroll area) ----
         // Save is a real AccentButton so its blue/grey state tracks IsEnabled reliably (the
@@ -482,13 +606,15 @@ public sealed partial class HomePage : Page
 
         // Content: scrollable body (sized to content, capped so it scrolls only when too tall)
         // above a pinned button row.
-        var outer = new Grid();
-        outer.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        // Star scroll row + Auto button row, capped via the outer grid: the body absorbs all height
+        // pressure and scrolls internally, so the Save/Cancel bar stays pinned and visible even on a
+        // short window (an Auto scroll row would instead push the buttons off the bottom).
+        var outer = new Grid { MaxHeight = 680 };
+        outer.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         outer.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         var scroller = new ScrollViewer
         {
             Content = root,
-            MaxHeight = 640, // high enough that normal content doesn't scroll; only short windows do
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
         };
         Grid.SetRow(scroller, 0);
@@ -504,6 +630,10 @@ public sealed partial class HomePage : Page
             // Commit every axis. Set the volume flag first so SetUserCustomisation's persist
             // (UpdateDeviceConfig) writes it alongside the glyph / accent.
             card.IsVolumeControlsHiddenByUser = pendingVolumeHidden;
+            // Apply the overrides persist-free; SetUserCustomisation's callback then persists every
+            // axis (UpdateDeviceConfig reads them all off the card) and reconciles the apps rows.
+            card.ApplyFeatureOverrides(pendingNowPlaying, pendingFill, pendingAppChips,
+                pendingAppMeters, pendingMeterEnabled, pendingPeak, pendingShowRules);
             card.SetUserCustomisation(pendingGlyph, pendingAccent, pendingNone);
             dialog.Hide();
         };
@@ -514,7 +644,16 @@ public sealed partial class HomePage : Page
             pendingAccent = null;
             pendingNone = false;
             pendingVolumeHidden = false;
-            volumeCheck.IsChecked = true;
+            volumeCombo.SelectedIndex = 0; // Show
+            // Back to "follow global" on every override (index 0 fires each combo's change handler).
+            pendingNowPlaying = pendingFill = pendingAppChips = pendingAppMeters = pendingMeterEnabled = pendingPeak = pendingShowRules = null;
+            nowPlayingCombo.SelectedIndex = 0;
+            fillCombo.SelectedIndex = 0;
+            appChipsCombo.SelectedIndex = 0;
+            appMetersCombo.SelectedIndex = 0;
+            meterCombo.SelectedIndex = 0;
+            peakCombo.SelectedIndex = 0;
+            rulesCombo.SelectedIndex = 0;
             SeedColour();
             RefreshAll();
         };

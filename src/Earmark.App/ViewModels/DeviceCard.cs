@@ -42,6 +42,18 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     private readonly Action<DeviceCard> _onQuickPinToggled;
     private readonly Action<DeviceCard> _onCustomisationChanged;
     private readonly Action<DeviceCard> _onBluetoothToggle;
+
+    // The shared global display options (the template SyncEffectiveOptions folds this card's
+    // overrides onto), plus the six tri-state per-device overrides (null = follow global).
+    private readonly PeakMeterOptions _globalOptions;
+    private bool? _showNowPlayingOverride;
+    private bool? _nowPlayingFillOverride;
+    private bool? _showAppIndicatorsOverride;
+    private bool? _showAppMetersOverride;
+    private bool? _meterEnabledOverride;
+    private bool? _showPeakIndicatorOverride;
+    private bool? _showRulesOverride;
+
     private bool _suppressVolumeWrite;
     private float _leftHold;
     private float _rightHold;
@@ -75,7 +87,15 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         _userGlyphOverride = snapshot.UserGlyphOverride;
         _userAccent = snapshot.UserAccent;
         _userAccentNone = snapshot.UserAccentNone;
-        MeterOptions = meterOptions;
+        _globalOptions = meterOptions;
+        _showNowPlayingOverride = snapshot.ShowNowPlayingOverride;
+        _nowPlayingFillOverride = snapshot.NowPlayingFillOverride;
+        _showAppIndicatorsOverride = snapshot.ShowAppIndicatorsOverride;
+        _showAppMetersOverride = snapshot.ShowAppMetersOverride;
+        _meterEnabledOverride = snapshot.MeterEnabledOverride;
+        _showPeakIndicatorOverride = snapshot.ShowPeakIndicatorOverride;
+        _showRulesOverride = snapshot.ShowRulesOverride;
+        SyncEffectiveOptions();
         DeviceKey = snapshot.DeviceKey;
         Endpoint = snapshot.Endpoint;
         IsConnected = snapshot.IsConnected;
@@ -121,14 +141,108 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     public AudioEndpoint Endpoint { get; private set; }
     public IReadOnlyList<RuleSummary> Rules { get; private set; }
 
-    /// <summary>Shared peak-meter styling (colour mode / channels / hold), bound by the meter and
-    /// the slider layering. The same instance backs every card so a settings change applies live.</summary>
-    public PeakMeterOptions MeterOptions { get; }
+    /// <summary>This card's <b>effective</b> peak-meter / display styling: a per-card copy of the
+    /// shared global options with this device's tri-state overrides folded in (see
+    /// <see cref="SyncEffectiveOptions"/>). Bound by the meter, slider layering, app chips, and the
+    /// now-playing strip - all of which therefore honour the per-device overrides without any
+    /// binding-site changes. Re-synced from the global template whenever either changes.</summary>
+    public PeakMeterOptions MeterOptions { get; } = new();
 
-    /// <summary>Refreshes meter-style-derived bindings after <see cref="MeterOptions"/> changes.
+    /// <summary>Folds the global options plus this device's overrides into <see cref="MeterOptions"/>.
+    /// Style-only fields (colour / channels / card height / dividers / always-show-pinned) mirror the
+    /// global verbatim; the six overridable display flags resolve as <c>override ?? global</c>.</summary>
+    private void SyncEffectiveOptions()
+    {
+        var g = _globalOptions;
+        // The meter on/off override rides on the colour mode (Off = no meter). Forcing it on while
+        // the global mode is Off falls back to Gradient, since there's no per-device colour choice.
+        MeterOptions.ColourMode = _meterEnabledOverride switch
+        {
+            false => PeakMeterColourMode.Off,
+            true => g.ColourMode == PeakMeterColourMode.Off ? PeakMeterColourMode.Gradient : g.ColourMode,
+            _ => g.ColourMode,
+        };
+        MeterOptions.ChannelMode = g.ChannelMode;
+        MeterOptions.SingleColour = g.SingleColour;
+        MeterOptions.CardHeight = g.CardHeight;
+        MeterOptions.ShowCardDividers = g.ShowCardDividers;
+        MeterOptions.AlwaysShowPinnedApps = g.AlwaysShowPinnedApps;
+        MeterOptions.ShowHold = _showPeakIndicatorOverride ?? g.ShowHold;
+        MeterOptions.ShowAppIndicators = _showAppIndicatorsOverride ?? g.ShowAppIndicators;
+        MeterOptions.ShowAppMeters = _showAppMetersOverride ?? g.ShowAppMeters;
+        MeterOptions.ShowRules = _showRulesOverride ?? g.ShowRules;
+        MeterOptions.ShowNowPlaying = _showNowPlayingOverride ?? g.ShowNowPlaying;
+        MeterOptions.NowPlayingCardBackground = _nowPlayingFillOverride ?? g.NowPlayingCardBackground;
+    }
+
+    // ---- Per-device display overrides (tri-state: null = follow global) ----
+
+    /// <summary>The now-playing-strip override (null = follow the global setting).</summary>
+    public bool? ShowNowPlayingOverride => _showNowPlayingOverride;
+
+    /// <summary>The fill-card-background vs strip-only override (null = follow global).</summary>
+    public bool? NowPlayingFillOverride => _nowPlayingFillOverride;
+
+    /// <summary>The app-indicator-chips override (null = follow global).</summary>
+    public bool? ShowAppIndicatorsOverride => _showAppIndicatorsOverride;
+
+    /// <summary>The app-chip peak-meter underbar override (null = follow global).</summary>
+    public bool? ShowAppMetersOverride => _showAppMetersOverride;
+
+    /// <summary>The volume-slider level-meter on/off override (null = follow global).</summary>
+    public bool? MeterEnabledOverride => _meterEnabledOverride;
+
+    /// <summary>The volume-slider peak-hold-indicator override (null = follow global).</summary>
+    public bool? ShowPeakIndicatorOverride => _showPeakIndicatorOverride;
+
+    /// <summary>The rules-section override (null = follow global).</summary>
+    public bool? ShowRulesOverride => _showRulesOverride;
+
+    // Current global defaults for the six overridable flags, so the Customise dialog can label its
+    // "Use global (On/Off)" option with what following the global would currently do.
+    public bool GlobalShowNowPlaying => _globalOptions.ShowNowPlaying;
+    public bool GlobalNowPlayingFill => _globalOptions.NowPlayingCardBackground;
+    public bool GlobalShowAppIndicators => _globalOptions.ShowAppIndicators;
+    public bool GlobalShowAppMeters => _globalOptions.ShowAppMeters;
+    public bool GlobalMeterEnabled => _globalOptions.ShowMeter;
+    public bool GlobalShowPeakIndicator => _globalOptions.ShowHold;
+    public bool GlobalShowRules => _globalOptions.ShowRules;
+
+    /// <summary>Sets the per-device display overrides without persisting (used by the in-place
+    /// rebuild and the Settings "Clear overrides" path, which re-reads from the saved config).
+    /// Re-folds the effective options and re-raises the dependent bindings. Returns true if any
+    /// override actually changed, so the caller can decide whether to re-run the apps reconcile.</summary>
+    public bool ApplyFeatureOverrides(
+        bool? showNowPlaying, bool? nowPlayingFill, bool? showAppIndicators,
+        bool? showAppMeters, bool? meterEnabled, bool? showPeakIndicator, bool? showRules)
+    {
+        var changed =
+            _showNowPlayingOverride != showNowPlaying
+            || _nowPlayingFillOverride != nowPlayingFill
+            || _showAppIndicatorsOverride != showAppIndicators
+            || _showAppMetersOverride != showAppMeters
+            || _meterEnabledOverride != meterEnabled
+            || _showPeakIndicatorOverride != showPeakIndicator
+            || _showRulesOverride != showRules;
+        if (!changed) return false;
+
+        _showNowPlayingOverride = showNowPlaying;
+        _nowPlayingFillOverride = nowPlayingFill;
+        _showAppIndicatorsOverride = showAppIndicators;
+        _showAppMetersOverride = showAppMeters;
+        _meterEnabledOverride = meterEnabled;
+        _showPeakIndicatorOverride = showPeakIndicator;
+        _showRulesOverride = showRules;
+        NotifyMeterStyleChanged();
+        return true;
+    }
+
+    /// <summary>Refreshes meter-style-derived bindings after the global options or this card's
+    /// overrides change. Re-folds the effective options first, then re-raises the dependent flags.
     /// Called by <c>HomeViewModel</c> so cards don't each subscribe to the shared options.</summary>
     public void NotifyMeterStyleChanged()
     {
+        SyncEffectiveOptions();
         OnPropertyChanged(nameof(ChannelMeterTooltip));
         // ShowMeter feeds the row-collapse and off-mode-slider visibility.
         OnPropertyChanged(nameof(ShowVolumeRow));
@@ -821,6 +935,13 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         _userGlyphOverride = snapshot.UserGlyphOverride;
         _userAccent = snapshot.UserAccentNone ? null : snapshot.UserAccent;
         _userAccentNone = snapshot.UserAccentNone;
+
+        // Per-device display overrides (also persist-free here): re-folds the effective options and
+        // re-raises the now-playing / apps / rules / meter bindings via NotifyMeterStyleChanged.
+        ApplyFeatureOverrides(
+            snapshot.ShowNowPlayingOverride, snapshot.NowPlayingFillOverride,
+            snapshot.ShowAppIndicatorsOverride, snapshot.ShowAppMetersOverride,
+            snapshot.MeterEnabledOverride, snapshot.ShowPeakIndicatorOverride, snapshot.ShowRulesOverride);
 
         // Endpoint-derived bindings (defaults can shift, the id can change on reinstall). The
         // observable setters above already raised their own dependents; these are the non-observable
