@@ -97,6 +97,33 @@ jobs:
           manifest-path: ${{ env.APPXMANIFEST_PATH }}
           version: ${{ steps.version.outputs.version }}
 
+      # The base manifest carries the Dev identity (so local F5 installs as "Earmark (Dev)" side by
+      # side with a Store build). CI rewrites it per channel: a normal push/PR builds Release (the
+      # Partner Center reserved identity), and only the release-please PR builds Prerelease. The
+      # Release branch is guarded so the Store identity / publisher can never drift.
+      - name: Stamp channel identity
+        shell: pwsh
+        env:
+          MANIFEST: ${{ env.APPXMANIFEST_PATH }}
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          $channel = if ($env:EVENT_NAME -eq 'pull_request' -and $env:HEAD_REF -eq 'release-please--branches--main') { 'Prerelease' } else { 'Release' }
+          $id = @{
+            Release    = @{ Name = 'Hoobi.Earmark';            Display = 'Earmark' }
+            Prerelease = @{ Name = 'Hoobi.Earmark.Prerelease'; Display = 'Earmark (Prerelease)' }
+          }[$channel]
+          $xml = Get-Content $env:MANIFEST -Raw
+          $xml = $xml -replace '(<Identity[^>]*\bName=")[^"]*(")', ('${1}' + $id.Name + '${2}')
+          $xml = $xml -replace '(<DisplayName>)[^<]*(</DisplayName>)', ('${1}' + $id.Display + '${2}')
+          $xml = $xml -replace '(<uap:VisualElements[^>]*\bDisplayName=")[^"]*(")', ('${1}' + $id.Display + '${2}')
+          Set-Content -Path $env:MANIFEST -Value $xml -Encoding UTF8 -NoNewline
+          Write-Host "Stamped channel=$channel Name=$($id.Name) DisplayName='$($id.Display)'"
+          if ($channel -eq 'Release') {
+            if ($xml -notmatch '<Identity[^>]*\bName="Hoobi\.Earmark"') { throw 'Release Identity Name was not stamped to Hoobi.Earmark' }
+            if ($xml -notmatch 'Publisher="CN=D74C026B-1081-4787-BDE6-0CFA2F1EDD71"') { throw 'Release Publisher must stay the reserved Store CN' }
+          }
+
       - name: Build MSIX
         uses: hoobio/pipeline-tools/pipeline/github/step/build-msix-dotnet@v2.2.1
         with:
@@ -123,6 +150,49 @@ jobs:
           $dest = Join-Path $env:STAGE_DIR ("Earmark-{0}-{1}.msix" -f $env:VERSION, $env:PLATFORM)
           Copy-Item -LiteralPath $msix.FullName -Destination $dest -Force
           Write-Host "Staged MSIX: $dest"
+
+      # Produce a side-load test build that installs via `Add-AppxPackage -AllowUnsigned`
+      # without a cert. Repacks the staged MSIX with the reserved "unsigned namespace" OID
+      # appended to Identity/@Publisher (see learn.microsoft.com/windows/msix/package/unsigned-package).
+      # This is TEST-ONLY: the OID must never reach the Store, so it lives in a separate
+      # `*-unsigned.msix` artifact and the canonical package above stays clean.
+      # NOTE: an unsigned package with executable content installs for-all-users only, so the
+      # consumer must run `Add-AppxPackage -AllowUnsigned` from an elevated PowerShell.
+      - name: Build unsigned-namespace test MSIX
+        shell: pwsh
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          VERSION: ${{ steps.version.outputs.version }}
+          STAGE_DIR: ${{ github.workspace }}\staging\msix-${{ matrix.platform }}
+          UNSIGNED_DIR: ${{ github.workspace }}\staging\msix-unsigned-${{ matrix.platform }}
+        run: |
+          $makeappx = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\*\x64\makeappx.exe' |
+            Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $makeappx) { throw 'makeappx.exe not found in the Windows SDK' }
+          $src = Join-Path $env:STAGE_DIR ("Earmark-{0}-{1}.msix" -f $env:VERSION, $env:PLATFORM)
+          $work = Join-Path $env:RUNNER_TEMP ("unsigned-" + $env:PLATFORM)
+          if (Test-Path $work) { Remove-Item $work -Recurse -Force }
+          & $makeappx unpack /p $src /d $work /o
+          if ($LASTEXITCODE -ne 0) { throw "makeappx unpack failed (exit $LASTEXITCODE)" }
+          $mf = Join-Path $work 'AppxManifest.xml'
+          $oid = 'OID.2.25.311729368913984317654407730594956997722=1'
+          $xml = Get-Content $mf -Raw
+          # Append the marker as the LAST field of the Identity Publisher; it must be last.
+          $xml = $xml -replace '(<Identity[^>]*\bPublisher=")([^"]*)(")', "`$1`$2, $oid`$3"
+          if ($xml -notmatch [regex]::Escape($oid)) { throw 'Failed to inject unsigned-namespace OID into manifest' }
+          Set-Content -Path $mf -Value $xml -Encoding UTF8 -NoNewline
+          New-Item -ItemType Directory -Path $env:UNSIGNED_DIR -Force | Out-Null
+          $out = Join-Path $env:UNSIGNED_DIR ("Earmark-{0}-{1}-unsigned.msix" -f $env:VERSION, $env:PLATFORM)
+          & $makeappx pack /d $work /p $out /o
+          if ($LASTEXITCODE -ne 0) { throw "makeappx pack failed (exit $LASTEXITCODE)" }
+          Write-Host "Unsigned-namespace test MSIX: $out"
+
+      - name: Upload unsigned-namespace test MSIX artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: msix-${{ matrix.platform }}-unsigned
+          path: ${{ github.workspace }}\staging\msix-unsigned-${{ matrix.platform }}\Earmark-${{ steps.version.outputs.version }}-${{ matrix.platform }}-unsigned.msix
+          if-no-files-found: error
 
       - name: Sign MSIX
         if: env.HAS_SIGNING_CERT == 'true'
@@ -538,6 +608,19 @@ jobs:
         with:
           name: msix-ARM64
           path: release/msix-ARM64
+      # Unsigned-namespace test builds: attached to pre-releases only (the pre-publish
+      # smoke-test path), so `Add-AppxPackage -AllowUnsigned` works without trusting a cert.
+      # The final `release` job deliberately omits these so they never ship on a stable release.
+      - name: Download unsigned test MSIX (x64)
+        uses: actions/download-artifact@v8
+        with:
+          name: msix-x64-unsigned
+          path: release/msix-x64-unsigned
+      - name: Download unsigned test MSIX (ARM64)
+        uses: actions/download-artifact@v8
+        with:
+          name: msix-ARM64-unsigned
+          path: release/msix-ARM64-unsigned
       - name: Download MSI (x64)
         uses: actions/download-artifact@v8
         with:

@@ -126,11 +126,24 @@ public sealed partial class QuickControlsWindow : Window
         return height;
     }
 
-    public void ShowPrepared()
+    public void ShowPrepared(bool animate = true)
     {
-        RevealCover.Opacity = 1;
-        AppWindow.Show();
-        ShowAnimation.Begin();
+        if (animate)
+        {
+            RevealCover.Opacity = 1;
+            AppWindow.Show();
+            ShowAnimation.Begin();
+        }
+        else
+        {
+            // Refreshing an already-open stack (e.g. a device connected / disconnected): update the
+            // content in place. Don't replay the slide-in - keep the reveal cover clear and the panel
+            // at rest so the window doesn't appear to re-open from the right on every state change.
+            RevealCover.Opacity = 0;
+            RootTransform.TranslateX = 0;
+            AppWindow.Show();
+        }
+
         IsOpen = true;
     }
 

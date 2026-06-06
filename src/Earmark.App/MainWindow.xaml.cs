@@ -42,7 +42,10 @@ public sealed partial class MainWindow : Window, IDisposable
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(AppTitleBar);
         AppWindow.TitleBar.PreferredHeightOption = Microsoft.UI.Windowing.TitleBarHeightOption.Tall;
-        AppWindow.SetIcon("Assets/AppIcon.ico");
+        // Absolute path: a packaged (MSIX) launch sets the working directory to System32, not the
+        // install dir, so a relative "Assets/AppIcon.ico" resolves to nothing and the window/taskbar
+        // icon goes blank. AppContext.BaseDirectory is the install dir in both packaged and unpackaged.
+        AppWindow.SetIcon(System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico"));
 
         _update.StatusChanged += OnUpdateStatusChanged;
         OnUpdateStatusChanged(this, EventArgs.Empty);
