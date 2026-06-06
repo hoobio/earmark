@@ -8,15 +8,20 @@
   xmlns:systemai="http://schemas.microsoft.com/appx/manifest/systemai/windows10"
   IgnorableNamespaces="uap rescap systemai">
 
+  <!-- Base manifest carries the Dev-channel identity so a local build / F5 installs as a distinct
+       "Earmark (Dev)" package, side by side with a Store build. CI rewrites Name + DisplayName per
+       channel (see build.yaml "Stamp channel identity"): Release -> Hoobi.Earmark / "Earmark" (the
+       Partner Center reserved identity), Prerelease -> Hoobi.Earmark.Prerelease / "Earmark (Prerelease)".
+       Publisher is the reserved Store CN and stays constant across channels. -->
   <Identity
-    Name="Hoobi.Earmark"
+    Name="Hoobi.Earmark.Dev"
     Publisher="CN=D74C026B-1081-4787-BDE6-0CFA2F1EDD71"
     Version="1.0.0.0" />
 
   <mp:PhoneIdentity PhoneProductId="3C95B08C-54CA-4725-93C4-C53BA82DB29E" PhonePublisherId="00000000-0000-0000-0000-000000000000"/>
 
   <Properties>
-    <DisplayName>Earmark.App</DisplayName>
+    <DisplayName>Earmark (Dev)</DisplayName>
     <PublisherDisplayName>Hoobi</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
   </Properties>
@@ -35,8 +40,8 @@
       Executable="$targetnametoken$.exe"
       EntryPoint="$targetentrypoint$">
       <uap:VisualElements
-        DisplayName="Earmark.App"
-        Description="Earmark.App"
+        DisplayName="Earmark (Dev)"
+        Description="Per-app audio routing for Windows."
         BackgroundColor="transparent"
         Square150x150Logo="Assets\Square150x150Logo.png"
         Square44x44Logo="Assets\Square44x44Logo.png">

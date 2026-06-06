@@ -97,6 +97,33 @@ jobs:
           manifest-path: ${{ env.APPXMANIFEST_PATH }}
           version: ${{ steps.version.outputs.version }}
 
+      # The base manifest carries the Dev identity (so local F5 installs as "Earmark (Dev)" side by
+      # side with a Store build). CI rewrites it per channel: a normal push/PR builds Release (the
+      # Partner Center reserved identity), and only the release-please PR builds Prerelease. The
+      # Release branch is guarded so the Store identity / publisher can never drift.
+      - name: Stamp channel identity
+        shell: pwsh
+        env:
+          MANIFEST: ${{ env.APPXMANIFEST_PATH }}
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          $channel = if ($env:EVENT_NAME -eq 'pull_request' -and $env:HEAD_REF -eq 'release-please--branches--main') { 'Prerelease' } else { 'Release' }
+          $id = @{
+            Release    = @{ Name = 'Hoobi.Earmark';            Display = 'Earmark' }
+            Prerelease = @{ Name = 'Hoobi.Earmark.Prerelease'; Display = 'Earmark (Prerelease)' }
+          }[$channel]
+          $xml = Get-Content $env:MANIFEST -Raw
+          $xml = $xml -replace '(<Identity[^>]*\bName=")[^"]*(")', ('${1}' + $id.Name + '${2}')
+          $xml = $xml -replace '(<DisplayName>)[^<]*(</DisplayName>)', ('${1}' + $id.Display + '${2}')
+          $xml = $xml -replace '(<uap:VisualElements[^>]*\bDisplayName=")[^"]*(")', ('${1}' + $id.Display + '${2}')
+          Set-Content -Path $env:MANIFEST -Value $xml -Encoding UTF8 -NoNewline
+          Write-Host "Stamped channel=$channel Name=$($id.Name) DisplayName='$($id.Display)'"
+          if ($channel -eq 'Release') {
+            if ($xml -notmatch '<Identity[^>]*\bName="Hoobi\.Earmark"') { throw 'Release Identity Name was not stamped to Hoobi.Earmark' }
+            if ($xml -notmatch 'Publisher="CN=D74C026B-1081-4787-BDE6-0CFA2F1EDD71"') { throw 'Release Publisher must stay the reserved Store CN' }
+          }
+
       - name: Build MSIX
         uses: hoobio/pipeline-tools/pipeline/github/step/build-msix-dotnet@v2.2.1
         with:
