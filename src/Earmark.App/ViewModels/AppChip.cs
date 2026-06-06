@@ -106,9 +106,9 @@ public partial class AppChip : ObservableObject, IWrapOrdered
 
         // First call kicks the async load; subsequent calls (driven by the peak tick) pick
         // up the cached ImageSource once the load completes.
-        Icon = string.IsNullOrEmpty(session.ExecutablePath)
+        Icon = string.IsNullOrEmpty(session.ExecutablePath) && string.IsNullOrEmpty(session.IconPath)
             ? null
-            : _iconService.TryGetIcon(session.ProcessId, session.ExecutablePath);
+            : _iconService.TryGetIcon(session.ProcessId, session.ExecutablePath, session.IconPath);
     }
 
     /// <summary>When the current audio run started - the rising edge from silence - or null when the
@@ -372,9 +372,9 @@ public partial class AppChip : ObservableObject, IWrapOrdered
             }
         }
 
-        if (Icon is null && !string.IsNullOrEmpty(Session.ExecutablePath))
+        if (Icon is null && (!string.IsNullOrEmpty(Session.ExecutablePath) || !string.IsNullOrEmpty(Session.IconPath)))
         {
-            Icon = _iconService.TryGetIcon(Session.ProcessId, Session.ExecutablePath);
+            Icon = _iconService.TryGetIcon(Session.ProcessId, Session.ExecutablePath, Session.IconPath);
         }
     }
 
@@ -423,9 +423,9 @@ public partial class AppChip : ObservableObject, IWrapOrdered
         CanCloseProcess = canCloseProcess;
         IsElevated = isElevated;
         UserClosed = false;
-        if (Icon is null && !string.IsNullOrEmpty(session.ExecutablePath))
+        if (Icon is null && (!string.IsNullOrEmpty(session.ExecutablePath) || !string.IsNullOrEmpty(session.IconPath)))
         {
-            Icon = _iconService.TryGetIcon(session.ProcessId, session.ExecutablePath);
+            Icon = _iconService.TryGetIcon(session.ProcessId, session.ExecutablePath, session.IconPath);
         }
         OnPropertyChanged(nameof(IsClosed));
         OnPropertyChanged(nameof(ShowClosedBadge));
