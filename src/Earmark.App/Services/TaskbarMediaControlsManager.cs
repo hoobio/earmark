@@ -48,6 +48,10 @@ internal sealed class TaskbarMediaControlsManager : ITaskbarMediaControls, IDisp
     private const int THBN_CLICKED = 0x1800;
     private const uint SubclassId = 0xEAB1;
 
+    // Drop the playback indicator once a session has sat paused this long, so a paused app
+    // doesn't keep a stale glyph on the taskbar indefinitely.
+    private static readonly TimeSpan PauseHideDelay = TimeSpan.FromSeconds(30);
+
     private readonly INowPlayingService _nowPlaying;
     private readonly IDispatcherQueueProvider _dispatcher;
     private readonly ILogger<TaskbarMediaControlsManager> _logger;
@@ -65,6 +69,10 @@ internal sealed class TaskbarMediaControlsManager : ITaskbarMediaControls, IDisp
     private nint _iconNext;
     private nint _overlayPlay;
     private nint _overlayPause;
+
+    private System.Threading.Timer? _pauseHideTimer;
+    private string? _pausedKey;
+    private bool _pauseHidden;
 
     public TaskbarMediaControlsManager(
         INowPlayingService nowPlaying,
@@ -113,20 +121,64 @@ internal sealed class TaskbarMediaControlsManager : ITaskbarMediaControls, IDisp
         });
 
     /// <summary>Mirrors the primary session's playback state onto the taskbar icon (play glyph while
-    /// playing, pause bars while paused, cleared otherwise). Picks the surface by install kind:
-    /// a packaged build uses the OS <see cref="BadgeNotificationManager"/> media glyph; an unpackaged
-    /// build (where that API throws) falls back to a corner overlay icon via ITaskbarList3. Either way
-    /// it only shows while the main window has a taskbar button.</summary>
+    /// playing, pause bars while paused, cleared otherwise). A session that's been paused for more than
+    /// <see cref="PauseHideDelay"/> drops its indicator so the taskbar doesn't carry a stale glyph.</summary>
     private void UpdatePlaybackBadge()
     {
         var primary = _nowPlaying.GetPrimary();
+
+        if (primary is null)
+        {
+            ResetPauseTracking();
+            ApplyBadge(BadgeState.None);
+            return;
+        }
+
+        if (primary.IsPlaying)
+        {
+            ResetPauseTracking();
+            ApplyBadge(BadgeState.Playing);
+            return;
+        }
+
+        // Paused: count down from the moment this session paused. A different primary session restarts
+        // the countdown; metadata churn on the same paused session does not.
+        if (primary.SessionKey != _pausedKey)
+        {
+            _pausedKey = primary.SessionKey;
+            _pauseHidden = false;
+            StopPauseHideTimer();
+        }
+
+        if (_pauseHidden)
+        {
+            ApplyBadge(BadgeState.None);
+            return;
+        }
+
+        ApplyBadge(BadgeState.Paused);
+        StartPauseHideTimer();
+    }
+
+    private enum BadgeState { None, Playing, Paused }
+
+    /// <summary>Applies the resolved playback state to the taskbar surface. Picks the surface by install
+    /// kind: a packaged build uses the OS <see cref="BadgeNotificationManager"/> media glyph; an
+    /// unpackaged build (where that API throws) falls back to a corner overlay icon via ITaskbarList3.
+    /// Either way it only shows while the main window has a taskbar button.</summary>
+    private void ApplyBadge(BadgeState state)
+    {
         if (AppInfo.IsPackaged)
         {
             try
             {
                 var manager = BadgeNotificationManager.Current;
-                if (primary is null) manager.ClearBadge();
-                else manager.SetBadgeAsGlyph(primary.IsPlaying ? BadgeNotificationGlyph.Playing : BadgeNotificationGlyph.Paused);
+                switch (state)
+                {
+                    case BadgeState.Playing: manager.SetBadgeAsGlyph(BadgeNotificationGlyph.Playing); break;
+                    case BadgeState.Paused: manager.SetBadgeAsGlyph(BadgeNotificationGlyph.Paused); break;
+                    default: manager.ClearBadge(); break;
+                }
             }
             catch (Exception ex)
             {
@@ -138,14 +190,46 @@ internal sealed class TaskbarMediaControlsManager : ITaskbarMediaControls, IDisp
         if (_taskbar is null) return;
         try
         {
-            if (primary is null) _taskbar.SetOverlayIcon(_hwnd, 0, string.Empty);
-            else if (primary.IsPlaying) _taskbar.SetOverlayIcon(_hwnd, _overlayPlay, "Playing");
-            else _taskbar.SetOverlayIcon(_hwnd, _overlayPause, "Paused");
+            switch (state)
+            {
+                case BadgeState.Playing: _taskbar.SetOverlayIcon(_hwnd, _overlayPlay, "Playing"); break;
+                case BadgeState.Paused: _taskbar.SetOverlayIcon(_hwnd, _overlayPause, "Paused"); break;
+                default: _taskbar.SetOverlayIcon(_hwnd, 0, string.Empty); break;
+            }
         }
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "Taskbar: overlay icon update failed");
         }
+    }
+
+    private void StartPauseHideTimer()
+    {
+        if (_pauseHideTimer is not null) return; // already counting down for this pause
+        _pauseHideTimer = new System.Threading.Timer(
+            _ => _dispatcher.Enqueue(OnPauseHideElapsed), null, PauseHideDelay, Timeout.InfiniteTimeSpan);
+    }
+
+    private void OnPauseHideElapsed()
+    {
+        StopPauseHideTimer();
+        var primary = _nowPlaying.GetPrimary();
+        if (primary is null || primary.IsPlaying || primary.SessionKey != _pausedKey) return;
+        _pauseHidden = true;
+        ApplyBadge(BadgeState.None);
+    }
+
+    private void StopPauseHideTimer()
+    {
+        _pauseHideTimer?.Dispose();
+        _pauseHideTimer = null;
+    }
+
+    private void ResetPauseTracking()
+    {
+        StopPauseHideTimer();
+        _pausedKey = null;
+        _pauseHidden = false;
     }
 
     private nint WindowSubclassProc(nint hWnd, uint uMsg, nint wParam, nint lParam, nuint uIdSubclass, nuint dwRefData)
@@ -432,6 +516,7 @@ internal sealed class TaskbarMediaControlsManager : ITaskbarMediaControls, IDisp
         _disposed = true;
 
         _nowPlaying.Changed -= OnNowPlayingChanged;
+        StopPauseHideTimer();
         if (AppInfo.IsPackaged)
         {
             try { BadgeNotificationManager.Current.ClearBadge(); } catch { /* platform may be gone */ }
