@@ -38,7 +38,11 @@
         </DataTemplate>
     </UserControl.Resources>
 
-    <Grid>
+    <!-- Transparent background so the whole card surface is hit-test captured by this Grid: without it,
+         right-clicks landing in the gaps between child elements fall through to the host Border behind
+         (which isn't in this Grid's subtree), so ContextRequested bubbles to the page's backdrop menu
+         instead of the card menu below. -->
+    <Grid Background="Transparent">
         <!-- Right-click anywhere on the card for show/hide, quick-pin, customise, and group actions.
              Items are built in code-behind (OnDeviceCardFlyoutOpening -> AppendDeviceMenuItems), the
              single source the app-chip menu also appends, so the two presentations can't drift. -->
