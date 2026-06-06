@@ -196,6 +196,17 @@ public sealed partial class DeviceCardView : UserControl
         set => SetValue(ShowRulesProperty, value);
     }
 
+    /// <summary>When false (the Quick Controls flyout), the card and app-chip right-click menus are
+    /// suppressed. Customisation belongs in the main app, not the overlay. Constant per host.</summary>
+    public static readonly DependencyProperty AllowContextMenuProperty = DependencyProperty.Register(
+        nameof(AllowContextMenu), typeof(bool), typeof(DeviceCardView), new PropertyMetadata(true));
+
+    public bool AllowContextMenu
+    {
+        get => (bool)GetValue(AllowContextMenuProperty);
+        set => SetValue(AllowContextMenuProperty, value);
+    }
+
     /// <summary>x:Bind function: a rule element shows only when rules are enabled for this host AND the
     /// card wants it. Re-evaluates when either argument changes, replacing the old collapse watchdog.</summary>
     public Visibility RuleVis(bool showRules, bool cardWants) =>
@@ -361,6 +372,7 @@ public sealed partial class DeviceCardView : UserControl
     private void OnAppChipFlyoutOpening(object sender, object e)
     {
         if (sender is not MenuFlyout flyout) return;
+        if (!AllowContextMenu) { flyout.Hide(); return; }
         if ((flyout.Target as FrameworkElement)?.Tag is not AppChip chip) return;
         flyout.Items.Clear();
 
@@ -459,6 +471,7 @@ public sealed partial class DeviceCardView : UserControl
     private void OnDeviceCardFlyoutOpening(object sender, object e)
     {
         if (sender is not MenuFlyout flyout || Card is not { } card) return;
+        if (!AllowContextMenu) { flyout.Hide(); return; }
         flyout.Items.Clear();
         AppendDeviceMenuItems(flyout.Items, card);
     }

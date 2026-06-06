@@ -37,7 +37,7 @@
                 <Border Style="{StaticResource SectionCardStyle}"
                         Padding="0"
                         Opacity="{x:Bind CardOpacity, Mode=OneWay}">
-                    <controls:DeviceCardView Card="{x:Bind}" ShowRules="False" />
+                    <controls:DeviceCardView Card="{x:Bind}" ShowRules="False" AllowContextMenu="False" />
                 </Border>
             </DataTemplate>
 
