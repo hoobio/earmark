@@ -54,48 +54,10 @@ internal sealed class WindowChromeManager : IWindowChromeManager, IDisposable
         if (_appWindow is not null)
         {
             _appWindow.Closing += OnAppWindowClosing;
-            RestoreSavedSize();
         }
 
         InstallSubclass();
         SyncTrayIcon();
-    }
-
-    private void RestoreSavedSize()
-    {
-        if (_appWindow is null) return;
-        var s = _settings.Current;
-        if (s.WindowWidth is int w && s.WindowHeight is int h && w > 0 && h > 0)
-        {
-            try
-            {
-                _appWindow.Resize(new Windows.Graphics.SizeInt32(w, h));
-            }
-            catch
-            {
-                // Resize can fail if dimensions are larger than any monitor; let the
-                // default size stand.
-            }
-        }
-    }
-
-    private void SaveCurrentSize()
-    {
-        if (_appWindow is null) return;
-        try
-        {
-            var size = _appWindow.Size;
-            if (size.Width <= 0 || size.Height <= 0) return;
-            if (_settings.Current.WindowWidth == size.Width &&
-                _settings.Current.WindowHeight == size.Height) return;
-            _settings.Current.WindowWidth = size.Width;
-            _settings.Current.WindowHeight = size.Height;
-            _ = _settings.SaveAsync();
-        }
-        catch
-        {
-            // Non-fatal; we just won't remember this resize.
-        }
     }
 
     public void RestoreWindow()
@@ -125,7 +87,6 @@ internal sealed class WindowChromeManager : IWindowChromeManager, IDisposable
     public void RequestExit()
     {
         _exitRequested = true;
-        SaveCurrentSize();
         _trayIcon?.Dispose();
         _trayIcon = null;
 
@@ -225,10 +186,6 @@ internal sealed class WindowChromeManager : IWindowChromeManager, IDisposable
     // not cancel anything, so route through here instead.
     private void OnAppWindowClosing(AppWindow sender, AppWindowClosingEventArgs args)
     {
-        // Save size every time the window closes (or hides to tray) so we restore the
-        // user's preferred dimensions next launch.
-        SaveCurrentSize();
-
         if (_exitRequested)
         {
             return;

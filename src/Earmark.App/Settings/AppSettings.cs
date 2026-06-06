@@ -217,11 +217,6 @@ public sealed class AppSettings
     /// </summary>
     public List<HiddenAppOnDevice> HiddenAppsOnDevice { get; set; } = new();
 
-    /// <summary>Persisted window size in physical pixels. Null until the user has resized
-    /// at least once (so first launch picks the WinUI default).</summary>
-    public int? WindowWidth { get; set; }
-    public int? WindowHeight { get; set; }
-
     /// <summary>Whether the navigation pane is expanded. Persisted so the collapse/expand state of the
     /// left sidebar survives a relaunch. Default true (expanded), matching the WinUI default.</summary>
     public bool NavigationPaneOpen { get; set; } = true;
