@@ -54,7 +54,6 @@ public sealed partial class QuickControlsWindow : Window
         ConfigureWindow();
         Hide();
         Root.ActualThemeChanged += OnRootActualThemeChanged;
-        Scroller.ViewChanged += OnScrollerViewChanged;
         _settings.SettingsChanged += OnSettingsChanged;
         Closed += OnClosed;
     }
@@ -92,7 +91,7 @@ public sealed partial class QuickControlsWindow : Window
         Repeater.ItemsSource = null;
         Root.UpdateLayout();
         Repeater.ItemsSource = blocks.ToList();
-        Scroller.VerticalScrollBarVisibility = ScrollBarVisibility.Disabled;
+        Scroller.VerticalScrollBarVisibility = ScrollingScrollBarVisibility.Hidden;
         AppWindow.Resize(new SizeInt32(width, Math.Max(1, workArea.Height - (OverlayMargin * 2))));
         AppWindow.Move(new PointInt32(-40000, -40000));
 
@@ -118,8 +117,8 @@ public sealed partial class QuickControlsWindow : Window
         ConfigureWindow();
         var height = Math.Min(desiredHeight, boundedMaxHeight);
         Scroller.VerticalScrollBarVisibility = desiredHeight - boundedMaxHeight > ScrollOverflowTolerance
-            ? ScrollBarVisibility.Auto
-            : ScrollBarVisibility.Disabled;
+            ? ScrollingScrollBarVisibility.Auto
+            : ScrollingScrollBarVisibility.Hidden;
 
         AppWindow.Resize(new SizeInt32(width, height));
         AppWindow.Move(new PointInt32(left, Math.Clamp(boundedBottom - height, workTop, workBottom - height)));
@@ -127,41 +126,22 @@ public sealed partial class QuickControlsWindow : Window
         return height;
     }
 
-    // Smooth wheel scrolling: handling the wheel on the content (not the ScrollViewer) stops the routed
-    // event before the ScrollViewer's own stepwise handler runs, so we drive an animated ChangeView
-    // instead. _wheelTarget accumulates rapid notches; ViewChanged resyncs it once a scroll settles.
-    private const double WheelStep = 90.0;
-    private double _wheelTarget;
-    private bool _wheelActive;
-
-    private void OnContentPointerWheelChanged(object sender, PointerRoutedEventArgs e)
-    {
-        var delta = e.GetCurrentPoint(Scroller).Properties.MouseWheelDelta;
-        _logger.LogDebug("Wheel: delta={Delta} scrollable={Scrollable} offset={Offset}", delta, Scroller.ScrollableHeight, Scroller.VerticalOffset);
-        if (delta == 0 || Scroller.ScrollableHeight <= 0) return;
-
-        var basis = _wheelActive ? _wheelTarget : Scroller.VerticalOffset;
-        _wheelTarget = Math.Clamp(basis - (delta / 120.0 * WheelStep), 0, Scroller.ScrollableHeight);
-        _wheelActive = true;
-        Scroller.ChangeView(null, _wheelTarget, null, disableAnimation: false);
-        e.Handled = true;
-    }
-
-    private void OnScrollerViewChanged(object? sender, ScrollViewerViewChangedEventArgs e)
-    {
-        if (!e.IsIntermediate) _wheelActive = false;
-    }
-
     public void ShowPrepared()
     {
         AppWindow.Show();
-        // Claim activation (the registered hotkey grants foreground rights) so a click on any other app
-        // fires Deactivated and dismisses the stack, then give the panel focus so the Escape accelerator
-        // has an active focus scope. Without this, neither works until the user first clicks a panel.
-        // Pointer focus state avoids drawing the focus rectangle.
+        IsOpen = true;
+    }
+
+    /// <summary>Pulls this panel to the foreground and focuses it. The owning service calls this once on
+    /// the top panel after the stack is shown: a background process can't steal foreground with
+    /// Activate() alone, but the registered hotkey that opened us grants the right, so SetForegroundWindow
+    /// lands. Without an active window, a click on another app never fires Deactivated (so click-away
+    /// can't dismiss) and the Escape accelerator has no focus scope. Pointer focus skips the focus rect.</summary>
+    public void GrabForeground()
+    {
+        SetForegroundWindow(_hwnd);
         Activate();
         Root.Focus(FocusState.Pointer);
-        IsOpen = true;
     }
 
     public void Hide()
@@ -350,6 +330,9 @@ public sealed partial class QuickControlsWindow : Window
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool SetWindowPos(nint hWnd, nint hWndInsertAfter, int x, int y, int cx, int cy, uint uFlags);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(nint hWnd);
 
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(nint hwnd, int dwAttribute, ref int pvAttribute, int cbAttribute);

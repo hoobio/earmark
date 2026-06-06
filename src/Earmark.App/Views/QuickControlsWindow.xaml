@@ -61,16 +61,16 @@
                     Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
                     Visibility="Collapsed" />
 
-            <!-- ScrollViewer fills the window so its scrollbar rides the window edge; the 12px content
-                 inset lives in Padding, leaving a gutter the scrollbar overlays instead of the cards. -->
-            <ScrollViewer x:Name="Scroller"
-                          Padding="12"
-                          VerticalScrollBarVisibility="Auto"
-                          HorizontalScrollBarVisibility="Disabled"
-                          IsScrollInertiaEnabled="False"
-                          Background="Transparent">
-                <ItemsRepeater x:Name="Repeater"
-                               PointerWheelChanged="OnContentPointerWheelChanged">
+            <!-- ScrollView (not ScrollViewer): InteractionTracker-based, so the mouse wheel animates
+                 smoothly out of the box. It fills the window so its scrollbar rides the window edge;
+                 the 12px content inset lives in Padding, leaving a gutter the scrollbar overlays
+                 instead of the cards. -->
+            <ScrollView x:Name="Scroller"
+                        Padding="12"
+                        VerticalScrollBarVisibility="Auto"
+                        ContentOrientation="Vertical"
+                        Background="Transparent">
+                <ItemsRepeater x:Name="Repeater">
                     <ItemsRepeater.Layout>
                         <StackLayout Spacing="12" />
                     </ItemsRepeater.Layout>
@@ -78,7 +78,7 @@
                         <StaticResource ResourceKey="QuickBlockTemplateSelector" />
                     </ItemsRepeater.ItemTemplate>
                 </ItemsRepeater>
-            </ScrollViewer>
+            </ScrollView>
         </Grid>
     </Border>
 </Window>

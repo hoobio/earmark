@@ -112,6 +112,10 @@ internal sealed class QuickControlsService : IQuickControlsService
         {
             _activeWindows[i].Window.ShowPrepared();
         }
+
+        // Pull one panel to the foreground so click-away (Deactivated) and Escape work without a first
+        // click. Done once, after the stack is up, to avoid focus churn across the windows.
+        if (_activeWindows.Count > 0) _activeWindows[0].Window.GrabForeground();
     }
 
     private static void FitBlockHeights(List<int> heights, int availableHeight)
