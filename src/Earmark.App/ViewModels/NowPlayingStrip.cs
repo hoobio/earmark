@@ -30,6 +30,10 @@ public partial class NowPlayingStrip : ObservableObject
     // YouTube Music's auto-generated channels report the artist as "<Artist> - Topic".
     private static readonly Regex TopicSuffix =
         new(@"\s*[-\u2013\u2014]\s*topic\s*$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    // Strips any ()/[] group containing "Official" (e.g. "(Official Video)", "[Official Music Video]",
+    // "[Official Channel]"). Leading whitespace is absorbed so the trailing trim leaves no double spaces.
+    private static readonly Regex OfficialTag =
+        new(@"\s*[\(\[][^\)\]]*\bofficial\b[^\)\]]*[\)\]]", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     private readonly INowPlayingService _service;
     private readonly INowPlayingArtworkService _artwork;
@@ -233,7 +237,9 @@ public partial class NowPlayingStrip : ObservableObject
     /// lines up. Returns the original title when there's no match, so non-music titles are untouched.</summary>
     private static string CleanTitle(string title, string artist)
     {
-        if (string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(artist)) return title;
+        if (string.IsNullOrWhiteSpace(title)) return title;
+        title = OfficialTag.Replace(title, string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(artist)) return title;
         var m = ArtistPrefix.Match(title);
         if (!m.Success) return title;
         return Norm(m.Groups["artist"].Value) == Norm(artist)
@@ -245,7 +251,8 @@ public partial class NowPlayingStrip : ObservableObject
     /// "Kanye West - Topic" -> "Kanye West"). "VEVO" is left alone: it has no separator, so dropping it
     /// would yield the space-less "KanyeWest".</summary>
     private static string CleanArtist(string artist) =>
-        string.IsNullOrWhiteSpace(artist) ? artist : TopicSuffix.Replace(artist, string.Empty).Trim();
+        string.IsNullOrWhiteSpace(artist) ? artist
+            : OfficialTag.Replace(TopicSuffix.Replace(artist, string.Empty), string.Empty).Trim();
 
     /// <summary>Reduces an artist/channel name to a comparable core: strips a trailing "VEVO" or
     /// "- Topic", then keeps only letters/digits, lowercased. "KanyeWestVEVO", "Kanye West" and
