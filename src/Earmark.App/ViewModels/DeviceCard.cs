@@ -739,6 +739,30 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
 
     // ---- Commands & sync entry points ----
 
+    /// <summary>Refreshes rule status, match counts, and lock state from a fresh rule-summary result.
+    /// Called by the debounced in-place session reconcile so device-card rule chips stay current as
+    /// apps open/close, without a full card rebuild.</summary>
+    internal void UpdateRuleSummary(DeviceRulesSummary.Result summary)
+    {
+        IsVolumeLockedByRule = summary.VolumeLocked;
+        IsMuteLockedByRule = summary.MuteLocked;
+        RuleMutedTarget = summary.RuleMutedTarget;
+        RuleMutedSource = summary.RuleMutedSource;
+        RuleVolumeSource = summary.RuleVolumeSource;
+
+        Rules = summary.Rules;
+        AdditionalRules.Clear();
+        for (var i = 1; i < Rules.Count; i++) AdditionalRules.Add(Rules[i]);
+
+        OnPropertyChanged(nameof(HasRules));
+        OnPropertyChanged(nameof(HasNoRules));
+        OnPropertyChanged(nameof(HasMultipleRules));
+        OnPropertyChanged(nameof(ShowRulesSection));
+        OnPropertyChanged(nameof(ShowNoRulesMessage));
+        OnPropertyChanged(nameof(FirstRule));
+        OnPropertyChanged(nameof(AdditionalRulesLabel));
+    }
+
     /// <summary>
     /// Updates a <b>reused</b> card instance in place from a fresh snapshot (same
     /// <see cref="DeviceKey"/>), re-raising every constructor-set binding so nothing renders stale.

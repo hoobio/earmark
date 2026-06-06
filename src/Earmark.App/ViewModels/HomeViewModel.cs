@@ -1153,6 +1153,23 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         }
 
         SyncNowPlaying();
+        RefreshCardRuleSummaries(sessions);
+    }
+
+    /// <summary>Refreshes rule status, match counts, and lock state on every card using the current
+    /// session snapshot. Called at the end of the debounced in-place session reconcile so device-card
+    /// rule chips stay current as apps open/close, without a full card rebuild.</summary>
+    private void RefreshCardRuleSummaries(IReadOnlyList<AudioSession> sessions)
+    {
+        if (_allCards.Count == 0) return;
+        var rules = _rules.Rules;
+        var renderEndpoints = _endpoints.GetEndpoints(EndpointFlow.Render);
+        var captureEndpoints = _endpoints.GetEndpoints(EndpointFlow.Capture);
+        foreach (var card in _allCards)
+        {
+            var summary = DeviceRulesSummary.For(card.Endpoint, rules, renderEndpoints, captureEndpoints, sessions, _matcher, _evaluator);
+            card.UpdateRuleSummary(summary);
+        }
     }
 
     /// <summary>
