@@ -8,6 +8,11 @@ on:
   release:
     types: [published]
   workflow_dispatch:
+    inputs:
+      force_build:
+        description: "Build the package without a release-please release (use if release-please misfires)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -69,6 +74,18 @@ jobs:
 
   build-msix:
     name: Build MSIX (${{ matrix.platform }})
+    # Building the self-contained package is the expensive part, and its only consumers are the
+    # release / pre-release jobs. So build it on PRs (validation + the prerelease source) and on the
+    # push to main that release-please turns into a release - not on every ordinary push to main,
+    # which would rebuild and discard both packages. force_build overrides if release-please misfires.
+    needs: [release-please]
+    if: >-
+      always()
+      && (
+        github.event_name == 'pull_request'
+        || needs.release-please.outputs.release_created == 'true'
+        || (github.event_name == 'workflow_dispatch' && inputs.force_build)
+      )
     runs-on: windows-latest
     strategy:
       fail-fast: false
@@ -217,6 +234,15 @@ jobs:
 
   build-msi:
     name: Build MSI (${{ matrix.platform }})
+    # Same gating as build-msix: skip on ordinary pushes to main (see that job for the rationale).
+    needs: [release-please]
+    if: >-
+      always()
+      && (
+        github.event_name == 'pull_request'
+        || needs.release-please.outputs.release_created == 'true'
+        || (github.event_name == 'workflow_dispatch' && inputs.force_build)
+      )
     runs-on: windows-latest
     strategy:
       fail-fast: false
