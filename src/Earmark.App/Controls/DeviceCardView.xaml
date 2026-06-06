@@ -109,16 +109,14 @@
         <!-- Optional now-playing card background: the primary session's artwork, dimmed behind the whole
              card (opt-in, default off). The card's own border clips it to the rounded corners. -->
         <Grid Visibility="{x:Bind Card.ShowCardBackground, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
-            <Border>
-                <Border.Background>
-                    <ImageBrush ImageSource="{x:Bind Card.PrimaryNowPlaying.BackdropSource, Mode=OneWay}"
-                                Stretch="UniformToFill" />
-                </Border.Background>
-            </Border>
+            <controls:CrossfadeImage Source="{x:Bind Card.PrimaryNowPlaying.BackdropSource, Mode=OneWay}"
+                                     Stretch="UniformToFill"
+                                     CornerRadius="{StaticResource CardCornerRadius}" />
             <!-- Scrim so the artwork is dimmed enough for the card's text / meter / chips to stay
                  legible. Theme-aware: darkens in dark theme, lightens in light theme, to track the
-                 themed text it sits behind. -->
-            <Border Background="{ThemeResource NowPlayingScrimBrush}" />
+                 themed text it sits behind. Rounded to match so its fill doesn't square off the corners. -->
+            <Border Background="{ThemeResource NowPlayingScrimBrush}"
+                    CornerRadius="{StaticResource CardCornerRadius}" />
         </Grid>
 
         <!-- Muted tint fills the whole card; shown only when muted. -->
@@ -399,7 +397,7 @@
                  band drops out (the whole card shows the artwork), so hairlines bracket the strip instead.
                  The external volume->rules divider is hidden while this shows. -->
             <Border Height="1" Margin="-16,0,-16,-6"
-                    Background="{ThemeResource CardStrokeColorDefaultBrush}"
+                    Background="{ThemeResource ControlStrokeColorDefaultBrush}"
                     Visibility="{x:Bind Card.ShowNowPlayingDividers, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
             <ItemsControl ItemsSource="{x:Bind Card.NowPlayingStrips, Mode=OneWay}"
                           HorizontalAlignment="Stretch"
@@ -425,14 +423,11 @@
                                          is on, because the whole card already shows the artwork + a single
                                          scrim; painting it again here would double up and look inconsistent. -->
                                     <Grid Visibility="{x:Bind MeterOptions.NowPlayingCardBackground, Mode=OneWay, Converter={StaticResource NegatedBooleanToVisibilityConverter}}">
-                                        <!-- Artwork backdrop painted as a Brush, not an Image element, so
-                                             it cover-fills the content height instead of inflating it. -->
-                                        <Border>
-                                            <Border.Background>
-                                                <ImageBrush ImageSource="{x:Bind BackdropSource, Mode=OneWay}"
-                                                            Stretch="UniformToFill" />
-                                            </Border.Background>
-                                        </Border>
+                                        <!-- Artwork backdrop. CrossfadeImage reports zero desired size
+                                             (like a Brush) so it cover-fills the content height instead of
+                                             inflating it, and eases between artworks on a track change. -->
+                                        <controls:CrossfadeImage Source="{x:Bind BackdropSource, Mode=OneWay}"
+                                                                 Stretch="UniformToFill" />
                                         <!-- Theme-aware scrim: keeps the card's themed text/controls legible
                                              over the art in both light and dark. -->
                                         <Border Background="{ThemeResource NowPlayingScrimBrush}" />
@@ -577,13 +572,13 @@
             </ItemsControl>
 
             <Border Height="1" Margin="-16,-6,-16,0"
-                    Background="{ThemeResource CardStrokeColorDefaultBrush}"
+                    Background="{ThemeResource ControlStrokeColorDefaultBrush}"
                     Visibility="{x:Bind NowPlayingBottomDividerVis(ShowRules, Card.ShowNowPlayingDividers, Card.ShowRulesSection, Card.ShowNoRulesMessage, Card.ShowAppsSection), Mode=OneWay}" />
 
             <!-- Volume -> rules divider. Hidden in the Quick Controls flyout (ShowRules=false) and while
                  the now-playing section shows (no dividers touch the strip then). -->
             <Border Height="1" Margin="-16,0,-16,-6"
-                    Background="{ThemeResource CardStrokeColorDefaultBrush}"
+                    Background="{ThemeResource ControlStrokeColorDefaultBrush}"
                     Visibility="{x:Bind VolumeRulesDividerVis(ShowRules, Card.ShowVolumeDivider, Card.ShowNowPlaying), Mode=OneWay}" />
 
             <!-- Rules section. First rule chip always visible; the chevron toggles the rest. -->
@@ -655,7 +650,7 @@
 
             <!-- Divider between rules and apps; shows only when the apps row is present. -->
             <Border Height="1" Margin="-16,0"
-                    Background="{ThemeResource CardStrokeColorDefaultBrush}"
+                    Background="{ThemeResource ControlStrokeColorDefaultBrush}"
                     Visibility="{x:Bind Card.ShowAppsDivider, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
 
             <!-- Apps row. Each chip is the app's icon with a peak underbar; drag a chip onto another

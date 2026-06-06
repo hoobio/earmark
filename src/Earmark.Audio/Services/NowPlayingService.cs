@@ -20,6 +20,11 @@ namespace Earmark.Audio.Services;
 public sealed class NowPlayingService : INowPlayingService, IDisposable
 {
     private static readonly TimeSpan RebuildDebounce = TimeSpan.FromMilliseconds(120);
+    // When a session disappears (e.g. a browser reloads the page between YouTube videos) keep showing its
+    // last snapshot, frozen as paused, for this long before dropping it - so flicking between tracks
+    // doesn't blink the strip out and back in. The app must still be running (its chip present) for the
+    // held strip to render, so this only papers over the brief mid-navigation gap.
+    private static readonly TimeSpan GraceWindow = TimeSpan.FromSeconds(6);
     private static readonly char[] PathSeparators = { '\\', '/' };
 
     private readonly ILogger<NowPlayingService> _logger;
@@ -38,9 +43,15 @@ public sealed class NowPlayingService : INowPlayingService, IDisposable
     // thumbnails (a track's artwork only changes when the track does).
     private Dictionary<string, NowPlayingInfo> _byKey = new(StringComparer.OrdinalIgnoreCase);
     private IReadOnlyList<NowPlayingInfo> _snapshot = Array.Empty<NowPlayingInfo>();
+    // When each key first went missing (session still listed but metadata blank), so grace counts from
+    // the gap itself, not from the last SMTC event - a track can play for ages between events, which
+    // would otherwise make the grace clock stale before the gap even starts. Cleared the moment a key is
+    // produced again. Touched only inside RebuildAsync (serialised by _rebuildLock).
+    private readonly Dictionary<string, DateTime> _missingSince = new(StringComparer.OrdinalIgnoreCase);
 
     private GlobalSystemMediaTransportControlsSessionManager? _manager;
     private CancellationTokenSource? _debounceCts;
+    private CancellationTokenSource? _graceCts;
     private bool _disposed;
 
     public NowPlayingService(ILogger<NowPlayingService> logger)
@@ -145,6 +156,27 @@ public sealed class NowPlayingService : INowPlayingService, IDisposable
         }, token);
     }
 
+    /// <summary>Fires a single rebuild after <paramref name="delay"/> so a held (paused) ghost drops once
+    /// its grace window lapses, even when SMTC raises no further event. Coalesced: a newer schedule
+    /// replaces the pending one.</summary>
+    private void ScheduleGraceExpiry(TimeSpan delay)
+    {
+        if (_disposed) return;
+        CancellationTokenSource cts;
+        lock (_gate)
+        {
+            _graceCts?.Cancel();
+            _graceCts = cts = new CancellationTokenSource();
+        }
+        var token = cts.Token;
+        _ = Task.Run(async () =>
+        {
+            try { await Task.Delay(delay, token).ConfigureAwait(false); }
+            catch (OperationCanceledException) { return; }
+            RequestRebuild();
+        }, token);
+    }
+
     private async Task RebuildAsync(CancellationToken token)
     {
         var manager = _manager;
@@ -158,17 +190,50 @@ public sealed class NowPlayingService : INowPlayingService, IDisposable
             catch (Exception ex) { _logger.LogDebug(ex, "NowPlaying: GetSessions failed during rebuild"); return; }
 
             var previous = _byKey;
+            var now = DateTime.UtcNow;
             var built = new List<NowPlayingInfo>(sessions.Count);
             var byKey = new Dictionary<string, NowPlayingInfo>(StringComparer.OrdinalIgnoreCase);
+            // Every key the manager still lists, even ones whose metadata is momentarily empty. Used to
+            // tell a mid-navigation gap (session present, blank metadata) from an app close (session gone).
+            var presentKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             foreach (var session in sessions)
             {
                 if (token.IsCancellationRequested) return;
+                var sessionKey = SafeKey(session);
+                if (!string.IsNullOrEmpty(sessionKey)) presentKeys.Add(sessionKey);
                 var info = await TryBuildAsync(session, previous).ConfigureAwait(false);
                 if (info is null) continue;
                 if (byKey.ContainsKey(info.SessionKey)) continue; // one entry per app key
                 byKey[info.SessionKey] = info;
                 built.Add(info);
+                _missingSince.Remove(info.SessionKey); // produced again: not missing
+            }
+
+            // Hold recently-blanked sessions as frozen (paused) ghosts within the grace window, so a
+            // page reload between tracks doesn't clear the strip. Grace counts from when the key first
+            // went missing (not from the last event), and a rebuild is scheduled at the soonest expiry
+            // so a held ghost still clears even if SMTC fires nothing more.
+            TimeSpan? soonestExpiry = null;
+            foreach (var (key, prior) in previous)
+            {
+                if (byKey.ContainsKey(key)) continue;
+                // App closed: its session left the manager entirely. Drop now, no grace - leniency is
+                // only for the metadata blank-out while the app stays open (the session stays listed).
+                if (!presentKeys.Contains(key))
+                {
+                    _missingSince.Remove(key);
+                    continue;
+                }
+                if (!_missingSince.TryGetValue(key, out var since)) _missingSince[key] = since = now;
+                var age = now - since;
+                if (age >= GraceWindow) { _missingSince.Remove(key); continue; }
+                byKey[key] = prior.Status == NowPlayingStatus.Playing
+                    ? prior with { Status = NowPlayingStatus.Paused }
+                    : prior;
+                built.Add(byKey[key]);
+                var remaining = GraceWindow - age;
+                if (soonestExpiry is null || remaining < soonestExpiry) soonestExpiry = remaining;
             }
 
             lock (_gate)
@@ -177,6 +242,8 @@ public sealed class NowPlayingService : INowPlayingService, IDisposable
                 _snapshot = built;
             }
             Changed?.Invoke(this, EventArgs.Empty);
+
+            if (soonestExpiry is { } delay) ScheduleGraceExpiry(delay + TimeSpan.FromMilliseconds(100));
         }
         finally
         {
@@ -354,6 +421,7 @@ public sealed class NowPlayingService : INowPlayingService, IDisposable
         lock (_gate)
         {
             _debounceCts?.Cancel();
+            _graceCts?.Cancel();
             if (_manager is not null) _manager.SessionsChanged -= OnSessionsChanged;
             foreach (var session in _hooked) Detach(session);
             _hooked.Clear();
