@@ -128,7 +128,7 @@ public sealed partial class QuickControlsWindow : Window
 
     public void ShowPrepared()
     {
-        Root.Opacity = 0;
+        RevealCover.Opacity = 1;
         AppWindow.Show();
         ShowAnimation.Begin();
         IsOpen = true;
@@ -251,6 +251,13 @@ public sealed partial class QuickControlsWindow : Window
     {
         var effective = Root.RequestedTheme == ElementTheme.Default ? Root.ActualTheme : Root.RequestedTheme;
         _backdropConfig.Theme = effective == ElementTheme.Light ? SystemBackdropTheme.Light : SystemBackdropTheme.Dark;
+
+        // Match the reveal cover to the backdrop so the dissolve lands on the right colour: Acrylic
+        // settles darker and more translucent than Mica's solid base, so reuse its in-app brush.
+        RevealCover.Background = (Brush)Application.Current.Resources[
+            ResolveBackdrop() == BackdropMode.Acrylic
+                ? "AcrylicInAppFillColorDefaultBrush"
+                : "SolidBackgroundFillColorBaseBrush"];
     }
 
     private void OnRootActualThemeChanged(FrameworkElement sender, object args) => UpdateBackdropTheme();

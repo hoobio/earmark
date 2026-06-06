@@ -15,22 +15,17 @@
         </Border.RenderTransform>
         <Border.Resources>
             <Storyboard x:Name="ShowAnimation">
-                <DoubleAnimation Storyboard.TargetName="Root"
+                <!-- Fade the solid Mica-coloured cover out (not the content in): the first visible frame
+                     is the backdrop colour, never the black of a backdrop that hasn't composited yet. -->
+                <DoubleAnimation Storyboard.TargetName="RevealCover"
                                  Storyboard.TargetProperty="Opacity"
-                                 From="0" To="1" Duration="0:0:0.25">
+                                 From="1" To="0" Duration="0:0:0.25">
                     <DoubleAnimation.EasingFunction>
                         <CubicEase EasingMode="EaseOut" />
                     </DoubleAnimation.EasingFunction>
                 </DoubleAnimation>
                 <DoubleAnimation Storyboard.TargetName="RootTransform"
                                  Storyboard.TargetProperty="TranslateX"
-                                 From="12" To="0" Duration="0:0:0.25">
-                    <DoubleAnimation.EasingFunction>
-                        <CubicEase EasingMode="EaseOut" />
-                    </DoubleAnimation.EasingFunction>
-                </DoubleAnimation>
-                <DoubleAnimation Storyboard.TargetName="RootTransform"
-                                 Storyboard.TargetProperty="TranslateY"
                                  From="12" To="0" Duration="0:0:0.25">
                     <DoubleAnimation.EasingFunction>
                         <CubicEase EasingMode="EaseOut" />
@@ -105,6 +100,13 @@
                     </ItemsRepeater.ItemTemplate>
                 </ItemsRepeater>
             </ScrollView>
+
+            <!-- Opaque Mica-coloured cover, on top, faded out by ShowAnimation. Masks the brief black
+                 frame while the system backdrop composites on first show. -->
+            <Border x:Name="RevealCover"
+                    Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+                    IsHitTestVisible="False"
+                    Opacity="0" />
         </Grid>
     </Border>
 </Window>
