@@ -1,5 +1,89 @@
 # Changelog
 
+## [1.0.0](https://github.com/hoobio/earmark/compare/v0.2.0...v1.0.0) (2026-06-06)
+
+
+### ⚠ BREAKING CHANGES
+
+* snappier startup, relocate data to %APPDATA%, lighter Mica
+* settings and rules now live under %APPDATA%\Earmark. Config saved by a pre-1.0 build under the old location is not migrated and must be recreated after upgrading.
+
+### Features
+
+* ✨ add Now Playing media strip to device cards ([#55](https://github.com/hoobio/earmark/issues/55)) ([94ec4f2](https://github.com/hoobio/earmark/commit/94ec4f299bb48c2e45320a74afb1c8cd52ede21c))
+* add per-device display overrides ([cb4efd1](https://github.com/hoobio/earmark/commit/cb4efd160ca9652b5a6af76c0610461187009562))
+* add Quick Controls overlay ([#52](https://github.com/hoobio/earmark/issues/52)) ([b6dd130](https://github.com/hoobio/earmark/commit/b6dd130e33601c160ef7615aedd651307d833dfd))
+* add taskbar thumbnail media controls and playback badge ([cb4efd1](https://github.com/hoobio/earmark/commit/cb4efd160ca9652b5a6af76c0610461187009562))
+* adopt WinUI TitleBar control with working back navigation ([cb4efd1](https://github.com/hoobio/earmark/commit/cb4efd160ca9652b5a6af76c0610461187009562))
+* channel-aware MSIX identity and DisplayName per build channel ([5bd1957](https://github.com/hoobio/earmark/commit/5bd19573c4976b57f9a41d5e6a046db961cf6dec))
+* collapse nav pane on backdrop tap ([cb4efd1](https://github.com/hoobio/earmark/commit/cb4efd160ca9652b5a6af76c0610461187009562))
+* hide taskbar playback indicator after 30s paused ([cb4efd1](https://github.com/hoobio/earmark/commit/cb4efd160ca9652b5a6af76c0610461187009562))
+* now-playing leniency grace window and artwork cross-fade ([cb4efd1](https://github.com/hoobio/earmark/commit/cb4efd160ca9652b5a6af76c0610461187009562))
+* refresh rule summaries during in-place session reconcile ([cb4efd1](https://github.com/hoobio/earmark/commit/cb4efd160ca9652b5a6af76c0610461187009562))
+* resolve session icons from the IconPath fallback ([cb4efd1](https://github.com/hoobio/earmark/commit/cb4efd160ca9652b5a6af76c0610461187009562))
+* slide-in animation for quick controls windows ([cb4efd1](https://github.com/hoobio/earmark/commit/cb4efd160ca9652b5a6af76c0610461187009562))
+* strip '- Topic' suffix from now playing artist ([cb4efd1](https://github.com/hoobio/earmark/commit/cb4efd160ca9652b5a6af76c0610461187009562))
+* strip redundant artist prefix from now playing titles ([cb4efd1](https://github.com/hoobio/earmark/commit/cb4efd160ca9652b5a6af76c0610461187009562))
+* taskbar media controls, startup performance, and UI polish ([#56](https://github.com/hoobio/earmark/issues/56)) ([cb4efd1](https://github.com/hoobio/earmark/commit/cb4efd160ca9652b5a6af76c0610461187009562))
+* theme-aware card surfaces, Mica uniformity, and tighter page ([cb4efd1](https://github.com/hoobio/earmark/commit/cb4efd160ca9652b5a6af76c0610461187009562))
+
+
+### Bug Fixes
+
+* animate page transitions on every nav, not just first load ([cb4efd1](https://github.com/hoobio/earmark/commit/cb4efd160ca9652b5a6af76c0610461187009562))
+* keep card at row height as a floor when rules expand ([cb4efd1](https://github.com/hoobio/earmark/commit/cb4efd160ca9652b5a6af76c0610461187009562))
+* lower audible threshold so faint audio keeps app chips lit ([cb4efd1](https://github.com/hoobio/earmark/commit/cb4efd160ca9652b5a6af76c0610461187009562))
+* mask black flash on quick controls open with backdrop-matched ([cb4efd1](https://github.com/hoobio/earmark/commit/cb4efd160ca9652b5a6af76c0610461187009562))
+* MSIX Store-readiness - brand icons, identity, and Quick Controls polish ([#58](https://github.com/hoobio/earmark/issues/58)) ([5bd1957](https://github.com/hoobio/earmark/commit/5bd19573c4976b57f9a41d5e6a046db961cf6dec))
+* quick controls scrollbar gutter, disconnected dimming, scroll ([cb4efd1](https://github.com/hoobio/earmark/commit/cb4efd160ca9652b5a6af76c0610461187009562))
+* refine now-playing band layout in strip and fill modes ([cb4efd1](https://github.com/hoobio/earmark/commit/cb4efd160ca9652b5a6af76c0610461187009562))
+* render real brand icons for the Start tile, taskbar, and tray in ([5bd1957](https://github.com/hoobio/earmark/commit/5bd19573c4976b57f9a41d5e6a046db961cf6dec))
+* roll up hosted webview sessions to owner apps ([#50](https://github.com/hoobio/earmark/issues/50)) ([8d162b6](https://github.com/hoobio/earmark/commit/8d162b6849b159b38bb6f2ae17438b7e9a4f9694))
+* show device card menu on right-click, not backdrop menu ([cb4efd1](https://github.com/hoobio/earmark/commit/cb4efd160ca9652b5a6af76c0610461187009562))
+* size the SplashScreen scale-200 asset to 1240x600 for WACK ([b19e517](https://github.com/hoobio/earmark/commit/b19e517a72e6951ee5ae00e79448282f30db9ef8))
+* stop replaying the Quick Controls slide-in on device state changes ([5bd1957](https://github.com/hoobio/earmark/commit/5bd19573c4976b57f9a41d5e6a046db961cf6dec))
+* strip Official tags from now-playing title and artist ([cb4efd1](https://github.com/hoobio/earmark/commit/cb4efd160ca9652b5a6af76c0610461187009562))
+* suppress the Quick Controls right-click context menu ([5bd1957](https://github.com/hoobio/earmark/commit/5bd19573c4976b57f9a41d5e6a046db961cf6dec))
+* WACK splash-asset size and gate package builds to releases ([#61](https://github.com/hoobio/earmark/issues/61)) ([b19e517](https://github.com/hoobio/earmark/commit/b19e517a72e6951ee5ae00e79448282f30db9ef8))
+
+
+### Performance Improvements
+
+* snappier startup, relocate data to %APPDATA%, lighter Mica ([cb4efd1](https://github.com/hoobio/earmark/commit/cb4efd160ca9652b5a6af76c0610461187009562))
+
+
+### Documentation
+
+* remove shipped customization panel feature doc ([8d162b6](https://github.com/hoobio/earmark/commit/8d162b6849b159b38bb6f2ae17438b7e9a4f9694))
+* rewrite README for the audio companion scope ([#57](https://github.com/hoobio/earmark/issues/57)) ([89343fb](https://github.com/hoobio/earmark/commit/89343fb66b995dc76b4569ad4fd4b7a8eda9102f))
+
+
+### Miscellaneous Chores
+
+* remove custom smooth-scroll and update AGENTS.md ([#53](https://github.com/hoobio/earmark/issues/53)) ([82b639f](https://github.com/hoobio/earmark/commit/82b639f88d9043203e731c16f99074c1c6fabd11))
+
+
+### Code Refactoring
+
+* ♻️ slim down the Quick Controls overlay ([#54](https://github.com/hoobio/earmark/issues/54)) ([9ad54c6](https://github.com/hoobio/earmark/commit/9ad54c6fc55d7d007a95d2f02f55300cd51e18bd))
+* remove unused volume-controls toggle from DeviceCard ([cb4efd1](https://github.com/hoobio/earmark/commit/cb4efd160ca9652b5a6af76c0610461187009562))
+* render now-playing backdrop with in-app acrylic ([cb4efd1](https://github.com/hoobio/earmark/commit/cb4efd160ca9652b5a6af76c0610461187009562))
+* stop persisting and restoring window size ([cb4efd1](https://github.com/hoobio/earmark/commit/cb4efd160ca9652b5a6af76c0610461187009562))
+* unify card section dividers and modernise now-playing slider ([cb4efd1](https://github.com/hoobio/earmark/commit/cb4efd160ca9652b5a6af76c0610461187009562))
+
+
+### Build System
+
+* drop Win2D, render taskbar icons via System.Drawing ([cb4efd1](https://github.com/hoobio/earmark/commit/cb4efd160ca9652b5a6af76c0610461187009562))
+
+
+### Continuous Integration
+
+* emit an unsigned-namespace test MSIX for sideload testing ([5bd1957](https://github.com/hoobio/earmark/commit/5bd19573c4976b57f9a41d5e6a046db961cf6dec))
+* fix WACK being skipped on the release-please PR ([#62](https://github.com/hoobio/earmark/issues/62)) ([7fdda09](https://github.com/hoobio/earmark/commit/7fdda0977db40f0ad09a0b56be697cfcac4846bc))
+* only build the MSIX/MSI package on main for release-please releases ([b19e517](https://github.com/hoobio/earmark/commit/b19e517a72e6951ee5ae00e79448282f30db9ef8))
+* stop WACK being skipped by the release-please skip propagation ([7fdda09](https://github.com/hoobio/earmark/commit/7fdda0977db40f0ad09a0b56be697cfcac4846bc))
+
 ## [0.2.0](https://github.com/hoobio/earmark/compare/v0.1.9...v0.2.0) (2026-06-01)
 
 
