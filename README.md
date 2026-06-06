@@ -1,6 +1,6 @@
 # Earmark
 
-Per-app audio routing for Windows, driven by regex rules. Pin a browser to your media DAC, force Discord onto your headset mic, or lock the system default to a specific endpoint. Like Volume Mixer's per-app device picker, but pattern-driven and persistent across reboots, app updates, and driver reinstalls.
+An audio companion for Windows, built around a regex-driven rules engine. Routing rules pin each app to the device you want (a browser to your media DAC, Discord onto your headset mic, the system default to a specific endpoint) and keep it there across reboots, app updates, and driver reinstalls. Around that sits a live per-device mixer, now-playing with media controls, and quick access from the tray or a global shortcut. Like Volume Mixer's per-app device picker, but pattern-driven and persistent. A full control centre.
 
 [![Download from GitHub Releases](https://img.shields.io/github/v/release/hoobio/earmark?label=Download&logo=github&style=for-the-badge&color=181717)](https://github.com/hoobio/earmark/releases/latest)
 
@@ -13,6 +13,8 @@ Per-app audio routing for Windows, driven by regex rules. Pin a browser to your 
 
 ## Features
 
+### Routing rules
+
 - **Rule-based routing**: each rule is a list of conditions (all must hold) and a list of actions (all run in order, topmost wins per target).
 - **Four action types**: pin an app's render endpoint, pin an app's capture endpoint, set the system default output, set the system default input. Default actions can target the "default" role, the "communications" role, or both.
 - **Conditions**: `Device present` and `Device missing`, scoped to render, capture, or any flow. The same regex syntax as device patterns.
@@ -20,6 +22,24 @@ Per-app audio routing for Windows, driven by regex rules. Pin a browser to your 
 - **Live status**: rules dim when off, when shadowed by an earlier rule, or when their conditions are not met. Match counts and resolved devices appear inline as you edit.
 - **Drag to reorder**: rules apply top-down, so reordering changes precedence.
 - **Auto-reapply**: routing reapplies on rule changes, on device add/remove, on default-device changes, and on a 10-second safety tick.
+
+### Devices dashboard
+
+- **Live mixer**: a card per endpoint with a volume slider, mute, and per-channel peak meters. Disconnected devices stay listed with their settings remembered, and reactivate when they reconnect.
+- **App indicators**: chips show which apps are on each device, flagging closed and elevated processes; jump straight to a rule with "Open in Rules".
+- **Quick pin**: route a running app to a device from its card without writing a rule.
+- **Bluetooth**: connect or disconnect Bluetooth audio devices from the card.
+- **Customisable**: tune card height, dividers, rule visibility, app indicators, and meters globally or per device; hide audio forwarders, always show pinned apps, or keep stopped apps visible.
+
+### Now playing & media
+
+- **Now playing**: each card surfaces the active media session (title, artist, artwork) with transport controls and a seek bar. Titles and artists are tidied (drops `- Topic`, "Official ..." tags, and redundant artist prefixes).
+- **Taskbar controls**: thumbnail play/pause/skip buttons and a playback badge on the taskbar icon (auto-hides after a pause).
+- **Quick Controls**: a configurable global shortcut opens a compact window to glance at devices and control playback without opening the main window.
+
+### App
+
+- **Wave Link**: optional integration that surfaces Elgato Wave Link channels.
 - **Tray-friendly**: launch hidden, close to tray, single-instance.
 - **Stays current**: the standalone build checks GitHub for new releases and shows an "Update available" badge in the title bar (toggle it off in Settings). Version, logs, and one-click bug/feature links live in Settings > About.
 
@@ -79,11 +99,11 @@ When the DAC is unplugged, the condition fails, the rule dims, and Windows rever
 
 | What | Where |
 |------|-------|
-| Rules | `%UserProfile%\Documents\Hoobi\Earmark\rules.json` |
-| Settings | `%UserProfile%\Documents\Hoobi\Earmark\settings.json` |
+| Rules | `%AppData%\Hoobi\Earmark\rules.json` |
+| Settings | `%AppData%\Hoobi\Earmark\settings.json` |
 | Logs | `%LocalAppData%\Earmark\logs\earmark-{yyyyMMdd-HHmmss}.log` (one per launch) |
 
-Rules and settings live under `Documents/` so OneDrive backs them up across machines.
+Rules and settings live in roaming `%AppData%`. Dev and pre-release builds nest under a channel subfolder so they never clobber a stable install.
 
 ## How it works
 
