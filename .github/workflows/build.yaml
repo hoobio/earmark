@@ -192,6 +192,9 @@ jobs:
           # the installed build can compare itself against newer pre-release tags. Everything else
           # CI builds is "Release".
           $channel = if ('${{ github.event_name }}' -eq 'pull_request' -and '${{ github.head_ref }}' -eq 'release-please--branches--main') { 'Prerelease' } else { 'Release' }
+          # Expose the channel to later steps (the WiX build reads $(env.EARMARK_CHANNEL) to set the
+          # per-channel ARP name, install folder, and UpgradeCode).
+          "EARMARK_CHANNEL=$channel" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           $extra = @()
           if ($channel -eq 'Prerelease') {
             $extra += "-p:InformationalVersion=$($env:APP_VERSION)-pre.$($env:GITHUB_RUN_NUMBER)"

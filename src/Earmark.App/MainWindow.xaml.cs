@@ -166,6 +166,9 @@ public sealed partial class MainWindow : Window, IDisposable
         NavigateTo(first);
         NavView.SelectedItem = first;
 
+        // Background init is done and the first page is in the frame; drop the startup skeleton.
+        LoadingOverlay.Visibility = Visibility.Collapsed;
+
         // Without this, initial focus falls on the first focusable element (the title-bar pane
         // toggle); a keyboard-initiated launch then renders its focus rectangle. Set focus to the
         // selected nav item with Programmatic state so no high-visibility ring shows on launch. If
@@ -258,7 +261,7 @@ public sealed partial class MainWindow : Window, IDisposable
         ISystemBackdropControllerWithTargets? controller = mode switch
         {
             BackdropMode.Acrylic when DesktopAcrylicController.IsSupported() => new DesktopAcrylicController(),
-            BackdropMode.Mica when MicaController.IsSupported() => new MicaController { Kind = MicaKind.BaseAlt },
+            BackdropMode.Mica when MicaController.IsSupported() => new MicaController { Kind = MicaKind.Base },
             _ => null,
         };
 

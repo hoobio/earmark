@@ -394,13 +394,17 @@
                  row. Full-bleed to the card edges; each row carries a top hairline so the first row also
                  divides the section and extra rows are separated. Lives on the Devices page and in Quick
                  Controls alike (independent of ShowRules). -->
-            <!-- Now playing: one full-bleed dark strip per app with a media session. No dividers around
-                 it - the dark band is its own separator; multiple rows are spaced apart. The external
-                 volume->rules divider is hidden while this shows. -->
+            <!-- Now playing: one full-bleed dark strip per app with a media session. Normally no dividers
+                 around it - the dark band is its own separator. But with "fill card background" on, the
+                 band drops out (the whole card shows the artwork), so hairlines bracket the strip instead.
+                 The external volume->rules divider is hidden while this shows. -->
+            <Border Height="1" Margin="-16,0,-16,-6"
+                    Background="{ThemeResource CardStrokeColorDefaultBrush}"
+                    Visibility="{x:Bind Card.ShowNowPlayingDividers, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
             <ItemsControl ItemsSource="{x:Bind Card.NowPlayingStrips, Mode=OneWay}"
                           HorizontalAlignment="Stretch"
                           HorizontalContentAlignment="Stretch"
-                          Margin="-16,0"
+                          Margin="{x:Bind NowPlayingStripMargin(Card.ShowNowPlayingDividers, ShowRules, Card.ShowRulesSection, Card.ShowNoRulesMessage, Card.ShowAppsSection), Mode=OneWay}"
                           Visibility="{x:Bind Card.ShowNowPlaying, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
                 <ItemsControl.ItemsPanel>
                     <ItemsPanelTemplate>
@@ -434,7 +438,10 @@
                                         <Border Background="{ThemeResource NowPlayingScrimBrush}" />
                                     </Grid>
 
-                                    <Grid Padding="16" ColumnSpacing="10">
+                                    <!-- Horizontal inset stays 16 so the strip content lines up with the
+                                         rest of the card; vertical inset is the card's 12px row spacing so
+                                         the strip isn't more padded than the gaps around it. -->
+                                    <Grid Padding="16,12" ColumnSpacing="10">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="Auto" />
@@ -568,6 +575,10 @@
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
+
+            <Border Height="1" Margin="-16,-6,-16,0"
+                    Background="{ThemeResource CardStrokeColorDefaultBrush}"
+                    Visibility="{x:Bind NowPlayingBottomDividerVis(ShowRules, Card.ShowNowPlayingDividers, Card.ShowRulesSection, Card.ShowNoRulesMessage, Card.ShowAppsSection), Mode=OneWay}" />
 
             <!-- Volume -> rules divider. Hidden in the Quick Controls flyout (ShowRules=false) and while
                  the now-playing section shows (no dividers touch the strip then). -->

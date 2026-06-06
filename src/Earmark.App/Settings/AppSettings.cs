@@ -133,8 +133,8 @@ public sealed class AppSettings
     public NowPlayingBackdropBlurMode NowPlayingBackdropBlur { get; set; } = NowPlayingBackdropBlurMode.Gaussian;
 
     /// <summary>Whether the primary now-playing artwork also fills the whole device card as a dimmed
-    /// background (the playing session wins when a card has several). Default off.</summary>
-    public bool NowPlayingCardBackground { get; set; }
+    /// background (the playing session wins when a card has several). Default on.</summary>
+    public bool NowPlayingCardBackground { get; set; } = true;
 
     /// <summary>How device cards size their height within a row. <see cref="CardHeightMode.Balanced"/>
     /// (default) aligns plain cards to the row's tallest plain card while letting a card with apps /

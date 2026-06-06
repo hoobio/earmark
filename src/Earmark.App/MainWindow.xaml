@@ -147,6 +147,18 @@
             </Frame>
         </NavigationView>
 
+        <!-- Instant loading skeleton: a centred ring over the Mica shell, shown from the moment the
+             window is activated until the first page navigates (which waits on background init). The
+             nav shell paints immediately; this fills the empty content area so startup never reads as
+             a blank/black window. HomePage's own loading ring then takes over while its cards build. -->
+        <Grid x:Name="LoadingOverlay" Grid.Row="1">
+            <ProgressRing IsActive="True"
+                          Width="36"
+                          Height="36"
+                          HorizontalAlignment="Center"
+                          VerticalAlignment="Center" />
+        </Grid>
+
         <!-- In-app toast: brief, bottom-centred feedback for an interactive action in this window
              (e.g. "couldn't close that app"). Collapsed until ShowToast animates it in, then it
              auto-dismisses. Windows notifications stay reserved for background events the user may

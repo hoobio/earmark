@@ -13,13 +13,14 @@ internal sealed partial class SettingsJsonContext : JsonSerializerContext;
 
 internal sealed class SettingsService : ISettingsService, IDisposable
 {
-    private static readonly string DefaultPath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
-        "Hoobi",
-        "Earmark",
-        "settings.json");
-
+    private readonly string _path;
     private readonly SemaphoreSlim _gate = new(1, 1);
+
+    public SettingsService(string path)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        _path = path;
+    }
 
     public AppSettings Current { get; private set; } = new();
 
@@ -30,13 +31,13 @@ internal sealed class SettingsService : ISettingsService, IDisposable
         await _gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            if (!File.Exists(DefaultPath))
+            if (!File.Exists(_path))
             {
                 Current = new AppSettings();
                 return;
             }
 
-            await using var stream = File.OpenRead(DefaultPath);
+            await using var stream = File.OpenRead(_path);
             var loaded = await JsonSerializer
                 .DeserializeAsync(stream, SettingsJsonContext.Default.AppSettings, ct)
                 .ConfigureAwait(false);
@@ -55,7 +56,7 @@ internal sealed class SettingsService : ISettingsService, IDisposable
         await _gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(DefaultPath)!);
+            Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
 
             await using var buffer = new MemoryStream();
             await JsonSerializer
@@ -67,7 +68,7 @@ internal sealed class SettingsService : ISettingsService, IDisposable
             {
                 try
                 {
-                    await File.WriteAllBytesAsync(DefaultPath, bytes, ct).ConfigureAwait(false);
+                    await File.WriteAllBytesAsync(_path, bytes, ct).ConfigureAwait(false);
                     break;
                 }
                 catch (IOException) when (attempt < 4)
@@ -92,7 +93,7 @@ internal sealed class SettingsService : ISettingsService, IDisposable
     {
         ArgumentException.ThrowIfNullOrEmpty(label);
         var backupPath = Path.Combine(
-            Path.GetDirectoryName(DefaultPath)!,
+            Path.GetDirectoryName(_path)!,
             $"settings.{label}.json");
         await _gate.WaitAsync(ct).ConfigureAwait(false);
         try

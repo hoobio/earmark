@@ -47,6 +47,11 @@ public sealed class AudioEndpointService : IAudioEndpointService, IMMNotificatio
     private readonly Lock _scheduleGate = new();
     private readonly Dictionary<string, MuteSubscription> _muteSubs =
         new(StringComparer.OrdinalIgnoreCase);
+    // Endpoints whose AudioEndpointVolume activation already failed (render/capture subnodes that
+    // throw 0x88890004). Skipped on later refreshes so we don't re-throw + re-catch a COMException
+    // per dead endpoint every time the set changes. Pruned to the live set below, so a replug retries.
+    private readonly HashSet<string> _failedMuteSubs =
+        new(StringComparer.OrdinalIgnoreCase);
     private readonly Timer _safetyTimer;
     private readonly Timer _watchdogTimer;
     private readonly Timer _peakSampler;
@@ -418,9 +423,12 @@ public sealed class AudioEndpointService : IAudioEndpointService, IMMNotificatio
                 }
             }
 
+            // Drop known-bad ids that are no longer present so a reconnect gets a fresh attempt.
+            _failedMuteSubs.IntersectWith(current);
+
             foreach (var id in current)
             {
-                if (!_muteSubs.ContainsKey(id))
+                if (!_muteSubs.ContainsKey(id) && !_failedMuteSubs.Contains(id))
                 {
                     (toAdd ??= []).Add(id);
                 }
@@ -447,6 +455,7 @@ public sealed class AudioEndpointService : IAudioEndpointService, IMMNotificatio
                 }
                 catch (Exception ex)
                 {
+                    lock (_muteSubGate) _failedMuteSubs.Add(id);
                     _logger.LogDebug(ex, "Mute subscription: failed to attach to {Id}", id);
                     continue;
                 }

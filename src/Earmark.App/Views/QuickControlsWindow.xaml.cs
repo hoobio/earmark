@@ -54,6 +54,7 @@ public sealed partial class QuickControlsWindow : Window
         ConfigureWindow();
         Hide();
         Root.ActualThemeChanged += OnRootActualThemeChanged;
+        Scroller.ViewChanged += OnScrollerViewChanged;
         _settings.SettingsChanged += OnSettingsChanged;
         Closed += OnClosed;
     }
@@ -126,11 +127,39 @@ public sealed partial class QuickControlsWindow : Window
         return height;
     }
 
+    // Smooth wheel scrolling: handling the wheel on the content (not the ScrollViewer) stops the routed
+    // event before the ScrollViewer's own stepwise handler runs, so we drive an animated ChangeView
+    // instead. _wheelTarget accumulates rapid notches; ViewChanged resyncs it once a scroll settles.
+    private const double WheelStep = 90.0;
+    private double _wheelTarget;
+    private bool _wheelActive;
+
+    private void OnContentPointerWheelChanged(object sender, PointerRoutedEventArgs e)
+    {
+        var delta = e.GetCurrentPoint(Scroller).Properties.MouseWheelDelta;
+        _logger.LogDebug("Wheel: delta={Delta} scrollable={Scrollable} offset={Offset}", delta, Scroller.ScrollableHeight, Scroller.VerticalOffset);
+        if (delta == 0 || Scroller.ScrollableHeight <= 0) return;
+
+        var basis = _wheelActive ? _wheelTarget : Scroller.VerticalOffset;
+        _wheelTarget = Math.Clamp(basis - (delta / 120.0 * WheelStep), 0, Scroller.ScrollableHeight);
+        _wheelActive = true;
+        Scroller.ChangeView(null, _wheelTarget, null, disableAnimation: false);
+        e.Handled = true;
+    }
+
+    private void OnScrollerViewChanged(object? sender, ScrollViewerViewChangedEventArgs e)
+    {
+        if (!e.IsIntermediate) _wheelActive = false;
+    }
+
     public void ShowPrepared()
     {
         AppWindow.Show();
-        // Give the panel focus so the Escape accelerator has an active focus scope (the window has no
-        // title bar to take focus on its own). Pointer focus state avoids drawing the focus rectangle.
+        // Claim activation (the registered hotkey grants foreground rights) so a click on any other app
+        // fires Deactivated and dismisses the stack, then give the panel focus so the Escape accelerator
+        // has an active focus scope. Without this, neither works until the user first clicks a panel.
+        // Pointer focus state avoids drawing the focus rectangle.
+        Activate();
         Root.Focus(FocusState.Pointer);
         IsOpen = true;
     }
@@ -213,7 +242,7 @@ public sealed partial class QuickControlsWindow : Window
         ISystemBackdropControllerWithTargets? controller = mode switch
         {
             BackdropMode.Acrylic when DesktopAcrylicController.IsSupported() => new DesktopAcrylicController(),
-            BackdropMode.Mica when MicaController.IsSupported() => new MicaController { Kind = MicaKind.BaseAlt },
+            BackdropMode.Mica when MicaController.IsSupported() => new MicaController { Kind = MicaKind.Base },
             _ => null,
         };
 

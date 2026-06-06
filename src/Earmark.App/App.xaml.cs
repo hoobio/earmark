@@ -51,35 +51,47 @@ public partial class App : Application
         try
         {
             await _host.Services.GetRequiredService<ISettingsService>().LoadAsync();
-            _host.Services.GetRequiredService<StartupSettingsApplier>().Start();
-            _host.Services.GetRequiredService<INotificationService>().Register();
             _logger.LogInformation("Settings loaded");
 
-            // Heavy init (audio endpoint + session enumeration via COM, rules load, routing
-            // applier startup) runs on the thread pool so the UI thread can paint immediately.
-            // MainWindow.InitializationTask gates the first page navigation - RulesViewModel
-            // depends on the audio singletons, so navigating before this task completes would
-            // force their construction synchronously on the UI thread, which is what we just
-            // moved off it.
+            // Heavy init runs on the thread pool so the UI thread can paint immediately. The first
+            // navigation is gated only on what the pages need to bind: the audio singletons (whose
+            // COM-heavy construction must not run during page nav on the UI thread) and the loaded
+            // rules. Seeding and the routing applier's first apply are NOT on the gate - they're
+            // COM-heavy too but the Devices grid can paint without them, so they run ungated after,
+            // shrinking the blank-window window. navGate is completed the moment those bindings are
+            // ready, even if a step faults (we navigate to a degraded UI rather than hang).
+            var navGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             var initTask = Task.Run(async () =>
             {
-                // Construct the audio singletons here (off the UI thread) so their COM-heavy
-                // setup never runs during page navigation. Time each so a slow machine shows
-                // where startup goes. The meter service is pre-built too: HomeViewModel needs
-                // it, and otherwise its Rebuild() would run on the UI thread during nav.
-                var sw = System.Diagnostics.Stopwatch.StartNew();
-                _ = _host.Services.GetRequiredService<IAudioEndpointService>();
-                var epMs = sw.ElapsedMilliseconds;
-                _ = _host.Services.GetRequiredService<IAudioSessionService>();
-                var sessMs = sw.ElapsedMilliseconds - epMs;
-                _ = _host.Services.GetRequiredService<IAudioSessionMeterService>();
-                var meterMs = sw.ElapsedMilliseconds - epMs - sessMs;
-                _logger.LogInformation(
-                    "Audio services initialized in {TotalMs} ms (endpoints {EpMs}, sessions {SessMs}, meters {MeterMs})",
-                    sw.ElapsedMilliseconds, epMs, sessMs, meterMs);
+                try
+                {
+                    // Apply persisted startup settings (file log level, WaveLink enable, run-at-login)
+                    // off the UI thread: the WaveLink enable triggers a TCP connect we don't want on
+                    // the first-paint path, and it must run before the routing applier's first apply.
+                    _host.Services.GetRequiredService<StartupSettingsApplier>().Start();
 
-                await _host.Services.GetRequiredService<IRulesService>().LoadAsync();
-                _logger.LogInformation("Rules loaded");
+                    // Construct the audio singletons here (off the UI thread). Time each so a slow
+                    // machine shows where startup goes. The meter service is pre-built too:
+                    // HomeViewModel needs it, and otherwise its Rebuild() would run on the UI thread.
+                    var sw = System.Diagnostics.Stopwatch.StartNew();
+                    _ = _host.Services.GetRequiredService<IAudioEndpointService>();
+                    var epMs = sw.ElapsedMilliseconds;
+                    _ = _host.Services.GetRequiredService<IAudioSessionService>();
+                    var sessMs = sw.ElapsedMilliseconds - epMs;
+                    _ = _host.Services.GetRequiredService<IAudioSessionMeterService>();
+                    var meterMs = sw.ElapsedMilliseconds - epMs - sessMs;
+                    _logger.LogInformation(
+                        "Audio services initialized in {TotalMs} ms (endpoints {EpMs}, sessions {SessMs}, meters {MeterMs})",
+                        sw.ElapsedMilliseconds, epMs, sessMs, meterMs);
+
+                    await _host.Services.GetRequiredService<IRulesService>().LoadAsync();
+                    _logger.LogInformation("Rules loaded");
+                }
+                finally
+                {
+                    // Unblock the first navigation as soon as the pages can bind, even on fault.
+                    navGate.TrySetResult();
+                }
 
                 // Blank-slate installs only: seed the starter device groups + two disabled example
                 // rules. A no-op when any rule or Devices-page config already exists, so it never
@@ -92,7 +104,7 @@ public partial class App : Application
             });
 
             _window = _host.Services.GetRequiredService<MainWindow>();
-            _window.InitializationTask = initTask;
+            _window.InitializationTask = navGate.Task;
             // Sync handler on purpose: WinUI stops pumping the dispatcher once the last
             // window closes, so an `async void` continuation containing _host.Dispose()
             // can be dropped on the floor and leak COM resources / the IMMNotificationClient
@@ -101,19 +113,22 @@ public partial class App : Application
 
             var chrome = _host.Services.GetRequiredService<IWindowChromeManager>();
             chrome.Attach(_window);
-            _host.Services.GetRequiredService<IQuickControlsService>().Start();
 
+            // Show the window NOW with its loading skeleton. Everything not needed to paint the
+            // shell (notification registration, the Quick Controls hotkey window, the update check)
+            // is deferred to a low-priority dispatch that runs after the first frame, so nothing
+            // here blocks the window appearing. The content area shows MainWindow's skeleton until
+            // background init completes and the first page navigates.
             var settings = _host.Services.GetRequiredService<ISettingsService>().Current;
             var startHidden = LaunchToTrayRequested || settings.LaunchToTray;
+            _window.Activate();
             if (startHidden && settings.ShowTrayIcon)
             {
-                _window.Activate();
                 chrome.HideToTray();
                 _logger.LogInformation("Main window started hidden in tray");
             }
             else
             {
-                _window.Activate();
                 _logger.LogInformation("Main window activated");
             }
 
@@ -121,9 +136,14 @@ public partial class App : Application
                 t => _logger.LogError(t.Exception, "Background startup failed"),
                 TaskContinuationOptions.OnlyOnFaulted);
 
-            // Background update check (unpackaged builds only; the service self-gates on packaged
-            // identity and the CheckForUpdates setting). Fire-and-forget so it never blocks startup.
-            _ = _host.Services.GetRequiredService<IUpdateService>().CheckForUpdatesAsync(manual: false);
+            // Deferred, post-first-paint. The update check self-gates on packaged identity + the
+            // CheckForUpdates setting.
+            MainDispatcher?.TryEnqueue(DispatcherQueuePriority.Low, () =>
+            {
+                _host.Services.GetRequiredService<INotificationService>().Register();
+                _host.Services.GetRequiredService<IQuickControlsService>().Start();
+                _ = _host.Services.GetRequiredService<IUpdateService>().CheckForUpdatesAsync(manual: false);
+            });
         }
         catch (Exception ex)
         {

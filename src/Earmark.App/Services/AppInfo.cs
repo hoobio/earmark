@@ -55,6 +55,16 @@ internal static class AppInfo
 
     public static bool IsPrerelease => string.Equals(BuildChannel, "Prerelease", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>Per-channel storage subfolder so Dev / Prerelease / Release builds keep separate
+    /// data (rules, settings, logs) and never clobber each other: "Dev" / "Prerelease" for the
+    /// non-stable channels, empty for a stable Release build (which sits at the base folder).</summary>
+    public static string ChannelFolder => BuildChannel switch
+    {
+        "Dev" => "Dev",
+        "Prerelease" => "Prerelease",
+        _ => string.Empty,
+    };
+
     /// <summary>Version with a channel tag for non-stable builds, e.g. "0.1.8 (Dev)".</summary>
     public static string DisplayVersion => BuildChannel switch
     {

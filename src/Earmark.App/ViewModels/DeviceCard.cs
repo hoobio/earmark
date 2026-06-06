@@ -148,6 +148,7 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         // Section-divider toggle (and the rows they bracket) may have changed.
         OnPropertyChanged(nameof(ShowVolumeDivider));
         OnPropertyChanged(nameof(ShowAppsDivider));
+        OnPropertyChanged(nameof(ShowNowPlayingDividers));
     }
 
     /// <summary>
@@ -177,6 +178,7 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     {
         OnPropertyChanged(nameof(ShowNowPlaying));
         OnPropertyChanged(nameof(ShowCardBackground));
+        OnPropertyChanged(nameof(ShowNowPlayingDividers));
     }
 
     /// <summary>Whether the now-playing section renders: at least one strip AND the user hasn't turned
@@ -186,6 +188,12 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     /// <summary>Whether the card paints the primary now-playing artwork as its full background: the
     /// feature and the card-background option are both on AND a primary strip exists.</summary>
     public bool ShowCardBackground => MeterOptions.ShowNowPlaying && MeterOptions.NowPlayingCardBackground && PrimaryNowPlaying is not null;
+
+    /// <summary>Whether hairlines bracket the now-playing strip (above and below). Only with "fill card
+    /// background" on: the strip then drops its own dark band (the whole card shows the artwork), so it
+    /// needs dividers to stay separated from the rows around it. Off otherwise - the dark band is its
+    /// own separator. Respects the global section-divider toggle.</summary>
+    public bool ShowNowPlayingDividers => MeterOptions.ShowCardDividers && ShowNowPlaying && MeterOptions.NowPlayingCardBackground;
 
     /// <summary>Whether any chip would actually show in the apps row (i.e. isn't currently hoisted into
     /// the now-playing strip). The matched now-playing chip is collapsed out of the row, so a card whose

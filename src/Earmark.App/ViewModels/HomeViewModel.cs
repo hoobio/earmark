@@ -83,6 +83,11 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     private static readonly TimeSpan ToastRateLimit = TimeSpan.FromSeconds(15);
     private readonly Lock _gate = new();
     private readonly List<DeviceCard> _allCards = new();
+    // Reused across the 20Hz TickAppMeters pass so the tick doesn't allocate a dictionary + a
+    // per-card hash set 20x/sec. Cleared at the start of the tick / per card. UI-thread only,
+    // and DispatcherTimer ticks never overlap, so sharing these is safe.
+    private readonly Dictionary<string, List<uint>> _tickPidsByAppKey = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _tickSeenAppsOnCard = new(StringComparer.Ordinal);
     private readonly PeakMeterOptions _meterOptions = new();
     private readonly DeviceUndoStack _undoStack = new();
     private CancellationTokenSource? _refreshCts;
@@ -461,7 +466,8 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         // Group every showable session's pid by app identity (executable path). One chip stands
         // in for an app's several processes, so its meter must reflect the loudest sibling - this
         // map lets Phase 1 take the max peak across them without a nested per-tick scan.
-        var pidsByAppKey = new Dictionary<string, List<uint>>(StringComparer.Ordinal);
+        var pidsByAppKey = _tickPidsByAppKey;
+        foreach (var list in pidsByAppKey.Values) list.Clear();
         foreach (var session in sessionsSnapshot)
         {
             if (!ShouldShow(session)) continue;
@@ -499,7 +505,8 @@ public partial class HomeViewModel : ObservableObject, IDisposable
                 // Track app identities (not pids) already on the card: one chip stands in for an
                 // app's several processes, so a second process of an app already shown must not
                 // spawn a duplicate chip.
-                var seenAppsOnThisCard = new HashSet<string>(StringComparer.Ordinal);
+                var seenAppsOnThisCard = _tickSeenAppsOnCard;
+                seenAppsOnThisCard.Clear();
                 foreach (var chip in card.Apps) seenAppsOnThisCard.Add(chip.Session.IdentityKey);
 
                 foreach (var session in sessionsSnapshot)

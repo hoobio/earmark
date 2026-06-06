@@ -70,9 +70,9 @@ public partial class PeakMeterOptions : ObservableObject
     public partial NowPlayingBackdropBlurMode NowPlayingBlur { get; set; } = NowPlayingBackdropBlurMode.Gaussian;
 
     /// <summary>Whether the primary now-playing artwork fills the whole card as a dimmed background.
-    /// Default off. Shared/observable so toggling the setting updates every card live.</summary>
+    /// Default on. Shared/observable so toggling the setting updates every card live.</summary>
     [ObservableProperty]
-    public partial bool NowPlayingCardBackground { get; set; }
+    public partial bool NowPlayingCardBackground { get; set; } = true;
 
     /// <summary>True unless the meter is switched off (the card then shows a plain volume slider).</summary>
     public bool ShowMeter => ColourMode != PeakMeterColourMode.Off;

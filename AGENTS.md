@@ -118,7 +118,7 @@ Follows [Fluent 2](https://fluent2.microsoft.design); benchmark against Windows 
 - **Spacing:** 4px grid via `Spacing*` `x:Double` resources in `App.xaml` (`SpacingXXSmall`=2 ... `SpacingXXLarge`=32). No ad-hoc numbers.
 - **Corner radii:** `{ThemeResource ControlCornerRadius}` (4) for inset controls/chips, `{StaticResource CardCornerRadius}` (8) for cards. No one-off radii.
 - **Theme:** `AppSettings.Theme` drives `RootGrid.RequestedTheme`, caption colours, backdrop tint. Theme-dependent brushes MUST be `{ThemeResource}` (code-resolved brushes snapshot one theme). Absolute brand colours (Wave Link accents, white mix tile) are deliberately theme-independent.
-- **Backdrop:** `AppSettings.Backdrop` (Mica default / Acrylic / Solid) picks material. `MainWindow.ApplyBackdrop` attaches a `MicaController` (`BaseAlt`) or `DesktopAcrylicController` so tint follows the Theme setting. Solid shows the opaque `SolidBackdrop` border.
+- **Backdrop:** `AppSettings.Backdrop` (Mica default / Acrylic / Solid) picks material. `MainWindow.ApplyBackdrop` (and `QuickControlsWindow`) attach a `MicaController` (`Base`, matching Windows Settings - it bleeds the wallpaper through; `BaseAlt` reads much darker) or `DesktopAcrylicController` so tint follows the Theme setting. Solid shows the opaque `SolidBackdrop` border.
 - **Content width:** Devices/Rules/Sessions stretch full-width; Settings uses a ~720 column. Don't cap the list/grid pages.
 
 ## Reactivity

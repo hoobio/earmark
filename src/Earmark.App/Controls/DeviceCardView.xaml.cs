@@ -41,7 +41,15 @@ public sealed partial class DeviceCardView : UserControl
         _rulesViewModel = services.GetRequiredService<RulesViewModel>();
         _mainWindow = services.GetRequiredService<MainWindow>();
         _logger = services.GetService<ILogger<DeviceCardView>>();
-        InitializeComponent();
+        try
+        {
+            InitializeComponent();
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogCritical(ex, "DeviceCardView.InitializeComponent threw");
+            throw;
+        }
     }
 
     public static readonly DependencyProperty CardProperty = DependencyProperty.Register(
@@ -73,6 +81,26 @@ public sealed partial class DeviceCardView : UserControl
     /// shows, so no divider sits directly above or below the strip (the dark band is its own separator).</summary>
     public Visibility VolumeRulesDividerVis(bool showRules, bool showVolumeDivider, bool showNowPlaying) =>
         showRules && showVolumeDivider && !showNowPlaying ? Visibility.Visible : Visibility.Collapsed;
+
+    /// <summary>x:Bind function: the hairline *below* the now-playing strip shows only when the strip's
+    /// brackets are on (fill-card-background) AND a section actually follows it (rules / no-rules text /
+    /// apps row). When now-playing is the last thing on the card, a bottom divider would just float above
+    /// the card's empty bottom padding, so it's dropped - the top bracket alone separates the strip.</summary>
+    public Visibility NowPlayingBottomDividerVis(bool showRules, bool bracketsOn, bool rulesSection, bool noRulesMessage, bool appsSection) =>
+        bracketsOn && SectionFollowsNowPlaying(showRules, rulesSection, noRulesMessage, appsSection)
+            ? Visibility.Visible : Visibility.Collapsed;
+
+    /// <summary>x:Bind function: the now-playing strip is full-bleed at the sides always. When it's also
+    /// the last section on a fill-card-background card, it bleeds past the card's bottom section padding
+    /// too, so the strip's own 16px inset frames the seek bar - matching the inset above the app icon
+    /// rather than stacking the strip's padding on top of the card's. With a section below, normal flow
+    /// keeps the inter-section spacing.</summary>
+    public Thickness NowPlayingStripMargin(bool bracketsOn, bool showRules, bool rulesSection, bool noRulesMessage, bool appsSection) =>
+        bracketsOn && !SectionFollowsNowPlaying(showRules, rulesSection, noRulesMessage, appsSection)
+            ? new Thickness(-16, 0, -16, -16) : new Thickness(-16, 0, -16, 0);
+
+    private static bool SectionFollowsNowPlaying(bool showRules, bool rulesSection, bool noRulesMessage, bool appsSection) =>
+        (showRules && (rulesSection || noRulesMessage)) || appsSection;
 
     /// <summary>Raised when "Rename group" is picked from a card/app-chip menu, so the host can focus
     /// the group's title editor (which lives in the page's tree, not here).</summary>
