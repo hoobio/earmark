@@ -7,6 +7,8 @@ using Microsoft.UI.Composition;
 using Microsoft.UI.Composition.SystemBackdrops;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
 
 using Windows.UI;
@@ -79,6 +81,11 @@ public sealed partial class MainWindow : Window, IDisposable
         _dispatcher.Register(DispatcherQueue);
         _navigation.Register(ContentFrame);
 
+        // Clicking the empty page backdrop (not a card or control) collapses the nav pane for more
+        // room. handledEventsToo so it still fires when a control marks the tap handled; the walk in
+        // OnContentFrameTapped decides whether the tap actually landed on the backdrop.
+        ContentFrame.AddHandler(UIElement.TappedEvent, new TappedEventHandler(OnContentFrameTapped), handledEventsToo: true);
+
         // Restore the persisted pane expand/collapse state once the NavView is realised (setting it
         // pre-load can be clobbered when Auto display-mode initialises). Done before the first nav so
         // the focus fallback below sees the right pane state.
@@ -93,6 +100,42 @@ public sealed partial class MainWindow : Window, IDisposable
         // triggers initial nav if it hasn't happened yet.
         Activated += (_, _) => _ = EnsureInitialNavigationAsync();
     }
+
+    // ---- Backdrop tap collapses the nav pane ----
+
+    private void OnContentFrameTapped(object sender, TappedRoutedEventArgs e)
+    {
+        if (!NavView.IsPaneOpen) return;
+        if (IsBackdropTap(e.OriginalSource as DependencyObject))
+        {
+            NavView.IsPaneOpen = false;
+        }
+    }
+
+    /// <summary>True when a tap landed on the empty page backdrop rather than a card or control.
+    /// Walks from the tapped element up to the content frame: a real control or an opaque card
+    /// surface in the path means content; structural hosts (Frame / Page / ScrollViewer) and
+    /// transparent layout panels are passthroughs that read as backdrop.</summary>
+    private bool IsBackdropTap(DependencyObject? source)
+    {
+        for (var node = source; node is not null && node != ContentFrame; node = VisualTreeHelper.GetParent(node))
+        {
+            switch (node)
+            {
+                case ScrollViewer or Frame or Page:
+                    continue;
+                case Control:
+                    return false;
+                case Border { Background: { } border } when IsOpaque(border):
+                    return false;
+                case Panel { Background: { } panel } when IsOpaque(panel):
+                    return false;
+            }
+        }
+        return true;
+    }
+
+    private static bool IsOpaque(Brush brush) => brush is not SolidColorBrush scb || scb.Color.A != 0;
 
     // ---- In-app toast ----
 
