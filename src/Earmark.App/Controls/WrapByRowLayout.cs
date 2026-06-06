@@ -92,9 +92,11 @@ public sealed class WrapByRowLayout : VirtualizingLayout
     /// for drag hit-testing so opening the gap doesn't move the answer.</summary>
     private Rect[] _identityRects = [];
 
-    /// <summary>Last non-custom (collapsed) height measured for each member, keyed by its view-model
-    /// item. A member that opts out of the baseline (its rules panel expands) keeps holding the
-    /// baseline at this height, so a shorter sibling member doesn't shrink when this one expands.</summary>
+    /// <summary>The height each member last occupied while non-custom (the row baseline it was arranged
+    /// at, which may exceed its own content when stretched up to a bigger sibling), keyed by its
+    /// view-model item. When a member opts out of the baseline (its rules panel expands) this becomes
+    /// its floor: it grows to fit the expanded rules but never shrinks below the height it held
+    /// pre-expansion, and it keeps the row baseline up for shorter siblings.</summary>
     private readonly Dictionary<object, double> _baselineHeights = new();
 
     /// <summary>Lift <paramref name="draggedIndex"/> and re-insert it at <paramref name="gapIndex"/>
@@ -251,32 +253,31 @@ public sealed class WrapByRowLayout : VirtualizingLayout
             var rowEnd = Math.Min(rowStart + columnCount, order.Length);
 
             // Pass 1: baseline = tallest non-custom card (custom-sized cards, e.g. an expanded rules
-            // chevron, are excluded so they don't drag everyone up); rowTotal tracks the true max.
+            // chevron, are excluded so they don't drag everyone up); a custom-sized card instead holds
+            // the baseline at the height it last occupied while non-custom, so a shorter sibling member
+            // doesn't shrink the moment this one expands.
             var baseline = 0.0;
-            var rowTotal = 0.0;
             for (var slot = rowStart; slot < rowEnd; slot++)
             {
                 if (order[slot] < 0) continue;   // phantom slot - no element
                 var element = context.GetOrCreateElementAt(order[slot]);
-                var h = element.DesiredSize.Height;
-                if (h > rowTotal) rowTotal = h;
                 var item = context.GetItemAt(order[slot]);
                 if (!GetIsCustomSized((DependencyObject)element))
                 {
-                    if (item is not null) _baselineHeights[item] = h;   // remember the collapsed height
-                    if (h > baseline) baseline = h;
+                    if (element.DesiredSize.Height > baseline) baseline = element.DesiredSize.Height;
                 }
-                else if (item is not null && _baselineHeights.TryGetValue(item, out var collapsed) && collapsed > baseline)
+                else if (item is not null && _baselineHeights.TryGetValue(item, out var held) && held > baseline)
                 {
-                    // A custom-sized member (rules panel expanded) keeps its own height but still holds
-                    // the baseline at its last collapsed height, so a shorter sibling member doesn't
-                    // shrink the moment this one expands.
-                    baseline = collapsed;
+                    baseline = held;
                 }
             }
-            if (baseline == 0) baseline = rowTotal; // all custom-sized? fall back to true max
 
-            // Pass 2: non-custom cards stretch to the baseline so siblings stay aligned.
+            // Pass 2: a non-custom card stretches to the baseline, and we remember THAT height (which
+            // may exceed its own content when stretched up to a bigger sibling) keyed by the member. A
+            // custom-sized card takes max(own content, its remembered stretched height): it grows for the
+            // expanded rules but never shrinks below the height it held pre-expansion - that's its floor.
+            // rowTotal tracks the tallest arranged card so the next row clears it.
+            var rowTotal = 0.0;
             for (var slot = rowStart; slot < rowEnd; slot++)
             {
                 var col = slot - rowStart;
@@ -289,8 +290,19 @@ public sealed class WrapByRowLayout : VirtualizingLayout
                 else
                 {
                     var element = context.GetOrCreateElementAt(order[slot]);
-                    h = GetIsCustomSized((DependencyObject)element) ? element.DesiredSize.Height : baseline;
+                    var item = context.GetItemAt(order[slot]);
+                    if (!GetIsCustomSized((DependencyObject)element))
+                    {
+                        h = baseline > 0 ? baseline : element.DesiredSize.Height;
+                        if (item is not null) _baselineHeights[item] = h;
+                    }
+                    else
+                    {
+                        h = element.DesiredSize.Height;
+                        if (item is not null && _baselineHeights.TryGetValue(item, out var floor) && floor > h) h = floor;
+                    }
                 }
+                if (h > rowTotal) rowTotal = h;
                 rects[slot] = new Rect(x, y, columnWidth, h);
             }
 
