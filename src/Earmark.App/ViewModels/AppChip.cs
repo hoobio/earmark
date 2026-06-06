@@ -127,9 +127,12 @@ public partial class AppChip : ObservableObject, IWrapOrdered
     // Null whenever the chip is audible or already stopped.
     private DateTime? _silentSince;
 
-    /// <summary>Peak amplitude below which we treat the session as silent. -46 dBFS is comfortably
-    /// below speech-noise but well above the digital-zero floor most clean exits land at.</summary>
-    public const float AudibleAmplitudeThreshold = 0.005f;
+    /// <summary>Peak amplitude below which we treat the session as silent (drives fade + prune, so
+    /// only a genuinely silent app dims). -72 dBFS sits just above the denormal/dither floor a clean
+    /// session reports when it's producing nothing, yet stays below even very faint real output (quiet
+    /// passages, low app/output volume) so audible-but-quiet apps keep full brightness. A truly silent
+    /// session reports a hard 0 from MasterPeakValue, well under this.</summary>
+    public const float AudibleAmplitudeThreshold = 0.00025f;
 
     /// <summary>Grace window: a run stays "playing" (full brightness, front tier) for this long after
     /// its last audible tick, so a brief track gap, seek, or quiet passage doesn't end it - only a
