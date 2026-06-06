@@ -147,10 +147,19 @@ internal sealed class WindowChromeManager : IWindowChromeManager, IDisposable
 
         try
         {
-            var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico");
-            if (File.Exists(iconPath))
+            // A packaged app can't load a BitmapImage from a file:// path under WindowsApps; ms-appx is
+            // the sanctioned scheme there. Unpackaged (MSI) has no ms-appx root, so use the on-disk path.
+            if (AppInfo.IsPackaged)
             {
-                icon.IconSource = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri(iconPath));
+                icon.IconSource = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri("ms-appx:///Assets/AppIcon.ico"));
+            }
+            else
+            {
+                var iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico");
+                if (File.Exists(iconPath))
+                {
+                    icon.IconSource = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri(iconPath));
+                }
             }
         }
         catch

@@ -80,12 +80,12 @@ internal sealed class QuickControlsService : IQuickControlsService
         var blocks = _viewModel.QuickControlBlocks.ToList();
         if (blocks.Count == 0) return;
 
-        RenderBlocks(blocks);
+        RenderBlocks(blocks, animate: true);
         _isOpen = true;
         _viewModel.ResumePeakPollingForQuickControls();
     }
 
-    private void RenderBlocks(List<object> blocks)
+    private void RenderBlocks(List<object> blocks, bool animate)
     {
         _activeWindows.Clear();
         var workArea = ResolveWorkArea().WorkArea;
@@ -110,12 +110,13 @@ internal sealed class QuickControlsService : IQuickControlsService
 
         for (var i = _activeWindows.Count - 1; i >= 0; i--)
         {
-            _activeWindows[i].Window.ShowPrepared();
+            _activeWindows[i].Window.ShowPrepared(animate);
         }
 
         // Pull one panel to the foreground so click-away (Deactivated) and Escape work without a first
-        // click. Done once, after the stack is up, to avoid focus churn across the windows.
-        if (_activeWindows.Count > 0) _activeWindows[0].Window.GrabForeground();
+        // click. Done once on initial show; skipped on an in-place refresh so a background state change
+        // (device connect/disconnect) doesn't steal focus or churn the stack.
+        if (animate && _activeWindows.Count > 0) _activeWindows[0].Window.GrabForeground();
     }
 
     private static void FitBlockHeights(List<int> heights, int availableHeight)
@@ -161,7 +162,7 @@ internal sealed class QuickControlsService : IQuickControlsService
             return;
         }
 
-        RenderBlocks(blocks);
+        RenderBlocks(blocks, animate: false);
         _isOpen = true;
     }
 
