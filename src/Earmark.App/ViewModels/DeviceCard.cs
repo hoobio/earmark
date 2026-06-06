@@ -143,9 +143,7 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         OnPropertyChanged(nameof(ShowNowPlaying));
         OnPropertyChanged(nameof(ShowCardBackground));
         // Section-divider toggle (and the rows they bracket) may have changed.
-        OnPropertyChanged(nameof(ShowRulesDivider));
-        OnPropertyChanged(nameof(ShowAppsDivider));
-        OnPropertyChanged(nameof(ShowNowPlayingDivider));
+        NotifyDividersChanged();
     }
 
     /// <summary>
@@ -168,14 +166,29 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     [ObservableProperty]
     public partial NowPlayingStrip? PrimaryNowPlaying { get; set; }
 
-    partial void OnPrimaryNowPlayingChanged(NowPlayingStrip? value) => OnPropertyChanged(nameof(ShowCardBackground));
+    partial void OnPrimaryNowPlayingChanged(NowPlayingStrip? value)
+    {
+        // Toggling fill-card-background flips which dividers show (strip mode suppresses the band's
+        // brackets; fill mode keeps them), so re-raise them alongside the background flag.
+        OnPropertyChanged(nameof(ShowCardBackground));
+        NotifyDividersChanged();
+    }
 
     /// <summary>Raises the now-playing visibility flags after the strip collection is reconciled.</summary>
     public void NotifyNowPlayingChanged()
     {
         OnPropertyChanged(nameof(ShowNowPlaying));
         OnPropertyChanged(nameof(ShowCardBackground));
+        NotifyDividersChanged();
+    }
+
+    /// <summary>Re-raises the three section-divider flags together: they all hinge on the now-playing /
+    /// fill-mode state, so any change there flips which hairlines show.</summary>
+    private void NotifyDividersChanged()
+    {
         OnPropertyChanged(nameof(ShowNowPlayingDivider));
+        OnPropertyChanged(nameof(ShowAppsDivider));
+        OnPropertyChanged(nameof(ShowRulesDivider));
     }
 
     /// <summary>Whether the now-playing section renders: at least one strip AND the user hasn't turned
@@ -186,11 +199,10 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     /// feature and the card-background option are both on AND a primary strip exists.</summary>
     public bool ShowCardBackground => MeterOptions.ShowNowPlaying && MeterOptions.NowPlayingCardBackground && PrimaryNowPlaying is not null;
 
-    /// <summary>Whether the hairline above the now-playing strip shows. Like every other section the
-    /// strip owns the divider above itself (shown when section dividers are on and the strip renders),
-    /// so the dark band - or the artwork in "fill card background" mode - is bracketed consistently with
-    /// the rows around it regardless of section order.</summary>
-    public bool ShowNowPlayingDivider => MeterOptions.ShowCardDividers && ShowNowPlaying;
+    /// <summary>Whether the hairline above the now-playing section shows. Only in fill-card-background
+    /// mode: there the lighter over-art divider brackets the now-playing content like every other section.
+    /// In strip mode the band is a filled block whose own edge is the separator, so it has no top hairline.</summary>
+    public bool ShowNowPlayingDivider => MeterOptions.ShowCardDividers && ShowNowPlaying && ShowCardBackground;
 
     /// <summary>Whether any chip would actually show in the apps row (i.e. isn't currently hoisted into
     /// the now-playing strip). The matched now-playing chip is collapsed out of the row, so a card whose
@@ -236,13 +248,18 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     };
 
     /// <summary>Whether the hairline above the rules block shows: only when the user has opted into
-    /// section dividers AND the block has content (a rules list or the "no rules" message). The host's
-    /// own ShowRules flag (false in Quick Controls) is applied at the binding alongside this.</summary>
-    public bool ShowRulesDivider => MeterOptions.ShowCardDividers && (ShowRulesSection || ShowNoRulesMessage);
+    /// section dividers AND the block has content (a rules list or the "no rules" message). Suppressed
+    /// only in strip mode when the now-playing band sits directly above (no apps row between), so the
+    /// band's own edge is the separator; in fill-card-background mode the lighter over-art divider is
+    /// kept. The host's own ShowRules flag (false in Quick Controls) is applied at the binding too.</summary>
+    public bool ShowRulesDivider => MeterOptions.ShowCardDividers && (ShowRulesSection || ShowNoRulesMessage)
+        && !(ShowNowPlaying && !ShowCardBackground && !ShowAppsSection);
 
-    /// <summary>Whether the hairline above the apps row shows: only when the user has opted into
-    /// section dividers AND the apps row is present.</summary>
-    public bool ShowAppsDivider => MeterOptions.ShowCardDividers && ShowAppsSection;
+    /// <summary>Whether the hairline above the apps row shows: only when the user has opted into section
+    /// dividers AND the apps row is present. Suppressed only in strip mode when the now-playing band sits
+    /// directly above (band edge separates); in fill-card-background mode the over-art divider is kept.</summary>
+    public bool ShowAppsDivider => MeterOptions.ShowCardDividers && ShowAppsSection
+        && (ShowCardBackground || !ShowNowPlaying);
 
     /// <summary>Tells the page that <see cref="HasApps"/> may have flipped. Raised from
     /// <c>HomeViewModel</c> after it adds/removes chips so the section visibility binding
@@ -254,6 +271,8 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         OnPropertyChanged(nameof(ShowAppsSection));
         OnPropertyChanged(nameof(IsLayoutCustomSized));
         OnPropertyChanged(nameof(ShowAppsDivider));
+        // ShowRulesDivider depends on whether an apps row sits between the band and the rules block.
+        OnPropertyChanged(nameof(ShowRulesDivider));
     }
 
     public string DisplayName => Endpoint.FriendlyName;

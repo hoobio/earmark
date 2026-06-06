@@ -47,24 +47,25 @@
         </Grid.ContextFlyout>
 
         <!-- Optional now-playing card background: the primary session's artwork, dimmed behind the whole
-             card (opt-in, default off). The card's own border clips it to the rounded corners. -->
-        <Grid Visibility="{x:Bind Card.ShowCardBackground, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
-            <controls:CrossfadeImage Source="{x:Bind Card.PrimaryNowPlaying.BackdropSource, Mode=OneWay}"
-                                     Stretch="UniformToFill"
-                                     CornerRadius="{StaticResource CardCornerRadius}" />
-            <!-- Frost: in-app acrylic over low-res art only (high-res fills sharp), so the compositor
-                 blurs the fill into a soft album-coloured backdrop. -->
-            <Border Background="{ThemeResource NowPlayingFrostBrush}"
-                    CornerRadius="{StaticResource CardCornerRadius}"
-                    Visibility="{x:Bind Card.PrimaryNowPlaying.BackdropFrosted, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
-            <!-- Scrim for sharp (high-res) art only: dims it so the card's text / meter / chips stay
-                 legible. When the art is frosted the acrylic above already carries the theme-aware
-                 dimming, so the scrim is dropped to avoid double-darkening (washed-out art).
-                 Rounded to match so its fill doesn't square off the corners. -->
-            <Border Background="{ThemeResource NowPlayingScrimBrush}"
-                    CornerRadius="{StaticResource CardCornerRadius}"
-                    Visibility="{x:Bind Card.PrimaryNowPlaying.BackdropFrosted, Mode=OneWay, Converter={StaticResource NegatedBooleanToVisibilityConverter}}" />
-        </Grid>
+             card (opt-in, default off). One rounded Border clips the whole stack (art + frost/scrim) so
+             every layer shares an identical corner: rounding each layer on its own left the acrylic's
+             corner anti-aliasing a hair short of the art's, leaking bright art pixels at the corners. -->
+        <Border CornerRadius="{StaticResource CardCornerRadius}"
+                Visibility="{x:Bind Card.ShowCardBackground, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
+            <Grid>
+                <controls:CrossfadeImage Source="{x:Bind Card.PrimaryNowPlaying.BackdropSource, Mode=OneWay}"
+                                         Stretch="UniformToFill" />
+                <!-- Frost: in-app acrylic over low-res art only (high-res fills sharp), so the compositor
+                     blurs the fill into a soft album-coloured backdrop. -->
+                <Border Background="{ThemeResource NowPlayingFrostBrush}"
+                        Visibility="{x:Bind Card.PrimaryNowPlaying.BackdropFrosted, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                <!-- Scrim for sharp (high-res) art only: dims it so the card's text / meter / chips stay
+                     legible. When the art is frosted the acrylic above already carries the theme-aware
+                     dimming, so the scrim is dropped to avoid double-darkening (washed-out art). -->
+                <Border Background="{ThemeResource NowPlayingScrimBrush}"
+                        Visibility="{x:Bind Card.PrimaryNowPlaying.BackdropFrosted, Mode=OneWay, Converter={StaticResource NegatedBooleanToVisibilityConverter}}" />
+            </Grid>
+        </Border>
 
         <!-- Muted tint fills the whole card; shown only when muted. -->
         <Border Background="{ThemeResource SystemFillColorCriticalBackgroundBrush}"
@@ -335,20 +336,18 @@
 
             <!-- Now playing: one full-bleed strip row per app on this card that exposes SMTC media info
                  (a media app reports one session even across tabs, so a browser is a single row; distinct
-                 apps each get a row). Each matched app's chip is hoisted here and hidden from the apps
-                 row. Full-bleed to the card edges; each row carries a top hairline so the first row also
-                 divides the section and extra rows are separated. Lives on the Devices page and in Quick
-                 Controls alike (independent of ShowRules). -->
-            <!-- Now playing: one full-bleed strip per app with a media session. Like every section it
-                 carries the hairline above itself (shown with section dividers on), so the dark band - or
-                 the artwork in "fill card background" mode - is bracketed consistently with the rows around
-                 it. Full-bleed to the card edges. -->
+                 apps each get a row). Each matched app's chip is hoisted here and hidden from the apps row.
+                 In fill-card-background mode the over-art hairline below brackets the section like any other;
+                 in strip mode the band is a filled block whose own edges separate it (no bracketing
+                 hairlines - it also suppresses the divider directly below it; see DeviceCard). Lives on the
+                 Devices page and in Quick Controls alike (independent of ShowRules). -->
             <Border Height="1" Margin="-16,0,-16,-6"
                     Background="{ThemeResource DividerStrokeColorDefaultBrush}"
-                    Visibility="{x:Bind DividerOverArt(Card.ShowNowPlayingDivider, Card.ShowCardBackground), Mode=OneWay}" />
-            <Border Height="1" Margin="-16,0,-16,-6"
-                    Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
-                    Visibility="{x:Bind DividerPlain(Card.ShowNowPlayingDivider, Card.ShowCardBackground), Mode=OneWay}" />
+                    Visibility="{x:Bind Card.ShowNowPlayingDivider, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
+            <!-- Bleed to the card edges (-16) but keep the natural section spacing top/bottom: with no
+                 bracketing hairlines (strip mode) the band would otherwise butt straight against the rows
+                 above/below. Zero vertical margin lets the StackPanel's 12px spacing sit it apart like every
+                 other section (no negative margin, so nothing to round at fractional DPI). -->
             <ItemsControl ItemsSource="{x:Bind Card.NowPlayingStrips, Mode=OneWay}"
                           HorizontalAlignment="Stretch"
                           HorizontalContentAlignment="Stretch"
@@ -390,9 +389,10 @@
                                     </Grid>
 
                                     <!-- Horizontal inset stays 16 so the strip content lines up with the
-                                         rest of the card; vertical inset is the card's 12px row spacing so
-                                         the strip isn't more padded than the gaps around it. -->
-                                    <Grid Padding="16,12" ColumnSpacing="10">
+                                         rest of the card. Top inset is 12 (matches the row spacing); the
+                                         bottom is trimmed to 6 because the seek slider already carries its
+                                         own height below the track, which otherwise reads as too much gap. -->
+                                    <Grid Padding="16,12,16,6" ColumnSpacing="10">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="Auto" />
