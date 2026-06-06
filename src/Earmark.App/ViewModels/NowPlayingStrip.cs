@@ -1,3 +1,5 @@
+using System.Text.RegularExpressions;
+
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
@@ -20,6 +22,11 @@ public partial class NowPlayingStrip : ObservableObject
 {
     private const string PlayGlyph = "\uE768";   // Segoe MDL2 Play
     private const string PauseGlyph = "\uE769";  // Segoe MDL2 Pause
+
+    // Splits a "<Artist> - <Song>" title into the leading artist claim and the remainder, on any
+    // dash variant (hyphen / en / em dash). Non-greedy head so the FIRST separator wins.
+    private static readonly Regex ArtistPrefix =
+        new(@"^\s*(?<artist>.+?)\s*[-\u2013\u2014]\s*(?<rest>.+)$", RegexOptions.Compiled);
 
     private readonly INowPlayingService _service;
     private readonly INowPlayingArtworkService _artwork;
@@ -64,7 +71,7 @@ public partial class NowPlayingStrip : ObservableObject
 
     public string SessionKey => _info.SessionKey;
 
-    public string Title => _info.Title;
+    public string Title => CleanTitle(_info.Title, _info.Artist);
     public string Artist => _info.Artist;
     public bool HasArtist => !string.IsNullOrWhiteSpace(_info.Artist);
 
@@ -156,7 +163,9 @@ public partial class NowPlayingStrip : ObservableObject
 
         // Only raise what actually changed. SMTC fires ~once a second (position updates), and blindly
         // re-raising Title/Artist re-renders the text and dismisses an open hover tooltip.
-        if (!string.Equals(old.Title, info.Title, StringComparison.Ordinal)) OnPropertyChanged(nameof(Title));
+        // Cleaned Title depends on both raw fields, so a change in either can shift it.
+        if (!string.Equals(old.Title, info.Title, StringComparison.Ordinal) ||
+            !string.Equals(old.Artist, info.Artist, StringComparison.Ordinal)) OnPropertyChanged(nameof(Title));
         if (!string.Equals(old.Artist, info.Artist, StringComparison.Ordinal))
         {
             OnPropertyChanged(nameof(Artist));
@@ -209,6 +218,30 @@ public partial class NowPlayingStrip : ObservableObject
 
         var processed = await _artwork.BuildAsync(_info.Thumbnail, _info.ThumbnailHash, mode);
         BackdropSource = processed.Source;
+    }
+
+    /// <summary>Drops a redundant "&lt;Artist&gt; - " prefix from a track title when the leading claim
+    /// matches the session's artist. Many sources (YouTube music videos especially) title tracks
+    /// "Artist - Song" while reporting the artist separately, so the strip would otherwise show the
+    /// artist twice. Matching is normalised so channel-name noise ("VEVO", "- Topic", spacing) still
+    /// lines up. Returns the original title when there's no match, so non-music titles are untouched.</summary>
+    private static string CleanTitle(string title, string artist)
+    {
+        if (string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(artist)) return title;
+        var m = ArtistPrefix.Match(title);
+        if (!m.Success) return title;
+        return Norm(m.Groups["artist"].Value) == Norm(artist)
+            ? m.Groups["rest"].Value.Trim()
+            : title;
+    }
+
+    /// <summary>Reduces an artist/channel name to a comparable core: strips a trailing "VEVO" or
+    /// "- Topic", then keeps only letters/digits, lowercased. "KanyeWestVEVO", "Kanye West" and
+    /// "Kanye West - Topic" all collapse to "kanyewest".</summary>
+    private static string Norm(string s)
+    {
+        s = Regex.Replace(s, @"\s*-\s*topic$|vevo$", string.Empty, RegexOptions.IgnoreCase);
+        return new string(s.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
     }
 
     [RelayCommand]
