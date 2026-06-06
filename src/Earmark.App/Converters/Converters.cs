@@ -115,6 +115,25 @@ public sealed class QuickPinBrushConverter : IValueConverter
     public object ConvertBack(object value, Type targetType, object parameter, string language) => throw new NotSupportedException();
 }
 
+/// <summary>Picks the section-divider brush by whether the card paints now-playing artwork as its
+/// full background. Over that artwork the opaque base-fill hairline reads as a harsh bar, so fill cards
+/// get the standard subtle divider stroke instead; ordinary cards keep the defined base-fill line.</summary>
+public sealed class SectionDividerBrushConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, string language)
+    {
+        var key = value is bool b && b ? "DividerStrokeColorDefaultBrush" : "SolidBackgroundFillColorBaseBrush";
+        if (Application.Current.Resources.TryGetValue(key, out var brush) && brush is Brush resolved)
+        {
+            return resolved;
+        }
+
+        return new SolidColorBrush(Microsoft.UI.Colors.Gray);
+    }
+
+    public object ConvertBack(object value, Type targetType, object parameter, string language) => throw new NotSupportedException();
+}
+
 public sealed class WaveLinkStateBrushConverter : IValueConverter
 {
     public object Convert(object value, Type targetType, object parameter, string language)

@@ -47,6 +47,7 @@
             <converters:SatisfiedBrushConverter x:Key="SatisfiedBrushConverter" />
             <converters:SatisfiedTooltipConverter x:Key="SatisfiedTooltipConverter" />
             <converters:QuickPinBrushConverter x:Key="QuickPinBrushConverter" />
+            <converters:SectionDividerBrushConverter x:Key="SectionDividerBrushConverter" />
             <converters:WaveLinkStateBrushConverter x:Key="WaveLinkStateBrushConverter" />
             <converters:WaveLinkStateGlyphConverter x:Key="WaveLinkStateGlyphConverter" />
             <converters:NegatedBooleanConverter x:Key="NegatedBooleanConverter" />

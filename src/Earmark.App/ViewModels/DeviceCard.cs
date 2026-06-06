@@ -146,9 +146,9 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         OnPropertyChanged(nameof(ShowNowPlaying));
         OnPropertyChanged(nameof(ShowCardBackground));
         // Section-divider toggle (and the rows they bracket) may have changed.
-        OnPropertyChanged(nameof(ShowVolumeDivider));
+        OnPropertyChanged(nameof(ShowRulesDivider));
         OnPropertyChanged(nameof(ShowAppsDivider));
-        OnPropertyChanged(nameof(ShowNowPlayingDividers));
+        OnPropertyChanged(nameof(ShowNowPlayingDivider));
     }
 
     /// <summary>
@@ -178,7 +178,7 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     {
         OnPropertyChanged(nameof(ShowNowPlaying));
         OnPropertyChanged(nameof(ShowCardBackground));
-        OnPropertyChanged(nameof(ShowNowPlayingDividers));
+        OnPropertyChanged(nameof(ShowNowPlayingDivider));
     }
 
     /// <summary>Whether the now-playing section renders: at least one strip AND the user hasn't turned
@@ -189,11 +189,11 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     /// feature and the card-background option are both on AND a primary strip exists.</summary>
     public bool ShowCardBackground => MeterOptions.ShowNowPlaying && MeterOptions.NowPlayingCardBackground && PrimaryNowPlaying is not null;
 
-    /// <summary>Whether hairlines bracket the now-playing strip (above and below). Only with "fill card
-    /// background" on: the strip then drops its own dark band (the whole card shows the artwork), so it
-    /// needs dividers to stay separated from the rows around it. Off otherwise - the dark band is its
-    /// own separator. Respects the global section-divider toggle.</summary>
-    public bool ShowNowPlayingDividers => MeterOptions.ShowCardDividers && ShowNowPlaying && MeterOptions.NowPlayingCardBackground;
+    /// <summary>Whether the hairline above the now-playing strip shows. Like every other section the
+    /// strip owns the divider above itself (shown when section dividers are on and the strip renders),
+    /// so the dark band - or the artwork in "fill card background" mode - is bracketed consistently with
+    /// the rows around it regardless of section order.</summary>
+    public bool ShowNowPlayingDivider => MeterOptions.ShowCardDividers && ShowNowPlaying;
 
     /// <summary>Whether any chip would actually show in the apps row (i.e. isn't currently hoisted into
     /// the now-playing strip). The matched now-playing chip is collapsed out of the row, so a card whose
@@ -235,17 +235,16 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     {
         CardHeightMode.MatchRow => false,
         CardHeightMode.Dynamic => true,
-        _ => IsRulesExpanded,
+        _ => IsRulesExpanded || IsRulesCollapsing,
     };
 
-    /// <summary>Whether the hairline between the volume row and the rules block shows: only when the
-    /// user has opted into section dividers AND the volume row above it is present, and only while
-    /// the rules section is visible.</summary>
-    public bool ShowVolumeDivider => MeterOptions.ShowCardDividers && MeterOptions.ShowRules && ShowVolumeRow;
+    /// <summary>Whether the hairline above the rules block shows: only when the user has opted into
+    /// section dividers AND the block has content (a rules list or the "no rules" message). The host's
+    /// own ShowRules flag (false in Quick Controls) is applied at the binding alongside this.</summary>
+    public bool ShowRulesDivider => MeterOptions.ShowCardDividers && (ShowRulesSection || ShowNoRulesMessage);
 
-    /// <summary>Whether the hairline immediately above the apps row shows: only when the user has
-    /// opted into section dividers AND the apps row is present. This still shows when rules are
-    /// hidden so the apps row remains separated from the volume row.</summary>
+    /// <summary>Whether the hairline above the apps row shows: only when the user has opted into
+    /// section dividers AND the apps row is present.</summary>
     public bool ShowAppsDivider => MeterOptions.ShowCardDividers && ShowAppsSection;
 
     /// <summary>Tells the page that <see cref="HasApps"/> may have flipped. Raised from
@@ -614,6 +613,14 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     [ObservableProperty]
     public partial bool IsRulesExpanded { get; set; }
 
+    /// <summary>Set by the card view while a rules <b>collapse</b> animation is in flight. The panel is
+    /// shrinking back to zero, but the card must keep managing its own height (stay opted out of the row
+    /// baseline) until it lands - otherwise its still-tall content would inflate the baseline the instant
+    /// <see cref="IsRulesExpanded"/> flips false, yanking every sibling in the row up and back down. Folds
+    /// into <see cref="IsLayoutCustomSized"/>; not persisted.</summary>
+    [ObservableProperty]
+    public partial bool IsRulesCollapsing { get; set; }
+
     /// <summary>The first rule chip - always visible (when any rules apply at all). Sits
     /// outside the Expander so users see at-a-glance which rule is active without having
     /// to expand anything.</summary>
@@ -759,6 +766,7 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         OnPropertyChanged(nameof(HasMultipleRules));
         OnPropertyChanged(nameof(ShowRulesSection));
         OnPropertyChanged(nameof(ShowNoRulesMessage));
+        OnPropertyChanged(nameof(ShowRulesDivider));
         OnPropertyChanged(nameof(FirstRule));
         OnPropertyChanged(nameof(AdditionalRulesLabel));
     }
@@ -831,6 +839,7 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         OnPropertyChanged(nameof(HasMultipleRules));
         OnPropertyChanged(nameof(ShowRulesSection));
         OnPropertyChanged(nameof(ShowNoRulesMessage));
+        OnPropertyChanged(nameof(ShowRulesDivider));
         OnPropertyChanged(nameof(FirstRule));
         OnPropertyChanged(nameof(AdditionalRulesLabel));
         OnPropertyChanged(nameof(IsVolumeEditable));
@@ -1108,6 +1117,11 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         OnPropertyChanged(nameof(IsLayoutCustomSized));
     }
 
+    partial void OnIsRulesCollapsingChanged(bool value)
+    {
+        OnPropertyChanged(nameof(IsLayoutCustomSized));
+    }
+
     partial void OnChannelCountChanged(int value) => OnPropertyChanged(nameof(ChannelMeterTooltip));
 
     // OnIsHiddenByUserChanged / OnIsPinnedByUserChanged do not fire the visibility callback
@@ -1151,7 +1165,6 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     {
         OnPropertyChanged(nameof(ShowVolumeControls));
         OnPropertyChanged(nameof(ShowVolumeRow));
-        OnPropertyChanged(nameof(ShowVolumeDivider));
         OnPropertyChanged(nameof(ShowPlainSlider));
         OnPropertyChanged(nameof(ShowVolumeLockIcon));
         OnPropertyChanged(nameof(ShowVolumeLockOverlay));

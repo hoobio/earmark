@@ -392,17 +392,17 @@
                  row. Full-bleed to the card edges; each row carries a top hairline so the first row also
                  divides the section and extra rows are separated. Lives on the Devices page and in Quick
                  Controls alike (independent of ShowRules). -->
-            <!-- Now playing: one full-bleed dark strip per app with a media session. Normally no dividers
-                 around it - the dark band is its own separator. But with "fill card background" on, the
-                 band drops out (the whole card shows the artwork), so hairlines bracket the strip instead.
-                 The external volume->rules divider is hidden while this shows. -->
+            <!-- Now playing: one full-bleed strip per app with a media session. Like every section it
+                 carries the hairline above itself (shown with section dividers on), so the dark band - or
+                 the artwork in "fill card background" mode - is bracketed consistently with the rows around
+                 it. Full-bleed to the card edges. -->
             <Border Height="1" Margin="-16,0,-16,-6"
-                    Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
-                    Visibility="{x:Bind Card.ShowNowPlayingDividers, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                    Background="{x:Bind Card.ShowCardBackground, Mode=OneWay, Converter={StaticResource SectionDividerBrushConverter}}"
+                    Visibility="{x:Bind Card.ShowNowPlayingDivider, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
             <ItemsControl ItemsSource="{x:Bind Card.NowPlayingStrips, Mode=OneWay}"
                           HorizontalAlignment="Stretch"
                           HorizontalContentAlignment="Stretch"
-                          Margin="{x:Bind NowPlayingStripMargin(Card.ShowNowPlayingDividers, ShowRules, Card.ShowRulesSection, Card.ShowNoRulesMessage, Card.ShowAppsSection), Mode=OneWay}"
+                          Margin="-16,0,-16,0"
                           Visibility="{x:Bind Card.ShowNowPlaying, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
                 <ItemsControl.ItemsPanel>
                     <ItemsPanelTemplate>
@@ -541,11 +541,11 @@
                                                 Tag="{x:Bind}"
                                                 Loaded="OnSeekSliderLoaded"
                                                 Visibility="{x:Bind HasProgress, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                            <!-- Default (theme-aware, accessible) slider chrome; only the
-                                                 thumb is slimmed to suit the compact strip. -->
+                                            <!-- Default (theme-aware, accessible) slider chrome; thumb
+                                                 sized to match the volume slider for visual consistency. -->
                                             <Slider.Resources>
-                                                <x:Double x:Key="SliderHorizontalThumbWidth">12</x:Double>
-                                                <x:Double x:Key="SliderHorizontalThumbHeight">12</x:Double>
+                                                <x:Double x:Key="SliderHorizontalThumbWidth">14</x:Double>
+                                                <x:Double x:Key="SliderHorizontalThumbHeight">14</x:Double>
                                             </Slider.Resources>
                                         </Slider>
 
@@ -571,86 +571,9 @@
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
 
-            <Border Height="1" Margin="-16,-6,-16,0"
-                    Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
-                    Visibility="{x:Bind NowPlayingBottomDividerVis(ShowRules, Card.ShowNowPlayingDividers, Card.ShowRulesSection, Card.ShowNoRulesMessage, Card.ShowAppsSection), Mode=OneWay}" />
-
-            <!-- Volume -> rules divider. Hidden in the Quick Controls flyout (ShowRules=false) and while
-                 the now-playing section shows (no dividers touch the strip then). -->
+            <!-- Apps row carries the hairline above itself (section dividers on + a row present). -->
             <Border Height="1" Margin="-16,0,-16,-6"
-                    Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
-                    Visibility="{x:Bind VolumeRulesDividerVis(ShowRules, Card.ShowVolumeDivider, Card.ShowNowPlaying), Mode=OneWay}" />
-
-            <!-- Rules section. First rule chip always visible; the chevron toggles the rest. -->
-            <StackPanel Spacing="{StaticResource SpacingXSmall}"
-                        Visibility="{x:Bind RuleVis(ShowRules, Card.ShowRulesSection), Mode=OneWay}">
-                <TextBlock Text="Rules"
-                           Style="{StaticResource CaptionTextBlockStyle}"
-                           Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
-
-                <controls:ExpanderPill Margin="0,2,0,0"
-                                       IsExpanded="{x:Bind Card.IsRulesExpanded, Mode=TwoWay}"
-                                       ChevronVisible="{x:Bind Card.HasMultipleRules, Mode=OneWay}"
-                                       ToggleTooltip="{x:Bind Card.AdditionalRulesLabel}"
-                                       ToggleOnBodyTap="False">
-                    <controls:ExpanderPill.PillContent>
-                        <Button Style="{StaticResource SubtleRuleChipButtonStyle}"
-                                Background="Transparent"
-                                Opacity="{x:Bind Card.FirstRule.Opacity, FallbackValue=1.0, Mode=OneWay}"
-                                DataContext="{x:Bind Card.FirstRule, Mode=OneWay}"
-                                Click="OnRuleChipClicked"
-                                ToolTipService.ToolTip="Open in Rules">
-                            <StackPanel Spacing="{StaticResource SpacingXXSmall}">
-                                <TextBlock Text="{x:Bind Card.FirstRule.Name, Mode=OneWay, FallbackValue=''}"
-                                           Style="{StaticResource BodyStrongTextBlockStyle}"
-                                           TextTrimming="CharacterEllipsis"
-                                           TextWrapping="NoWrap" />
-                                <StackPanel Orientation="Horizontal" Spacing="6">
-                                    <TextBlock Text="{x:Bind Card.FirstRule.StatusMessage, Mode=OneWay, FallbackValue=''}"
-                                               Style="{StaticResource CaptionTextBlockStyle}"
-                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                    <TextBlock Text="·"
-                                               Style="{StaticResource CaptionTextBlockStyle}"
-                                               Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                               Visibility="{x:Bind Card.FirstRule.HasMatchSummary, Mode=OneWay, FallbackValue=Collapsed}" />
-                                    <TextBlock Text="{x:Bind Card.FirstRule.MatchSummary, Mode=OneWay, FallbackValue=''}"
-                                               Style="{StaticResource CaptionTextBlockStyle}"
-                                               Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                               Visibility="{x:Bind Card.FirstRule.HasMatchSummary, Mode=OneWay, FallbackValue=Collapsed}" />
-                                </StackPanel>
-                            </StackPanel>
-                        </Button>
-                    </controls:ExpanderPill.PillContent>
-                </controls:ExpanderPill>
-
-                <ItemsControl ItemsSource="{x:Bind Card.AdditionalRules}"
-                              HorizontalAlignment="Stretch"
-                              HorizontalContentAlignment="Stretch"
-                              Visibility="{x:Bind Card.IsRulesExpanded, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
-                    <ItemsControl.ItemContainerStyle>
-                        <Style TargetType="ContentPresenter">
-                            <Setter Property="HorizontalAlignment" Value="Stretch" />
-                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                        </Style>
-                    </ItemsControl.ItemContainerStyle>
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate x:DataType="vm:RuleSummary">
-                            <ContentControl HorizontalAlignment="Stretch"
-                                            HorizontalContentAlignment="Stretch"
-                                            Content="{x:Bind}"
-                                            ContentTemplate="{StaticResource RuleChipTemplate}" />
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
-            </StackPanel>
-
-            <TextBlock Text="No rules target this device."
-                       Style="{StaticResource MutedCaptionTextStyle}"
-                       Visibility="{x:Bind RuleVis(ShowRules, Card.ShowNoRulesMessage), Mode=OneWay}" />
-
-            <!-- Divider between rules and apps; shows only when the apps row is present. -->
-            <Border Height="1" Margin="-16,0"
-                    Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+                    Background="{x:Bind Card.ShowCardBackground, Mode=OneWay, Converter={StaticResource SectionDividerBrushConverter}}"
                     Visibility="{x:Bind Card.ShowAppsDivider, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
 
             <!-- Apps row. Each chip is the app's icon with a peak underbar; drag a chip onto another
@@ -845,6 +768,83 @@
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
             </StackPanel>
+
+            <!-- Rules block carries the hairline above itself (host ShowRules + section dividers on
+                 + the block has content - a rules list or the "no rules" message). -->
+            <Border Height="1" Margin="-16,0,-16,-6"
+                    Background="{x:Bind Card.ShowCardBackground, Mode=OneWay, Converter={StaticResource SectionDividerBrushConverter}}"
+                    Visibility="{x:Bind RuleVis(ShowRules, Card.ShowRulesDivider), Mode=OneWay}" />
+
+            <!-- Rules section. First rule chip always visible; the chevron toggles the rest. -->
+            <StackPanel Spacing="{StaticResource SpacingXSmall}"
+                        Visibility="{x:Bind RuleVis(ShowRules, Card.ShowRulesSection), Mode=OneWay}">
+                <TextBlock Text="Rules"
+                           Style="{StaticResource CaptionTextBlockStyle}"
+                           Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+
+                <controls:ExpanderPill Margin="0,2,0,0"
+                                       IsExpanded="{x:Bind Card.IsRulesExpanded, Mode=TwoWay}"
+                                       ChevronVisible="{x:Bind Card.HasMultipleRules, Mode=OneWay}"
+                                       ToggleTooltip="{x:Bind Card.AdditionalRulesLabel}"
+                                       ToggleOnBodyTap="False">
+                    <controls:ExpanderPill.PillContent>
+                        <Button Style="{StaticResource SubtleRuleChipButtonStyle}"
+                                Background="Transparent"
+                                Opacity="{x:Bind Card.FirstRule.Opacity, FallbackValue=1.0, Mode=OneWay}"
+                                DataContext="{x:Bind Card.FirstRule, Mode=OneWay}"
+                                Click="OnRuleChipClicked"
+                                ToolTipService.ToolTip="Open in Rules">
+                            <StackPanel Spacing="{StaticResource SpacingXXSmall}">
+                                <TextBlock Text="{x:Bind Card.FirstRule.Name, Mode=OneWay, FallbackValue=''}"
+                                           Style="{StaticResource BodyStrongTextBlockStyle}"
+                                           TextTrimming="CharacterEllipsis"
+                                           TextWrapping="NoWrap" />
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <TextBlock Text="{x:Bind Card.FirstRule.StatusMessage, Mode=OneWay, FallbackValue=''}"
+                                               Style="{StaticResource CaptionTextBlockStyle}"
+                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                    <TextBlock Text="·"
+                                               Style="{StaticResource CaptionTextBlockStyle}"
+                                               Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                               Visibility="{x:Bind Card.FirstRule.HasMatchSummary, Mode=OneWay, FallbackValue=Collapsed}" />
+                                    <TextBlock Text="{x:Bind Card.FirstRule.MatchSummary, Mode=OneWay, FallbackValue=''}"
+                                               Style="{StaticResource CaptionTextBlockStyle}"
+                                               Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                               Visibility="{x:Bind Card.FirstRule.HasMatchSummary, Mode=OneWay, FallbackValue=Collapsed}" />
+                                </StackPanel>
+                            </StackPanel>
+                        </Button>
+                    </controls:ExpanderPill.PillContent>
+                </controls:ExpanderPill>
+
+                <!-- Reveal is animated in code-behind (SetRulesPanelState): MaxHeight drives the real
+                     reflow so siblings glide, opacity fades the content, an InsetClip hides the overflow
+                     while it grows. Starts Collapsed; code-behind owns Visibility from the first card bind. -->
+                <ItemsControl x:Name="AdditionalRulesPanel"
+                              ItemsSource="{x:Bind Card.AdditionalRules}"
+                              HorizontalAlignment="Stretch"
+                              HorizontalContentAlignment="Stretch"
+                              Visibility="Collapsed">
+                    <ItemsControl.ItemContainerStyle>
+                        <Style TargetType="ContentPresenter">
+                            <Setter Property="HorizontalAlignment" Value="Stretch" />
+                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                        </Style>
+                    </ItemsControl.ItemContainerStyle>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:RuleSummary">
+                            <ContentControl HorizontalAlignment="Stretch"
+                                            HorizontalContentAlignment="Stretch"
+                                            Content="{x:Bind}"
+                                            ContentTemplate="{StaticResource RuleChipTemplate}" />
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+
+            <TextBlock Text="No rules target this device."
+                       Style="{StaticResource MutedCaptionTextStyle}"
+                       Visibility="{x:Bind RuleVis(ShowRules, Card.ShowNoRulesMessage), Mode=OneWay}" />
         </StackPanel>
 
         <!-- Transient accent dotted outline shown while a drag hovers this card's centre to group. -->
