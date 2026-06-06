@@ -27,6 +27,9 @@ public partial class NowPlayingStrip : ObservableObject
     // dash variant (hyphen / en / em dash). Non-greedy head so the FIRST separator wins.
     private static readonly Regex ArtistPrefix =
         new(@"^\s*(?<artist>.+?)\s*[-\u2013\u2014]\s*(?<rest>.+)$", RegexOptions.Compiled);
+    // YouTube Music's auto-generated channels report the artist as "<Artist> - Topic".
+    private static readonly Regex TopicSuffix =
+        new(@"\s*[-\u2013\u2014]\s*topic\s*$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     private readonly INowPlayingService _service;
     private readonly INowPlayingArtworkService _artwork;
@@ -72,8 +75,8 @@ public partial class NowPlayingStrip : ObservableObject
     public string SessionKey => _info.SessionKey;
 
     public string Title => CleanTitle(_info.Title, _info.Artist);
-    public string Artist => _info.Artist;
-    public bool HasArtist => !string.IsNullOrWhiteSpace(_info.Artist);
+    public string Artist => CleanArtist(_info.Artist);
+    public bool HasArtist => !string.IsNullOrWhiteSpace(Artist);
 
     [ObservableProperty]
     public partial ImageSource? BackdropSource { get; set; }
@@ -235,12 +238,18 @@ public partial class NowPlayingStrip : ObservableObject
             : title;
     }
 
+    /// <summary>Strips YouTube Music's "- Topic" suffix from a display artist (e.g.
+    /// "Kanye West - Topic" -> "Kanye West"). "VEVO" is left alone: it has no separator, so dropping it
+    /// would yield the space-less "KanyeWest".</summary>
+    private static string CleanArtist(string artist) =>
+        string.IsNullOrWhiteSpace(artist) ? artist : TopicSuffix.Replace(artist, string.Empty).Trim();
+
     /// <summary>Reduces an artist/channel name to a comparable core: strips a trailing "VEVO" or
     /// "- Topic", then keeps only letters/digits, lowercased. "KanyeWestVEVO", "Kanye West" and
     /// "Kanye West - Topic" all collapse to "kanyewest".</summary>
     private static string Norm(string s)
     {
-        s = Regex.Replace(s, @"\s*-\s*topic$|vevo$", string.Empty, RegexOptions.IgnoreCase);
+        s = Regex.Replace(TopicSuffix.Replace(s, string.Empty), @"vevo$", string.Empty, RegexOptions.IgnoreCase);
         return new string(s.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
     }
 
