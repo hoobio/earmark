@@ -65,7 +65,6 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     private bool? _lastShowAppIndicators;
     private bool? _lastAlwaysShowPinned;
     private bool? _lastShowNowPlaying;
-    private NowPlayingBackdropBlurMode? _lastNowPlayingBlur;
     private int? _lastHiddenAppsCount;
     private int? _lastHiddenAppsOnDeviceCount;
     /// <summary>Identity keys of apps the user has permanently hidden from the chip rows, mirrored
@@ -927,7 +926,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             {
                 card = new DeviceCard(
                     _endpoints, _writer, _meterOptions, snap,
-                    OnCardVisibilityToggled, OnCardQuickPinToggled, OnCardVolumeControlsToggled, OnCardCustomisationChanged,
+                    OnCardVisibilityToggled, OnCardQuickPinToggled, OnCardCustomisationChanged,
                     OnCardBluetoothToggle);
             }
             rebuilt.Add(card);
@@ -965,14 +964,12 @@ public partial class HomeViewModel : ObservableObject, IDisposable
                 _settings.Current.FilterAudioForwarders != _lastFilterForwarders ||
                 _settings.Current.ShowAppIndicators != _lastShowAppIndicators ||
                 _settings.Current.AlwaysShowPinnedApps != _lastAlwaysShowPinned ||
-                _settings.Current.ShowNowPlaying != _lastShowNowPlaying ||
-                _settings.Current.NowPlayingBackdropBlur != _lastNowPlayingBlur)
+                _settings.Current.ShowNowPlaying != _lastShowNowPlaying)
             {
                 _lastFilterForwarders = _settings.Current.FilterAudioForwarders;
                 _lastShowAppIndicators = _settings.Current.ShowAppIndicators;
                 _lastAlwaysShowPinned = _settings.Current.AlwaysShowPinnedApps;
                 _lastShowNowPlaying = _settings.Current.ShowNowPlaying;
-                _lastNowPlayingBlur = _settings.Current.NowPlayingBackdropBlur;
                 QueueAppsReconcile();
             }
             if (_settings.Current.WaveLinkChannelStyle == _lastAppliedStyle) return;
@@ -996,7 +993,6 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         _meterOptions.ShowCardDividers = s.ShowCardDividers;
         _meterOptions.ShowRules = s.ShowRules;
         _meterOptions.ShowNowPlaying = s.ShowNowPlaying;
-        _meterOptions.NowPlayingBlur = s.NowPlayingBackdropBlur;
         _meterOptions.NowPlayingCardBackground = s.NowPlayingCardBackground;
         foreach (var card in _allCards) card.NotifyMeterStyleChanged();
     }
@@ -2149,14 +2145,6 @@ public partial class HomeViewModel : ObservableObject, IDisposable
 
         card.SetQuickPin(false);
         card.ToggleUserVisibilityCommand.Execute(null);
-    }
-
-    private void OnCardVolumeControlsToggled(DeviceCard card)
-    {
-        UpdateDeviceConfig(card);
-        QueueSettingsSave();
-        // No resync: the card stays listed, only its inner controls toggle, and that's already
-        // bound live on the existing card instance.
     }
 
     private void OnCardCustomisationChanged(DeviceCard card)

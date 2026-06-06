@@ -178,14 +178,6 @@
                     </ctrl:SettingsExpander.HeaderIcon>
                     <ToggleSwitch IsOn="{x:Bind ViewModel.ShowNowPlaying, Mode=TwoWay}" />
                     <ctrl:SettingsExpander.Items>
-                        <ctrl:SettingsCard Header="Low-res artwork blur"
-                                           Description="How small album art is blurred to fill the strip's backdrop. High-resolution art always fills sharp. Gaussian is a true blur; Downscale is a cheaper soft fill."
-                                           IsEnabled="{x:Bind ViewModel.NowPlayingChildrenEnabled, Mode=OneWay}">
-                            <ComboBox SelectedIndex="{x:Bind ViewModel.NowPlayingBlurIndex, Mode=TwoWay}" MinWidth="150">
-                                <ComboBoxItem Content="Gaussian" />
-                                <ComboBoxItem Content="Downscale" />
-                            </ComboBox>
-                        </ctrl:SettingsCard>
                         <ctrl:SettingsCard Header="Fill card background"
                                            Description="Also use the artwork as a dimmed background across the whole device card. When a card has several playing apps, the primary one wins."
                                            IsEnabled="{x:Bind ViewModel.NowPlayingChildrenEnabled, Mode=OneWay}">

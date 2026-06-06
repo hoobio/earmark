@@ -116,12 +116,6 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     public partial bool ShowNowPlaying { get; set; }
 
-    /// <summary>Now-playing artwork blur ComboBox index. Maps 1:1 to
-    /// <see cref="NowPlayingBackdropBlurMode"/> (Gaussian=0, Downscale=1). Only meaningful when
-    /// <see cref="ShowNowPlaying"/> is on.</summary>
-    [ObservableProperty]
-    public partial int NowPlayingBlurIndex { get; set; }
-
     /// <summary>Whether the primary now-playing artwork fills the whole card as a dimmed background.
     /// Only meaningful when <see cref="ShowNowPlaying"/> is on.</summary>
     [ObservableProperty]
@@ -223,7 +217,6 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
             ShowCardDividers = _settings.Current.ShowCardDividers;
             ShowRules = _settings.Current.ShowRules;
             ShowNowPlaying = _settings.Current.ShowNowPlaying;
-            NowPlayingBlurIndex = (int)_settings.Current.NowPlayingBackdropBlur;
             NowPlayingCardBackground = _settings.Current.NowPlayingCardBackground;
             AppThemeIndex = (int)_settings.Current.Theme;
             BackdropIndex = (int)_settings.Current.Backdrop;
@@ -381,7 +374,6 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         Persist(s => s.ShowNowPlaying = value);
         OnPropertyChanged(nameof(NowPlayingChildrenEnabled));
     }
-    partial void OnNowPlayingBlurIndexChanged(int value) => Persist(s => s.NowPlayingBackdropBlur = (NowPlayingBackdropBlurMode)value);
     partial void OnNowPlayingCardBackgroundChanged(bool value) => Persist(s => s.NowPlayingCardBackground = value);
     partial void OnAppThemeIndexChanged(int value) => Persist(s => s.Theme = (AppTheme)value);
     partial void OnBackdropIndexChanged(int value) => Persist(s => s.Backdrop = (BackdropMode)value);

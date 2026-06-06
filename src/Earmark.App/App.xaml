@@ -4,6 +4,7 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:local="using:Earmark.App"
+    xmlns:media="using:Microsoft.UI.Xaml.Media"
     xmlns:converters="using:Earmark.App.Converters">
     <Application.Resources>
         <ResourceDictionary>
@@ -20,6 +21,14 @@
                          solid window colour under High Contrast. WinUI has no built-in adaptive scrim, so
                          this is the one place a brush is defined; everything on top uses theme brushes. -->
                     <SolidColorBrush x:Key="NowPlayingScrimBrush" Color="#000000" Opacity="0.50" />
+                    <!-- Now-playing frost: an in-app acrylic laid over low-res artwork so the compositor
+                         blurs it into a soft, album-coloured backdrop (replaces the old Win2D Gaussian).
+                         Dark, low-luminosity frost in dark theme; brighter frost in light. TintOpacity is
+                         kept low so the art's colour survives; TintLuminosityOpacity does the theme split.
+                         Falls back to FallbackColor when transparency is off / battery saver / low-end. -->
+                    <media:AcrylicBrush x:Key="NowPlayingFrostBrush"
+                                        TintColor="#000000" TintOpacity="0.40" TintLuminosityOpacity="0.55"
+                                        FallbackColor="#1C1C1C" />
                     <!-- Card surface, theme-aware. Dark keeps the original subtle, borderless layer fill
                          (a hard card fill + stroke reads too light/boxy over dark Mica). Light needs the
                          standard card fill + hairline to separate from the near-white Mica backdrop. -->
@@ -29,12 +38,16 @@
                 <ResourceDictionary x:Key="Light">
                     <SolidColorBrush x:Key="ContentSurfaceBrush" Color="{ThemeResource SystemBaseLowColor}" Opacity="0.45" />
                     <SolidColorBrush x:Key="NowPlayingScrimBrush" Color="#FFFFFF" Opacity="0.80" />
+                    <media:AcrylicBrush x:Key="NowPlayingFrostBrush"
+                                        TintColor="#FFFFFF" TintOpacity="0.30" TintLuminosityOpacity="0.65"
+                                        FallbackColor="#E8E8E8" />
                     <SolidColorBrush x:Key="SectionCardBackgroundBrush" Color="{ThemeResource CardBackgroundFillColorDefault}" />
                     <SolidColorBrush x:Key="SectionCardBorderBrush" Color="{ThemeResource CardStrokeColorDefault}" />
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="HighContrast">
                     <SolidColorBrush x:Key="ContentSurfaceBrush" Color="{ThemeResource SystemColorWindowColor}" />
                     <SolidColorBrush x:Key="NowPlayingScrimBrush" Color="{ThemeResource SystemColorWindowColor}" />
+                    <SolidColorBrush x:Key="NowPlayingFrostBrush" Color="{ThemeResource SystemColorWindowColor}" />
                     <SolidColorBrush x:Key="SectionCardBackgroundBrush" Color="{ThemeResource SystemColorWindowColor}" />
                     <SolidColorBrush x:Key="SectionCardBorderBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
                 </ResourceDictionary>
@@ -47,7 +60,6 @@
             <converters:SatisfiedBrushConverter x:Key="SatisfiedBrushConverter" />
             <converters:SatisfiedTooltipConverter x:Key="SatisfiedTooltipConverter" />
             <converters:QuickPinBrushConverter x:Key="QuickPinBrushConverter" />
-            <converters:SectionDividerBrushConverter x:Key="SectionDividerBrushConverter" />
             <converters:WaveLinkStateBrushConverter x:Key="WaveLinkStateBrushConverter" />
             <converters:WaveLinkStateGlyphConverter x:Key="WaveLinkStateGlyphConverter" />
             <converters:NegatedBooleanConverter x:Key="NegatedBooleanConverter" />

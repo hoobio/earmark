@@ -128,10 +128,6 @@ public sealed class AppSettings
     /// strip and returns the app's chip to the regular apps row.</summary>
     public bool ShowNowPlaying { get; set; } = true;
 
-    /// <summary>How the now-playing strip blurs low-resolution artwork to fill its backdrop. High-res
-    /// art fills sharp regardless of this setting.</summary>
-    public NowPlayingBackdropBlurMode NowPlayingBackdropBlur { get; set; } = NowPlayingBackdropBlurMode.Gaussian;
-
     /// <summary>Whether the primary now-playing artwork also fills the whole device card as a dimmed
     /// background (the playing session wins when a card has several). Default on.</summary>
     public bool NowPlayingCardBackground { get; set; } = true;

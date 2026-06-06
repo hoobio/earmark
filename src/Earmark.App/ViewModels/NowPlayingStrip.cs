@@ -37,7 +37,6 @@ public partial class NowPlayingStrip : ObservableObject
 
     private NowPlayingInfo _info;
     private string _lastArtworkHash = string.Empty;
-    private Settings.NowPlayingBackdropBlurMode _lastBlurMode;
     // While the user drags, _seeking freezes the bar at _seekSeconds. After release, _pendingSeek holds
     // the requested position until an SMTC snapshot reports a position near it (or the settle timeout
     // elapses), so the bar doesn't snap back to the old position in the gap before the seek lands.
@@ -80,6 +79,11 @@ public partial class NowPlayingStrip : ObservableObject
 
     [ObservableProperty]
     public partial ImageSource? BackdropSource { get; set; }
+
+    /// <summary>Whether the backdrop is low-res art the strip softens with an in-app acrylic overlay
+    /// (the compositor blurs it). False for high-res art, which fills sharp.</summary>
+    [ObservableProperty]
+    public partial bool BackdropFrosted { get; set; }
 
     public bool CanPrevious => _info.CanPrevious;
     public bool CanPlayPause => _info.CanPlayPause;
@@ -211,16 +215,15 @@ public partial class NowPlayingStrip : ObservableObject
 
     private async Task RefreshBackdropAsync()
     {
-        var mode = _meterOptions.NowPlayingBlur;
-        if (string.Equals(_info.ThumbnailHash, _lastArtworkHash, StringComparison.Ordinal) && mode == _lastBlurMode)
+        if (string.Equals(_info.ThumbnailHash, _lastArtworkHash, StringComparison.Ordinal))
         {
             return;
         }
         _lastArtworkHash = _info.ThumbnailHash;
-        _lastBlurMode = mode;
 
-        var processed = await _artwork.BuildAsync(_info.Thumbnail, _info.ThumbnailHash, mode);
+        var processed = await _artwork.BuildAsync(_info.Thumbnail, _info.ThumbnailHash);
         BackdropSource = processed.Source;
+        BackdropFrosted = processed.Frosted;
     }
 
     /// <summary>Drops a redundant "&lt;Artist&gt; - " prefix from a track title when the leading claim

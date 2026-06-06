@@ -64,11 +64,6 @@ public partial class PeakMeterOptions : ObservableObject
     [ObservableProperty]
     public partial bool ShowNowPlaying { get; set; } = true;
 
-    /// <summary>How the now-playing strip blurs low-resolution artwork. Read by the artwork builder
-    /// when a strip's backdrop is (re)processed.</summary>
-    [ObservableProperty]
-    public partial NowPlayingBackdropBlurMode NowPlayingBlur { get; set; } = NowPlayingBackdropBlurMode.Gaussian;
-
     /// <summary>Whether the primary now-playing artwork fills the whole card as a dimmed background.
     /// Default on. Shared/observable so toggling the setting updates every card live.</summary>
     [ObservableProperty]

@@ -39,71 +39,11 @@
     </UserControl.Resources>
 
     <Grid>
-        <!-- Right-click anywhere on the card for show/hide, quick-pin, customise, and group actions. -->
+        <!-- Right-click anywhere on the card for show/hide, quick-pin, customise, and group actions.
+             Items are built in code-behind (OnDeviceCardFlyoutOpening -> AppendDeviceMenuItems), the
+             single source the app-chip menu also appends, so the two presentations can't drift. -->
         <Grid.ContextFlyout>
-            <MenuFlyout>
-                <MenuFlyoutItem Text="{x:Bind Card.HideToggleTooltip, Mode=OneWay}"
-                                Click="OnDeviceVisibilityClicked"
-                                Tag="{x:Bind Card}">
-                    <MenuFlyoutItem.Icon>
-                        <FontIcon Glyph="{x:Bind Card.HideToggleGlyph, Mode=OneWay}" />
-                    </MenuFlyoutItem.Icon>
-                </MenuFlyoutItem>
-                <MenuFlyoutItem Text="{x:Bind Card.QuickPinToggleLabel, Mode=OneWay}"
-                                Command="{x:Bind Card.ToggleQuickPinCommand}"
-                                Visibility="{x:Bind Card.CanQuickPin, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
-                    <MenuFlyoutItem.Icon>
-                        <FontIcon Glyph="{x:Bind Card.QuickPinToggleGlyph, Mode=OneWay}" />
-                    </MenuFlyoutItem.Icon>
-                </MenuFlyoutItem>
-                <MenuFlyoutItem Text="Customise…"
-                                Click="OnCustomiseClicked"
-                                Tag="{x:Bind Card}">
-                    <MenuFlyoutItem.Icon>
-                        <FontIcon Glyph="&#xE790;" />
-                    </MenuFlyoutItem.Icon>
-                </MenuFlyoutItem>
-                <MenuFlyoutItem Text="Forget device"
-                                Click="OnForgetDeviceClicked"
-                                Tag="{x:Bind Card}"
-                                Visibility="{x:Bind Card.ShowDisconnectedBadge, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
-                                ToolTipService.ToolTip="Stop remembering this disconnected device, clearing its saved order, group, and customisation. It returns as new if it reconnects.">
-                    <MenuFlyoutItem.Icon>
-                        <FontIcon Glyph="&#xE74D;" />
-                    </MenuFlyoutItem.Icon>
-                </MenuFlyoutItem>
-                <MenuFlyoutSeparator Visibility="{x:Bind Card.IsGroupMember, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                <MenuFlyoutItem Text="Ungroup device"
-                                Click="OnUngroupDeviceClicked"
-                                Tag="{x:Bind Card}"
-                                Visibility="{x:Bind Card.IsGroupMember, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
-                    <MenuFlyoutItem.Icon>
-                        <FontIcon Glyph="&#xF0B4;" />
-                    </MenuFlyoutItem.Icon>
-                </MenuFlyoutItem>
-                <MenuFlyoutSeparator Visibility="{x:Bind Card.IsGroupMember, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                <MenuFlyoutItem Text="Rename group"
-                                Click="OnRenameGroupClicked"
-                                Tag="{x:Bind Card}"
-                                Visibility="{x:Bind Card.IsGroupMember, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
-                    <MenuFlyoutItem.Icon>
-                        <FontIcon Glyph="&#xE8AC;" />
-                    </MenuFlyoutItem.Icon>
-                </MenuFlyoutItem>
-                <MenuFlyoutItem Text="Delete group"
-                                Click="OnUngroupAllClicked"
-                                Tag="{x:Bind Card}"
-                                Visibility="{x:Bind Card.IsGroupMember, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
-                    <MenuFlyoutItem.Resources>
-                        <SolidColorBrush x:Key="MenuFlyoutItemForeground" Color="{ThemeResource SystemFillColorCritical}" />
-                        <SolidColorBrush x:Key="MenuFlyoutItemForegroundPointerOver" Color="{ThemeResource SystemFillColorCritical}" />
-                        <SolidColorBrush x:Key="MenuFlyoutItemForegroundPressed" Color="{ThemeResource SystemFillColorCritical}" />
-                    </MenuFlyoutItem.Resources>
-                    <MenuFlyoutItem.Icon>
-                        <FontIcon Glyph="&#xE74D;" Foreground="{ThemeResource SystemFillColorCriticalBrush}" />
-                    </MenuFlyoutItem.Icon>
-                </MenuFlyoutItem>
-            </MenuFlyout>
+            <MenuFlyout Opening="OnDeviceCardFlyoutOpening" />
         </Grid.ContextFlyout>
 
         <!-- Optional now-playing card background: the primary session's artwork, dimmed behind the whole
@@ -112,11 +52,18 @@
             <controls:CrossfadeImage Source="{x:Bind Card.PrimaryNowPlaying.BackdropSource, Mode=OneWay}"
                                      Stretch="UniformToFill"
                                      CornerRadius="{StaticResource CardCornerRadius}" />
-            <!-- Scrim so the artwork is dimmed enough for the card's text / meter / chips to stay
-                 legible. Theme-aware: darkens in dark theme, lightens in light theme, to track the
-                 themed text it sits behind. Rounded to match so its fill doesn't square off the corners. -->
+            <!-- Frost: in-app acrylic over low-res art only (high-res fills sharp), so the compositor
+                 blurs the fill into a soft album-coloured backdrop. -->
+            <Border Background="{ThemeResource NowPlayingFrostBrush}"
+                    CornerRadius="{StaticResource CardCornerRadius}"
+                    Visibility="{x:Bind Card.PrimaryNowPlaying.BackdropFrosted, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
+            <!-- Scrim for sharp (high-res) art only: dims it so the card's text / meter / chips stay
+                 legible. When the art is frosted the acrylic above already carries the theme-aware
+                 dimming, so the scrim is dropped to avoid double-darkening (washed-out art).
+                 Rounded to match so its fill doesn't square off the corners. -->
             <Border Background="{ThemeResource NowPlayingScrimBrush}"
-                    CornerRadius="{StaticResource CardCornerRadius}" />
+                    CornerRadius="{StaticResource CardCornerRadius}"
+                    Visibility="{x:Bind Card.PrimaryNowPlaying.BackdropFrosted, Mode=OneWay, Converter={StaticResource NegatedBooleanToVisibilityConverter}}" />
         </Grid>
 
         <!-- Muted tint fills the whole card; shown only when muted. -->
@@ -397,8 +344,11 @@
                  the artwork in "fill card background" mode - is bracketed consistently with the rows around
                  it. Full-bleed to the card edges. -->
             <Border Height="1" Margin="-16,0,-16,-6"
-                    Background="{x:Bind Card.ShowCardBackground, Mode=OneWay, Converter={StaticResource SectionDividerBrushConverter}}"
-                    Visibility="{x:Bind Card.ShowNowPlayingDivider, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                    Background="{ThemeResource DividerStrokeColorDefaultBrush}"
+                    Visibility="{x:Bind DividerOverArt(Card.ShowNowPlayingDivider, Card.ShowCardBackground), Mode=OneWay}" />
+            <Border Height="1" Margin="-16,0,-16,-6"
+                    Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+                    Visibility="{x:Bind DividerPlain(Card.ShowNowPlayingDivider, Card.ShowCardBackground), Mode=OneWay}" />
             <ItemsControl ItemsSource="{x:Bind Card.NowPlayingStrips, Mode=OneWay}"
                           HorizontalAlignment="Stretch"
                           HorizontalContentAlignment="Stretch"
@@ -428,9 +378,15 @@
                                              inflating it, and eases between artworks on a track change. -->
                                         <controls:CrossfadeImage Source="{x:Bind BackdropSource, Mode=OneWay}"
                                                                  Stretch="UniformToFill" />
-                                        <!-- Theme-aware scrim: keeps the card's themed text/controls legible
-                                             over the art in both light and dark. -->
-                                        <Border Background="{ThemeResource NowPlayingScrimBrush}" />
+                                        <!-- Frost: in-app acrylic over low-res art only (high-res fills
+                                             sharp); the compositor blurs the fill, no Win2D. -->
+                                        <Border Background="{ThemeResource NowPlayingFrostBrush}"
+                                                Visibility="{x:Bind BackdropFrosted, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                        <!-- Scrim for sharp art only: keeps the card's themed text/controls
+                                             legible. Frosted art is dimmed by the acrylic above, so the scrim
+                                             is dropped there to avoid double-darkening. -->
+                                        <Border Background="{ThemeResource NowPlayingScrimBrush}"
+                                                Visibility="{x:Bind BackdropFrosted, Mode=OneWay, Converter={StaticResource NegatedBooleanToVisibilityConverter}}" />
                                     </Grid>
 
                                     <!-- Horizontal inset stays 16 so the strip content lines up with the
@@ -573,8 +529,11 @@
 
             <!-- Apps row carries the hairline above itself (section dividers on + a row present). -->
             <Border Height="1" Margin="-16,0,-16,-6"
-                    Background="{x:Bind Card.ShowCardBackground, Mode=OneWay, Converter={StaticResource SectionDividerBrushConverter}}"
-                    Visibility="{x:Bind Card.ShowAppsDivider, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                    Background="{ThemeResource DividerStrokeColorDefaultBrush}"
+                    Visibility="{x:Bind DividerOverArt(Card.ShowAppsDivider, Card.ShowCardBackground), Mode=OneWay}" />
+            <Border Height="1" Margin="-16,0,-16,-6"
+                    Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+                    Visibility="{x:Bind DividerPlain(Card.ShowAppsDivider, Card.ShowCardBackground), Mode=OneWay}" />
 
             <!-- Apps row. Each chip is the app's icon with a peak underbar; drag a chip onto another
                  render card to move the app's output there (the drop is handled by the host Border). -->
@@ -598,96 +557,10 @@
                                     AutomationProperties.Name="{x:Bind DisplayLabel, Mode=OneWay}"
                                     ToolTipService.ToolTip="{x:Bind Tooltip}"
                                     Visibility="{x:Bind IsInNowPlaying, Mode=OneWay, Converter={StaticResource NegatedBooleanToVisibilityConverter}}">
+                                <!-- Chip-specific actions (hide app, close/terminate process) plus the shared
+                                     device menu, both appended in code-behind (OnAppChipFlyoutOpening). -->
                                 <Border.ContextFlyout>
-                                    <MenuFlyout Opening="OnAppChipFlyoutOpening">
-                                        <MenuFlyoutSubItem Text="Hide this app">
-                                            <MenuFlyoutSubItem.Icon>
-                                                <FontIcon Glyph="&#xED1A;" />
-                                            </MenuFlyoutSubItem.Icon>
-                                            <MenuFlyoutItem Text="On this device"
-                                                            Command="{x:Bind HideOnDeviceCommand}"
-                                                            ToolTipService.ToolTip="Hide this app's chip on this device only; it stays on other devices. Unhide it from Settings &#x2192; App indicators." />
-                                            <MenuFlyoutItem Text="Everywhere"
-                                                            Command="{x:Bind HideCommand}"
-                                                            ToolTipService.ToolTip="Permanently hide this app's chip from every device. Unhide it from Settings &#x2192; App indicators." />
-                                        </MenuFlyoutSubItem>
-                                        <MenuFlyoutItem Text="{x:Bind CloseActionLabel, Mode=OneWay}"
-                                                        Command="{x:Bind CloseCommand}"
-                                                        IsEnabled="{x:Bind CanCloseProcess, Mode=OneWay}"
-                                                        Visibility="{x:Bind ShowProcessActions, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
-                                                        ToolTipService.ToolTip="Ask this app to close, like clicking its X (it can save or prompt first).">
-                                            <MenuFlyoutItem.Icon>
-                                                <FontIcon Glyph="&#xE711;" />
-                                            </MenuFlyoutItem.Icon>
-                                        </MenuFlyoutItem>
-                                        <MenuFlyoutItem Text="{x:Bind TerminateActionLabel, Mode=OneWay}"
-                                                        Command="{x:Bind TerminateCommand}"
-                                                        IsEnabled="{x:Bind CanControlProcess, Mode=OneWay}"
-                                                        Visibility="Collapsed"
-                                                        Tag="{x:Bind}"
-                                                        ToolTipService.ToolTip="Force this app to quit now. Unsaved work is lost.">
-                                            <MenuFlyoutItem.Resources>
-                                                <SolidColorBrush x:Key="MenuFlyoutItemForeground" Color="{ThemeResource SystemFillColorCritical}" />
-                                                <SolidColorBrush x:Key="MenuFlyoutItemForegroundPointerOver" Color="{ThemeResource SystemFillColorCritical}" />
-                                                <SolidColorBrush x:Key="MenuFlyoutItemForegroundPressed" Color="{ThemeResource SystemFillColorCritical}" />
-                                            </MenuFlyoutItem.Resources>
-                                            <MenuFlyoutItem.Icon>
-                                                <FontIcon Glyph="&#xE733;" Foreground="{ThemeResource SystemFillColorCriticalBrush}" />
-                                            </MenuFlyoutItem.Icon>
-                                        </MenuFlyoutItem>
-                                        <MenuFlyoutSeparator />
-                                        <MenuFlyoutItem Text="{x:Bind OwnerCard.HideToggleTooltip, Mode=OneWay}"
-                                                        Click="OnDeviceVisibilityClicked"
-                                                        Tag="{x:Bind OwnerCard}">
-                                            <MenuFlyoutItem.Icon>
-                                                <FontIcon Glyph="{x:Bind OwnerCard.HideToggleGlyph, Mode=OneWay}" />
-                                            </MenuFlyoutItem.Icon>
-                                        </MenuFlyoutItem>
-                                        <MenuFlyoutItem Text="{x:Bind OwnerCard.QuickPinToggleLabel, Mode=OneWay}"
-                                                        Command="{x:Bind OwnerCard.ToggleQuickPinCommand}"
-                                                        Visibility="{x:Bind OwnerCard.CanQuickPin, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                            <MenuFlyoutItem.Icon>
-                                                <FontIcon Glyph="{x:Bind OwnerCard.QuickPinToggleGlyph, Mode=OneWay}" />
-                                            </MenuFlyoutItem.Icon>
-                                        </MenuFlyoutItem>
-                                        <MenuFlyoutItem Text="{x:Bind OwnerCard.VolumeControlsToggleLabel, Mode=OneWay}"
-                                                        Command="{x:Bind OwnerCard.ToggleVolumeControlsCommand}">
-                                            <MenuFlyoutItem.Icon>
-                                                <FontIcon Glyph="{x:Bind OwnerCard.VolumeControlsToggleGlyph, Mode=OneWay}" />
-                                            </MenuFlyoutItem.Icon>
-                                        </MenuFlyoutItem>
-                                        <MenuFlyoutSeparator Visibility="{x:Bind OwnerCard.IsGroupMember, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                        <MenuFlyoutItem Text="Ungroup device"
-                                                        Click="OnUngroupDeviceClicked"
-                                                        Tag="{x:Bind OwnerCard}"
-                                                        Visibility="{x:Bind OwnerCard.IsGroupMember, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                            <MenuFlyoutItem.Icon>
-                                                <FontIcon Glyph="&#xF0B4;" />
-                                            </MenuFlyoutItem.Icon>
-                                        </MenuFlyoutItem>
-                                        <MenuFlyoutSeparator Visibility="{x:Bind OwnerCard.IsGroupMember, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                        <MenuFlyoutItem Text="Rename group"
-                                                        Click="OnRenameGroupClicked"
-                                                        Tag="{x:Bind OwnerCard}"
-                                                        Visibility="{x:Bind OwnerCard.IsGroupMember, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                            <MenuFlyoutItem.Icon>
-                                                <FontIcon Glyph="&#xE8AC;" />
-                                            </MenuFlyoutItem.Icon>
-                                        </MenuFlyoutItem>
-                                        <MenuFlyoutItem Text="Delete group"
-                                                        Click="OnUngroupAllClicked"
-                                                        Tag="{x:Bind OwnerCard}"
-                                                        Visibility="{x:Bind OwnerCard.IsGroupMember, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                            <MenuFlyoutItem.Resources>
-                                                <SolidColorBrush x:Key="MenuFlyoutItemForeground" Color="{ThemeResource SystemFillColorCritical}" />
-                                                <SolidColorBrush x:Key="MenuFlyoutItemForegroundPointerOver" Color="{ThemeResource SystemFillColorCritical}" />
-                                                <SolidColorBrush x:Key="MenuFlyoutItemForegroundPressed" Color="{ThemeResource SystemFillColorCritical}" />
-                                            </MenuFlyoutItem.Resources>
-                                            <MenuFlyoutItem.Icon>
-                                                <FontIcon Glyph="&#xE74D;" Foreground="{ThemeResource SystemFillColorCriticalBrush}" />
-                                            </MenuFlyoutItem.Icon>
-                                        </MenuFlyoutItem>
-                                    </MenuFlyout>
+                                    <MenuFlyout Opening="OnAppChipFlyoutOpening" />
                                 </Border.ContextFlyout>
                                 <Grid Opacity="{x:Bind ChipOpacity, Mode=OneWay}">
                                     <Grid.RowDefinitions>
@@ -772,8 +645,11 @@
             <!-- Rules block carries the hairline above itself (host ShowRules + section dividers on
                  + the block has content - a rules list or the "no rules" message). -->
             <Border Height="1" Margin="-16,0,-16,-6"
-                    Background="{x:Bind Card.ShowCardBackground, Mode=OneWay, Converter={StaticResource SectionDividerBrushConverter}}"
-                    Visibility="{x:Bind RuleVis(ShowRules, Card.ShowRulesDivider), Mode=OneWay}" />
+                    Background="{ThemeResource DividerStrokeColorDefaultBrush}"
+                    Visibility="{x:Bind RuleDividerOverArt(ShowRules, Card.ShowRulesDivider, Card.ShowCardBackground), Mode=OneWay}" />
+            <Border Height="1" Margin="-16,0,-16,-6"
+                    Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+                    Visibility="{x:Bind RuleDividerPlain(ShowRules, Card.ShowRulesDivider, Card.ShowCardBackground), Mode=OneWay}" />
 
             <!-- Rules section. First rule chip always visible; the chevron toggles the rest. -->
             <StackPanel Spacing="{StaticResource SpacingXSmall}"
