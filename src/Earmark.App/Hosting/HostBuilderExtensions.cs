@@ -14,14 +14,34 @@ namespace Earmark.App.Hosting;
 
 internal static class HostBuilderExtensions
 {
+    /// <summary>Roaming data root for persisted user content (rules, settings). Per build channel
+    /// so Dev / Prerelease / Release installs never share or clobber each other's data. In
+    /// %APPDATA% (not the OneDrive-backed Documents folder) so the startup read never stalls on a
+    /// cloud-syncing file. A stable Release build sits at the base; non-stable channels nest under it.</summary>
+    public static string DataDirectory { get; } = ChannelPath(
+        Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "Hoobi",
+            "Earmark"));
+
+    /// <summary>Cache root (logs) in %LOCALAPPDATA% - machine-local churn that must not roam or
+    /// sync. Channel-segregated to match the data root.</summary>
     public static string LogDirectory { get; } = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "Earmark",
+        ChannelPath(
+            Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "Earmark")),
         "logs");
 
     public static string CurrentLogPath { get; } = Path.Combine(
         LogDirectory,
         $"earmark-{DateTime.Now:yyyyMMdd-HHmmss}.log");
+
+    private static string ChannelPath(string baseDir)
+    {
+        var channel = AppInfo.ChannelFolder;
+        return string.IsNullOrEmpty(channel) ? baseDir : Path.Combine(baseDir, channel);
+    }
 
     public static HostApplicationBuilder ConfigureEarmark(this HostApplicationBuilder builder)
     {
@@ -35,14 +55,16 @@ internal static class HostBuilderExtensions
 
         builder.Services.AddSingleton(fileLoggerProvider);
 
-        builder.Services.AddEarmarkCore();
+        builder.Services.AddEarmarkCore(Path.Combine(DataDirectory, "rules.json"));
         builder.Services.AddEarmarkInterop();
 
-        builder.Services.AddSingleton<ISettingsService, SettingsService>();
+        builder.Services.AddSingleton<ISettingsService>(
+            _ => new SettingsService(Path.Combine(DataDirectory, "settings.json")));
         builder.Services.AddSingleton<IRoutingApplier, RoutingApplier>();
         builder.Services.AddSingleton<IDispatcherQueueProvider, DispatcherQueueProvider>();
         builder.Services.AddSingleton<INavigationService, NavigationService>();
         builder.Services.AddSingleton<IWindowChromeManager, WindowChromeManager>();
+        builder.Services.AddSingleton<ITaskbarMediaControls, TaskbarMediaControlsManager>();
         builder.Services.AddSingleton<INotificationService, NotificationService>();
         builder.Services.AddSingleton<IInAppNotificationService, InAppNotificationService>();
         builder.Services.AddSingleton<IProcessControlService, ProcessControlService>();

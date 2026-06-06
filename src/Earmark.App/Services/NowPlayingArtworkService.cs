@@ -1,46 +1,42 @@
 using System.Runtime.InteropServices.WindowsRuntime;
 
-using Earmark.App.Settings;
-
 using Microsoft.Extensions.Logging;
-using Microsoft.Graphics.Canvas;
-using Microsoft.Graphics.Canvas.Effects;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 
-using Windows.Foundation;
 using Windows.Graphics.Imaging;
 using Windows.Storage.Streams;
 
 namespace Earmark.App.Services;
 
 /// <summary>Result of processing now-playing artwork into a strip backdrop: the fill-ready image and
-/// whether it was blurred (low-res fallback) vs shown sharp (high-res cover-fill).</summary>
-public sealed record ProcessedArtwork(ImageSource? Source, bool WasBlurred);
+/// whether it should be frosted (a low-res source the strip softens with an acrylic overlay) vs shown
+/// sharp (high-res cover-fill).</summary>
+public sealed record ProcessedArtwork(ImageSource? Source, bool Frosted);
 
 /// <summary>Builds now-playing strip backdrops from raw SMTC thumbnail bytes (see
 /// <see cref="NowPlayingArtworkService"/>). Must be called on the UI thread (creates WinUI image
 /// sources).</summary>
 public interface INowPlayingArtworkService
 {
-    Task<ProcessedArtwork> BuildAsync(byte[]? bytes, string contentHash, NowPlayingBackdropBlurMode mode);
+    Task<ProcessedArtwork> BuildAsync(byte[]? bytes, string contentHash);
 }
 
 /// <summary>
 /// Turns raw SMTC thumbnail bytes into a backdrop <see cref="ImageSource"/> for the now-playing strip.
-/// One Win2D pipeline for every mode: decode, trim solid black letterbox bars off the edges, then either
-/// cover-fill sharp (source big enough to upscale cleanly) or blur-to-fill (Gaussian, or a cheap
-/// decode-tiny soft fill) when it isn't. Results are cached by content hash + mode so a track's backdrop
-/// is processed once, not on every reconcile.
+/// One <see cref="BitmapDecoder"/> pipeline: decode, trim solid black letterbox bars off the edges, then
+/// cover-fill the cropped art. Art big enough to upscale cleanly is shown sharp; art that would need to
+/// upscale past <see cref="SharpUpscaleLimit"/> is flagged <see cref="ProcessedArtwork.Frosted"/> so the
+/// strip lays an in-app acrylic over it (the compositor blurs the fill, no Win2D). Results are cached by
+/// content hash so a track's backdrop is processed once, not on every reconcile.
 /// </summary>
 public sealed class NowPlayingArtworkService : INowPlayingArtworkService
 {
     // Nominal physical width the strip backdrop must cover. The strip is full-bleed at roughly a
     // card's width (~320 logical) at ~1.5x scale. Only art that would need to upscale past
-    // SharpUpscaleLimit to cover this is blurred; typical album art (300-640px) fills sharp.
+    // SharpUpscaleLimit to cover this is frosted; typical album art (300-640px) fills sharp.
     private const double TargetPhysicalWidth = 480;
     private const double SharpUpscaleLimit = 2.0;
-    private const int DownscaleWidth = 32;
     private const int CacheCap = 32;
 
     // Black-bar trim: an edge row/column counts as a bar when nearly all its pixels are near-black.
@@ -56,21 +52,20 @@ public sealed class NowPlayingArtworkService : INowPlayingArtworkService
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
-    public async Task<ProcessedArtwork> BuildAsync(byte[]? bytes, string contentHash, NowPlayingBackdropBlurMode mode)
+    public async Task<ProcessedArtwork> BuildAsync(byte[]? bytes, string contentHash)
     {
         if (bytes is null || bytes.Length == 0) return new ProcessedArtwork(null, false);
 
-        var cacheKey = $"{contentHash}|{(int)mode}";
-        if (!string.IsNullOrEmpty(contentHash) && _cache.TryGetValue(cacheKey, out var cached)) return cached;
+        if (!string.IsNullOrEmpty(contentHash) && _cache.TryGetValue(contentHash, out var cached)) return cached;
 
         ProcessedArtwork result;
         try
         {
-            result = await ProcessAsync(bytes, mode).ConfigureAwait(true);
+            result = await ProcessAsync(bytes).ConfigureAwait(true);
         }
         catch (Exception ex)
         {
-            // Decode/blur failed (corrupt or unsupported art): fall back to showing the raw bytes.
+            // Decode/crop failed (corrupt or unsupported art): fall back to showing the raw bytes.
             _logger.LogDebug(ex, "NowPlaying artwork: processing failed; showing raw");
             result = new ProcessedArtwork(await LoadRawAsync(bytes).ConfigureAwait(true), false);
         }
@@ -78,85 +73,72 @@ public sealed class NowPlayingArtworkService : INowPlayingArtworkService
         if (!string.IsNullOrEmpty(contentHash))
         {
             if (_cache.Count >= CacheCap) _cache.Clear();
-            _cache[cacheKey] = result;
+            _cache[contentHash] = result;
         }
         return result;
     }
 
-    private async Task<ProcessedArtwork> ProcessAsync(byte[] bytes, NowPlayingBackdropBlurMode mode)
+    private async Task<ProcessedArtwork> ProcessAsync(byte[] bytes)
     {
-        var device = CanvasDevice.GetSharedDevice();
         using var stream = new InMemoryRandomAccessStream();
         await stream.WriteAsync(bytes.AsBuffer());
         stream.Seek(0);
-        using var source = await CanvasBitmap.LoadAsync(device, stream);
+        var decoder = await BitmapDecoder.CreateAsync(stream);
 
-        var fullW = (int)source.SizeInPixels.Width;
-        var fullH = (int)source.SizeInPixels.Height;
-        var pixels = source.GetPixelBytes();
+        var fullW = (int)decoder.PixelWidth;
+        var fullH = (int)decoder.PixelHeight;
+
+        // Ignore EXIF orientation so the returned buffer's layout matches PixelWidth/PixelHeight (album
+        // art is virtually never oriented; respecting it would swap the dimensions out from under the trim).
+        var pixelData = await decoder.GetPixelDataAsync(
+            BitmapPixelFormat.Bgra8,
+            BitmapAlphaMode.Premultiplied,
+            new BitmapTransform(),
+            ExifOrientationMode.IgnoreExifOrientation,
+            ColorManagementMode.DoNotColorManage);
+        var pixels = pixelData.DetachPixelData();
+
         var crop = DetectContentBounds(pixels, fullW, fullH);
-        var srcRect = new Rect(crop.X, crop.Y, crop.Width, crop.Height);
 
         var upscale = crop.Width > 0 ? TargetPhysicalWidth / crop.Width : double.MaxValue;
-        var sharp = upscale <= SharpUpscaleLimit;
+        var frosted = upscale > SharpUpscaleLimit;
         _logger.LogInformation(
-            "NowPlaying artwork: source={FullW}x{FullH} content={CropW}x{CropH} upscale={Upscale:0.00} sharp={Sharp} mode={Mode}",
-            fullW, fullH, crop.Width, crop.Height, upscale, sharp, mode);
+            "NowPlaying artwork: source={FullW}x{FullH} content={CropW}x{CropH} upscale={Upscale:0.00} frosted={Frosted}",
+            fullW, fullH, crop.Width, crop.Height, upscale, frosted);
 
-        ImageSource image = sharp
-            ? RenderToImageSource(device, source, srcRect, (int)crop.Width, (int)crop.Height, blur: null)
-            : mode == NowPlayingBackdropBlurMode.Downscale
-                ? RenderDownscale(device, source, srcRect, (int)crop.Width, (int)crop.Height)
-                : RenderToImageSource(device, source, srcRect, (int)crop.Width, (int)crop.Height, blur: BlurAmountFor((int)crop.Width));
-
-        return new ProcessedArtwork(image, !sharp);
+        var image = await CropToImageSourceAsync(pixels, fullW, fullH, crop).ConfigureAwait(true);
+        return new ProcessedArtwork(image, frosted);
     }
 
-    /// <summary>Renders the cropped source (optionally Gaussian-blurred) into a render target at the
-    /// crop's native size, returning a software-bitmap-backed image source.</summary>
-    private static SoftwareBitmapSource RenderToImageSource(CanvasDevice device, CanvasBitmap source, Rect srcRect, int w, int h, float? blur)
+    /// <summary>Copies the content rectangle out of the full BGRA buffer into a tightly-packed
+    /// software-bitmap-backed image source. No GPU work: the strip's UniformToFill (and, when frosted,
+    /// the acrylic overlay) does the upscale and blur.</summary>
+    private static async Task<ImageSource> CropToImageSourceAsync(byte[] bgra, int fullW, int fullH, BitmapBounds crop)
     {
-        using var target = new CanvasRenderTarget(device, w, h, 96);
-        using (var ds = target.CreateDrawingSession())
+        var w = (int)crop.Width;
+        var h = (int)crop.Height;
+
+        byte[] cropped;
+        if (crop.X == 0 && crop.Y == 0 && w == fullW && h == fullH)
         {
-            if (blur is { } amount)
+            cropped = bgra;
+        }
+        else
+        {
+            cropped = new byte[w * h * 4];
+            var srcStride = fullW * 4;
+            var dstStride = w * 4;
+            for (var row = 0; row < h; row++)
             {
-                using var crop = new CropEffect { Source = source, SourceRectangle = srcRect };
-                using var effect = new GaussianBlurEffect { Source = crop, BlurAmount = amount, BorderMode = EffectBorderMode.Hard };
-                ds.DrawImage(effect, new Rect(0, 0, w, h), srcRect);
-            }
-            else
-            {
-                ds.DrawImage(source, new Rect(0, 0, w, h), srcRect);
+                Array.Copy(bgra, ((int)crop.Y + row) * srcStride + ((int)crop.X * 4), cropped, row * dstStride, dstStride);
             }
         }
-        return SoftwareBitmapFrom(target, w, h);
-    }
 
-    /// <summary>Cheap soft-fill: draw the cropped source into a tiny target with linear sampling; the
-    /// strip's UniformToFill then upscales it into a soft blur, no GPU effect graph.</summary>
-    private static SoftwareBitmapSource RenderDownscale(CanvasDevice device, CanvasBitmap source, Rect srcRect, int w, int h)
-    {
-        var smallW = Math.Min(DownscaleWidth, w);
-        var smallH = Math.Max(1, (int)Math.Round(smallW * (double)h / Math.Max(1, w)));
-        using var target = new CanvasRenderTarget(device, smallW, smallH, 96);
-        using (var ds = target.CreateDrawingSession())
-        {
-            ds.DrawImage(source, new Rect(0, 0, smallW, smallH), srcRect, 1f, CanvasImageInterpolation.Linear);
-        }
-        return SoftwareBitmapFrom(target, smallW, smallH);
-    }
-
-    private static SoftwareBitmapSource SoftwareBitmapFrom(CanvasRenderTarget target, int w, int h)
-    {
-        var bytes = target.GetPixelBytes();
-        var bitmap = SoftwareBitmap.CreateCopyFromBuffer(bytes.AsBuffer(), BitmapPixelFormat.Bgra8, w, h, BitmapAlphaMode.Premultiplied);
+        var bitmap = SoftwareBitmap.CreateCopyFromBuffer(cropped.AsBuffer(), BitmapPixelFormat.Bgra8, w, h, BitmapAlphaMode.Premultiplied);
         var imageSource = new SoftwareBitmapSource();
-        _ = imageSource.SetBitmapAsync(bitmap); // fire-and-forget: the source paints once the copy lands
+        await imageSource.SetBitmapAsync(bitmap);
         return imageSource;
     }
-
-    private static float BlurAmountFor(int sourceWidth) => (float)Math.Clamp(sourceWidth / 40.0, 6.0, 24.0);
 
     /// <summary>Finds the non-black content rectangle by walking in from each edge while the edge
     /// row/column is (almost) entirely near-black. Capped so it can never eat real content; returns the

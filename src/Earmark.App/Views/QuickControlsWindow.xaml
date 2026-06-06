@@ -10,15 +10,41 @@
     <Border x:Name="Root"
             Background="Transparent"
             IsTabStop="True">
+        <Border.RenderTransform>
+            <CompositeTransform x:Name="RootTransform" />
+        </Border.RenderTransform>
         <Border.Resources>
+            <Storyboard x:Name="ShowAnimation">
+                <!-- Fade the solid Mica-coloured cover out (not the content in): the first visible frame
+                     is the backdrop colour, never the black of a backdrop that hasn't composited yet. -->
+                <DoubleAnimation Storyboard.TargetName="RevealCover"
+                                 Storyboard.TargetProperty="Opacity"
+                                 From="1" To="0" Duration="0:0:0.25">
+                    <DoubleAnimation.EasingFunction>
+                        <CubicEase EasingMode="EaseOut" />
+                    </DoubleAnimation.EasingFunction>
+                </DoubleAnimation>
+                <DoubleAnimation Storyboard.TargetName="RootTransform"
+                                 Storyboard.TargetProperty="TranslateX"
+                                 From="12" To="0" Duration="0:0:0.25">
+                    <DoubleAnimation.EasingFunction>
+                        <CubicEase EasingMode="EaseOut" />
+                    </DoubleAnimation.EasingFunction>
+                </DoubleAnimation>
+            </Storyboard>
             <!-- Compact card: the shared DeviceCardView with rules suppressed for the flyout. -->
             <DataTemplate x:Key="QuickCardTemplate" x:DataType="vm:DeviceCard">
-                <Border Style="{StaticResource SectionCardStyle}" Padding="0">
+                <Border Style="{StaticResource SectionCardStyle}"
+                        Padding="0"
+                        Opacity="{x:Bind CardOpacity, Mode=OneWay}">
                     <controls:DeviceCardView Card="{x:Bind}" ShowRules="False" />
                 </Border>
             </DataTemplate>
 
-            <!-- Compact group: an optional title over a vertical stack of member cards. -->
+            <!-- Compact group: an optional title over a vertical stack of member cards. A plain
+                 ItemsControl (not a virtualizing ItemsRepeater): the member count is tiny, and a
+                 virtualized inner list estimates off-screen rows at display time, inflating the scroll
+                 extent (phantom whitespace + a stray recycled card) past the real content. -->
             <DataTemplate x:Key="QuickGroupTemplate" x:DataType="vm:DeviceGroupCard">
                 <StackPanel Spacing="8">
                     <TextBlock Text="{x:Bind Title, Mode=OneWay}"
@@ -27,12 +53,22 @@
                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                TextTrimming="CharacterEllipsis"
                                Visibility="{x:Bind TitleVisibility, Mode=OneWay}" />
-                    <ItemsRepeater ItemsSource="{x:Bind Members, Mode=OneWay}"
-                                   ItemTemplate="{StaticResource QuickCardTemplate}">
-                        <ItemsRepeater.Layout>
-                            <StackLayout Spacing="8" />
-                        </ItemsRepeater.Layout>
-                    </ItemsRepeater>
+                    <ItemsControl ItemsSource="{x:Bind Members, Mode=OneWay}"
+                                  ItemTemplate="{StaticResource QuickCardTemplate}"
+                                  HorizontalAlignment="Stretch"
+                                  HorizontalContentAlignment="Stretch">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <StackPanel Spacing="8" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemContainerStyle>
+                            <Style TargetType="ContentPresenter">
+                                <Setter Property="HorizontalAlignment" Value="Stretch" />
+                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                            </Style>
+                        </ItemsControl.ItemContainerStyle>
+                    </ItemsControl>
                 </StackPanel>
             </DataTemplate>
 
@@ -46,12 +82,15 @@
                     Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
                     Visibility="Collapsed" />
 
-            <ScrollViewer x:Name="Scroller"
-                          Margin="12"
-                          VerticalScrollBarVisibility="Auto"
-                          HorizontalScrollBarVisibility="Disabled"
-                          IsScrollInertiaEnabled="False"
-                          Background="Transparent">
+            <!-- ScrollView (not ScrollViewer): InteractionTracker-based, so the mouse wheel animates
+                 smoothly out of the box. It fills the window so its scrollbar rides the window edge;
+                 the 12px content inset lives in Padding, leaving a gutter the scrollbar overlays
+                 instead of the cards. -->
+            <ScrollView x:Name="Scroller"
+                        Padding="12"
+                        VerticalScrollBarVisibility="Auto"
+                        ContentOrientation="Vertical"
+                        Background="Transparent">
                 <ItemsRepeater x:Name="Repeater">
                     <ItemsRepeater.Layout>
                         <StackLayout Spacing="12" />
@@ -60,7 +99,14 @@
                         <StaticResource ResourceKey="QuickBlockTemplateSelector" />
                     </ItemsRepeater.ItemTemplate>
                 </ItemsRepeater>
-            </ScrollViewer>
+            </ScrollView>
+
+            <!-- Opaque Mica-coloured cover, on top, faded out by ShowAnimation. Masks the brief black
+                 frame while the system backdrop composites on first show. -->
+            <Border x:Name="RevealCover"
+                    Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+                    IsHitTestVisible="False"
+                    Opacity="0" />
         </Grid>
     </Border>
 </Window>

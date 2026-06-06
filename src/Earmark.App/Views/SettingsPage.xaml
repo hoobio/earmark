@@ -41,7 +41,7 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <TextBlock Text="Settings" Style="{StaticResource PageHeaderTextStyle}" Margin="0,12,0,16" />
+        <TextBlock Text="Settings" Style="{StaticResource PageHeaderTextStyle}" Margin="0,0,0,16" />
 
         <ScrollViewer Grid.Row="1" Padding="0,0,16,0">
             <StackPanel Spacing="{StaticResource SpacingXSmall}" MaxWidth="720" HorizontalAlignment="Stretch">
@@ -127,6 +127,14 @@
                     </ctrl:SettingsCard.HeaderIcon>
                     <ToggleSwitch IsOn="{x:Bind ViewModel.ShowRules, Mode=TwoWay}" />
                 </ctrl:SettingsCard>
+                <InfoBar IsOpen="{x:Bind ViewModel.HasRulesOverrides, Mode=OneWay}" IsClosable="False"
+                         Severity="Informational" Margin="0,4,0,0"
+                         Message="{x:Bind ViewModel.RulesOverrideMessage, Mode=OneWay}"
+                         ToolTipService.ToolTip="{x:Bind ViewModel.RulesOverrideTooltip, Mode=OneWay}">
+                    <InfoBar.ActionButton>
+                        <Button Content="Clear overrides" Command="{x:Bind ViewModel.ClearRulesOverridesCommand}" />
+                    </InfoBar.ActionButton>
+                </InfoBar>
                 <ctrl:SettingsExpander Header="App indicators"
                                        Description="Show a chip for each app playing through a device, on that device's card. Drag a chip onto another card to reroute the app."
                                        IsExpanded="{x:Bind ViewModel.ShowAppIndicators, Mode=OneWay}">
@@ -169,6 +177,23 @@
                         </ctrl:SettingsCard>
                     </ctrl:SettingsExpander.Items>
                 </ctrl:SettingsExpander>
+                <InfoBar IsOpen="{x:Bind ViewModel.HasAppIndicatorsOverrides, Mode=OneWay}" IsClosable="False"
+                         Severity="Informational" Margin="0,4,0,0"
+                         Message="{x:Bind ViewModel.AppIndicatorsOverrideMessage, Mode=OneWay}"
+                         ToolTipService.ToolTip="{x:Bind ViewModel.AppIndicatorsOverrideTooltip, Mode=OneWay}">
+                    <InfoBar.ActionButton>
+                        <Button Content="Clear overrides" Command="{x:Bind ViewModel.ClearAppIndicatorsOverridesCommand}" />
+                    </InfoBar.ActionButton>
+                </InfoBar>
+                <InfoBar IsOpen="{x:Bind ViewModel.HasAppMetersOverrides, Mode=OneWay}" IsClosable="False"
+                         Severity="Informational" Margin="0,4,0,0"
+                         Title="Volume meters"
+                         Message="{x:Bind ViewModel.AppMetersOverrideMessage, Mode=OneWay}"
+                         ToolTipService.ToolTip="{x:Bind ViewModel.AppMetersOverrideTooltip, Mode=OneWay}">
+                    <InfoBar.ActionButton>
+                        <Button Content="Clear overrides" Command="{x:Bind ViewModel.ClearAppMetersOverridesCommand}" />
+                    </InfoBar.ActionButton>
+                </InfoBar>
 
                 <ctrl:SettingsExpander Header="Now playing"
                                        Description="Show a media strip on a device's card when an app playing through it exposes track info (title, artwork, transport controls) to Windows. The app's chip moves into the strip."
@@ -178,14 +203,6 @@
                     </ctrl:SettingsExpander.HeaderIcon>
                     <ToggleSwitch IsOn="{x:Bind ViewModel.ShowNowPlaying, Mode=TwoWay}" />
                     <ctrl:SettingsExpander.Items>
-                        <ctrl:SettingsCard Header="Low-res artwork blur"
-                                           Description="How small album art is blurred to fill the strip's backdrop. High-resolution art always fills sharp. Gaussian is a true blur; Downscale is a cheaper soft fill."
-                                           IsEnabled="{x:Bind ViewModel.NowPlayingChildrenEnabled, Mode=OneWay}">
-                            <ComboBox SelectedIndex="{x:Bind ViewModel.NowPlayingBlurIndex, Mode=TwoWay}" MinWidth="150">
-                                <ComboBoxItem Content="Gaussian" />
-                                <ComboBoxItem Content="Downscale" />
-                            </ComboBox>
-                        </ctrl:SettingsCard>
                         <ctrl:SettingsCard Header="Fill card background"
                                            Description="Also use the artwork as a dimmed background across the whole device card. When a card has several playing apps, the primary one wins."
                                            IsEnabled="{x:Bind ViewModel.NowPlayingChildrenEnabled, Mode=OneWay}">
@@ -193,6 +210,23 @@
                         </ctrl:SettingsCard>
                     </ctrl:SettingsExpander.Items>
                 </ctrl:SettingsExpander>
+                <InfoBar IsOpen="{x:Bind ViewModel.HasNowPlayingOverrides, Mode=OneWay}" IsClosable="False"
+                         Severity="Informational" Margin="0,4,0,0"
+                         Message="{x:Bind ViewModel.NowPlayingOverrideMessage, Mode=OneWay}"
+                         ToolTipService.ToolTip="{x:Bind ViewModel.NowPlayingOverrideTooltip, Mode=OneWay}">
+                    <InfoBar.ActionButton>
+                        <Button Content="Clear overrides" Command="{x:Bind ViewModel.ClearNowPlayingOverridesCommand}" />
+                    </InfoBar.ActionButton>
+                </InfoBar>
+                <InfoBar IsOpen="{x:Bind ViewModel.HasNowPlayingFillOverrides, Mode=OneWay}" IsClosable="False"
+                         Severity="Informational" Margin="0,4,0,0"
+                         Title="Fill card background"
+                         Message="{x:Bind ViewModel.NowPlayingFillOverrideMessage, Mode=OneWay}"
+                         ToolTipService.ToolTip="{x:Bind ViewModel.NowPlayingFillOverrideTooltip, Mode=OneWay}">
+                    <InfoBar.ActionButton>
+                        <Button Content="Clear overrides" Command="{x:Bind ViewModel.ClearNowPlayingFillOverridesCommand}" />
+                    </InfoBar.ActionButton>
+                </InfoBar>
 
                 <ctrl:SettingsExpander Header="Peak meter"
                                        Description="The level meter behind each device's volume slider. Off hides it and shows a plain slider.">
@@ -242,6 +276,24 @@
                         </ctrl:SettingsCard>
                     </ctrl:SettingsExpander.Items>
                 </ctrl:SettingsExpander>
+                <InfoBar IsOpen="{x:Bind ViewModel.HasMeterEnabledOverrides, Mode=OneWay}" IsClosable="False"
+                         Severity="Informational" Margin="0,4,0,0"
+                         Title="Peak meter"
+                         Message="{x:Bind ViewModel.MeterEnabledOverrideMessage, Mode=OneWay}"
+                         ToolTipService.ToolTip="{x:Bind ViewModel.MeterEnabledOverrideTooltip, Mode=OneWay}">
+                    <InfoBar.ActionButton>
+                        <Button Content="Clear overrides" Command="{x:Bind ViewModel.ClearMeterEnabledOverridesCommand}" />
+                    </InfoBar.ActionButton>
+                </InfoBar>
+                <InfoBar IsOpen="{x:Bind ViewModel.HasPeakIndicatorOverrides, Mode=OneWay}" IsClosable="False"
+                         Severity="Informational" Margin="0,4,0,0"
+                         Title="Peak-hold tick"
+                         Message="{x:Bind ViewModel.PeakIndicatorOverrideMessage, Mode=OneWay}"
+                         ToolTipService.ToolTip="{x:Bind ViewModel.PeakIndicatorOverrideTooltip, Mode=OneWay}">
+                    <InfoBar.ActionButton>
+                        <Button Content="Clear overrides" Command="{x:Bind ViewModel.ClearPeakIndicatorOverridesCommand}" />
+                    </InfoBar.ActionButton>
+                </InfoBar>
 
                 <ctrl:SettingsCard Header="Reset Devices page"
                                    Description="Restore the default device groups, order, and visibility, and un-hide any hidden app chips. Asks for confirmation first. Your rules and other settings aren't changed.">

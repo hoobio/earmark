@@ -87,9 +87,11 @@ public sealed class BlockWrapLayout : VirtualizingLayout
     /// left-aligned member-extent box for a group section. Used for join / create / leave intent.</summary>
     private Rect[] _contentRects = [];
 
-    /// <summary>Last stretch-eligible (collapsed) height measured for each block, keyed by the block's
-    /// view-model item. When a card opts out of the row baseline (its rules panel expands) it keeps
-    /// holding the baseline at this remembered height, so a shorter sibling doesn't shrink on expand.</summary>
+    /// <summary>The height each block last occupied while stretch-eligible (the row baseline it was
+    /// arranged at, which may exceed its own content when it was stretched up to a bigger sibling),
+    /// keyed by the block's view-model item. When a card opts out of the row baseline (its rules panel
+    /// expands) this height becomes its floor: it grows to fit the expanded rules but never shrinks
+    /// below the height it held pre-expansion, and it keeps the row baseline up for shorter siblings.</summary>
     private readonly Dictionary<object, double> _baselineHeights = new();
 
     /// <summary>Lift block <paramref name="draggedIndex"/> and re-insert it at <paramref name="gapIndex"/>
@@ -238,37 +240,50 @@ public sealed class BlockWrapLayout : VirtualizingLayout
             // Row height: baseline = tallest stretch-eligible block (a plain lone card); a group
             // section or a custom-sized card keeps its own height. A group always sits alone on its
             // row, so there's no cross-block title-band alignment to do here.
+            //
+            // Pass 1: measure desired heights and settle the baseline. A stretch-eligible block raises
+            // it to its own height; a block that has opted out (rules panel expanded) instead holds the
+            // baseline at the height it last occupied while stretched, so a shorter sibling doesn't
+            // shrink the moment this one expands.
             var baseline = 0.0;
-            var rowTotal = 0.0;
             foreach (var slot in rowSlots)
             {
                 var element = context.GetOrCreateElementAt(order[slot]);
                 element.Measure(new Size(rects[slot].Width, double.PositiveInfinity));
-                var h = element.DesiredSize.Height;
-                if (h > rowTotal) rowTotal = h;
                 var item = context.GetItemAt(order[slot]);
                 if (Info(context, order[slot])?.StretchToRowHeight ?? true)
                 {
-                    // A stretch-eligible block (a plain lone card) sets the baseline at its real height,
-                    // and we remember that height keyed by the block so it can keep holding the baseline
-                    // after it opts out (below).
-                    if (item is not null) _baselineHeights[item] = h;
-                    if (h > baseline) baseline = h;
+                    if (element.DesiredSize.Height > baseline) baseline = element.DesiredSize.Height;
                 }
-                else if (item is not null && _baselineHeights.TryGetValue(item, out var collapsed) && collapsed > baseline)
+                else if (item is not null && _baselineHeights.TryGetValue(item, out var held) && held > baseline)
                 {
-                    // A custom-sized block (e.g. a card with its rules panel expanded) keeps its own
-                    // taller height but still contributes its LAST stretch height to the baseline, so a
-                    // shorter sibling in the row doesn't shrink the moment this one expands.
-                    baseline = collapsed;
+                    baseline = held;
                 }
             }
-            if (baseline == 0) baseline = rowTotal;
 
+            // Pass 2: settle each block's arranged height. A stretch-eligible block takes the baseline,
+            // and we remember THAT (the height it actually occupies, which may be taller than its own
+            // content when stretched up to a bigger sibling) keyed by the block. A block that has opted
+            // out takes max(own content, its remembered stretched height): it grows to fit the expanded
+            // rules but never shrinks below the height it held before expanding - that height is its
+            // floor. rowTotal tracks the tallest arranged block so the next row clears it.
+            var rowTotal = 0.0;
             foreach (var slot in rowSlots)
             {
-                var stretch = Info(context, order[slot])?.StretchToRowHeight ?? true;
-                var h = stretch ? baseline : context.GetOrCreateElementAt(order[slot]).DesiredSize.Height;
+                var element = context.GetOrCreateElementAt(order[slot]);
+                var item = context.GetItemAt(order[slot]);
+                double h;
+                if (Info(context, order[slot])?.StretchToRowHeight ?? true)
+                {
+                    h = baseline > 0 ? baseline : element.DesiredSize.Height;
+                    if (item is not null) _baselineHeights[item] = h;
+                }
+                else
+                {
+                    h = element.DesiredSize.Height;
+                    if (item is not null && _baselineHeights.TryGetValue(item, out var floor) && floor > h) h = floor;
+                }
+                if (h > rowTotal) rowTotal = h;
                 var r = rects[slot];
                 rects[slot] = new Rect(r.X, r.Y, r.Width, h);
             }

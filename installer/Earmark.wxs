@@ -27,26 +27,62 @@
      xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui"
      xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
 
-  <?if $(var.Platform) = "ARM64" ?>
-    <?define UpgradeCodeGuid = "9F3A1E8B-2C7D-4A41-B6E5-1D8F0C9A7B22" ?>
-    <?define ShortcutGuid = "C13B7AE6-4F2E-4B0A-A4D7-7E8C1A5B9D31" ?>
-    <?define PlatformLabel = "ARM64" ?>
+  <!--
+    Build channel (Release / Prerelease / Dev), read from the EARMARK_CHANNEL environment variable
+    the build pipeline exports before invoking wix. Defaults to Release for a local build that
+    doesn't set it. Each channel installs as its own product - distinct UpgradeCode, ARP name,
+    install folder, and per-user registry key - so Dev / Prerelease / Release coexist side by side
+    and each shows separately in Add/Remove Programs.
+  -->
+  <?ifndef env.EARMARK_CHANNEL ?>
+    <?define Channel = "Release" ?>
   <?else?>
-    <?define UpgradeCodeGuid = "755F033C-94B7-466F-B5FA-2BFAEADADDA0" ?>
-    <?define ShortcutGuid = "2E5E5C30-4A8E-4B1E-8E13-9D9B1B5C6F70" ?>
+    <?define Channel = "$(env.EARMARK_CHANNEL)" ?>
+  <?endif?>
+
+  <?if $(var.Channel) = "Dev" ?>
+    <?define ChannelLabel = " (Dev)" ?>
+    <?define ChannelKey = "\Dev" ?>
+  <?elseif $(var.Channel) = "Prerelease" ?>
+    <?define ChannelLabel = " (Prerelease)" ?>
+    <?define ChannelKey = "\Prerelease" ?>
+  <?else?>
+    <?define ChannelLabel = "" ?>
+    <?define ChannelKey = "" ?>
+  <?endif?>
+
+  <!-- UpgradeCode is stable per (channel, architecture): a newer MSI of the same channel/arch
+       upgrades its own installed product, never another channel's. -->
+  <?if $(var.Platform) = "ARM64" ?>
+    <?define PlatformLabel = "ARM64" ?>
+    <?if $(var.Channel) = "Dev" ?>
+      <?define UpgradeCodeGuid = "94539874-84E3-422D-B95B-779CE40CB361" ?>
+    <?elseif $(var.Channel) = "Prerelease" ?>
+      <?define UpgradeCodeGuid = "F9A1862A-42E2-40E1-8EB8-1D15FD1E213E" ?>
+    <?else?>
+      <?define UpgradeCodeGuid = "9F3A1E8B-2C7D-4A41-B6E5-1D8F0C9A7B22" ?>
+    <?endif?>
+  <?else?>
     <?define PlatformLabel = "x64" ?>
+    <?if $(var.Channel) = "Dev" ?>
+      <?define UpgradeCodeGuid = "61B5A1E5-4954-4DC6-B6CD-AFD0102E15C4" ?>
+    <?elseif $(var.Channel) = "Prerelease" ?>
+      <?define UpgradeCodeGuid = "D699E71F-9859-49C0-B40E-3D1C1F29F7B0" ?>
+    <?else?>
+      <?define UpgradeCodeGuid = "755F033C-94B7-466F-B5FA-2BFAEADADDA0" ?>
+    <?endif?>
   <?endif?>
 
   <Package
-      Name="Earmark"
-      Manufacturer="hoobio"
+      Name="Earmark$(var.ChannelLabel)"
+      Manufacturer="Hoobi"
       Version="$(var.Version)"
       UpgradeCode="$(var.UpgradeCodeGuid)"
       Scope="perUser"
       Compressed="yes"
       InstallerVersion="500">
 
-    <SummaryInformation Description="Earmark $(var.PlatformLabel) installer" />
+    <SummaryInformation Description="Earmark$(var.ChannelLabel) $(var.PlatformLabel) installer" />
 
     <MajorUpgrade
         DowngradeErrorMessage="A newer version of Earmark is already installed."
@@ -81,20 +117,22 @@
 
 
     <StandardDirectory Id="LocalAppDataFolder">
-      <Directory Id="INSTALLFOLDER" Name="Earmark" />
+      <Directory Id="INSTALLFOLDER" Name="Earmark$(var.ChannelLabel)" />
     </StandardDirectory>
 
     <StandardDirectory Id="ProgramMenuFolder">
-      <Component Id="StartMenuShortcut" Guid="$(var.ShortcutGuid)">
+      <!-- Guid="*" derives the component GUID from the (channel-specific) registry key path, so
+           each channel's shortcut component is distinct and the three coexist cleanly. -->
+      <Component Id="StartMenuShortcut" Guid="*">
         <Shortcut Id="EarmarkShortcut"
-                  Name="Earmark"
+                  Name="Earmark$(var.ChannelLabel)"
                   Description="Per-app audio routing"
                   Target="[INSTALLFOLDER]Earmark.App.exe"
                   WorkingDirectory="INSTALLFOLDER"
                   Icon="EarmarkIcon.ico"
                   IconIndex="0" />
         <RegistryValue Root="HKCU"
-                       Key="Software\hoobio\Earmark"
+                       Key="Software\hoobio\Earmark$(var.ChannelKey)"
                        Name="StartMenuShortcut"
                        Type="integer"
                        Value="1"
@@ -102,7 +140,7 @@
       </Component>
     </StandardDirectory>
 
-    <Feature Id="Main" Title="Earmark" Level="1" AllowAdvertise="no" Display="expand" ConfigurableDirectory="INSTALLFOLDER">
+    <Feature Id="Main" Title="Earmark$(var.ChannelLabel)" Level="1" AllowAdvertise="no" Display="expand" ConfigurableDirectory="INSTALLFOLDER">
       <ComponentGroupRef Id="EarmarkPayload" />
       <ComponentRef Id="StartMenuShortcut" />
     </Feature>
@@ -164,7 +202,9 @@
   -->
   <Fragment>
     <ComponentGroup Id="EarmarkPayload" Directory="INSTALLFOLDER">
-      <Component Id="EarmarkAppExeComponent" Guid="0E9B8C61-9F47-4D1F-94E6-7A2C3D5F4B82">
+      <!-- Guid="*" derives from the file's (channel-specific) install path, keeping the component
+           unique per channel so the products don't share component reference counts. -->
+      <Component Id="EarmarkAppExeComponent" Guid="*">
         <File Id="EarmarkAppExe"
               Source="$(var.PayloadDir)\Earmark.App.exe"
               KeyPath="yes" />

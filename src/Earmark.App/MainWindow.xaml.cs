@@ -7,6 +7,8 @@ using Microsoft.UI.Composition;
 using Microsoft.UI.Composition.SystemBackdrops;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
 
 using Windows.UI;
@@ -38,14 +40,20 @@ public sealed partial class MainWindow : Window, IDisposable
 
         InitializeComponent();
         ExtendsContentIntoTitleBar = true;
-        SetTitleBar(AppTitleBarDragRegion);
+        SetTitleBar(AppTitleBar);
+        AppWindow.TitleBar.PreferredHeightOption = Microsoft.UI.Windowing.TitleBarHeightOption.Tall;
         AppWindow.SetIcon("Assets/AppIcon.ico");
 
-        // The update pill must clear the system caption buttons, and reflect the update status.
-        RootGrid.SizeChanged += (_, _) => UpdateTitleBarInset();
-        RootGrid.Loaded += (_, _) => UpdateTitleBarInset();
         _update.StatusChanged += OnUpdateStatusChanged;
         OnUpdateStatusChanged(this, EventArgs.Empty);
+
+        // Drive the title-bar back button off the navigation history (pages are swapped as DI
+        // singletons, so Frame.CanGoBack never reflects real history - see NavigationService).
+        _navigation.HistoryChanged += OnNavigationHistoryChanged;
+
+        // Mouse back / forward (XButton1 / XButton2) anywhere in the window. handledEventsToo so a
+        // child that marks the press handled doesn't swallow it.
+        RootGrid.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler(OnRootPointerPressed), handledEventsToo: true);
 
         _inAppNotifications.ToastRequested += OnToastRequested;
 
@@ -71,6 +79,7 @@ public sealed partial class MainWindow : Window, IDisposable
         {
             _settings.SettingsChanged -= OnSettingsChanged;
             _update.StatusChanged -= OnUpdateStatusChanged;
+            _navigation.HistoryChanged -= OnNavigationHistoryChanged;
             _inAppNotifications.ToastRequested -= OnToastRequested;
             _toastTimer?.Stop();
             Dispose();
@@ -78,6 +87,11 @@ public sealed partial class MainWindow : Window, IDisposable
 
         _dispatcher.Register(DispatcherQueue);
         _navigation.Register(ContentFrame);
+
+        // Clicking the empty page backdrop (not a card or control) collapses the nav pane for more
+        // room. handledEventsToo so it still fires when a control marks the tap handled; the walk in
+        // OnContentFrameTapped decides whether the tap actually landed on the backdrop.
+        ContentFrame.AddHandler(UIElement.TappedEvent, new TappedEventHandler(OnContentFrameTapped), handledEventsToo: true);
 
         // Restore the persisted pane expand/collapse state once the NavView is realised (setting it
         // pre-load can be clobbered when Auto display-mode initialises). Done before the first nav so
@@ -93,6 +107,42 @@ public sealed partial class MainWindow : Window, IDisposable
         // triggers initial nav if it hasn't happened yet.
         Activated += (_, _) => _ = EnsureInitialNavigationAsync();
     }
+
+    // ---- Backdrop tap collapses the nav pane ----
+
+    private void OnContentFrameTapped(object sender, TappedRoutedEventArgs e)
+    {
+        if (!NavView.IsPaneOpen) return;
+        if (IsBackdropTap(e.OriginalSource as DependencyObject))
+        {
+            NavView.IsPaneOpen = false;
+        }
+    }
+
+    /// <summary>True when a tap landed on the empty page backdrop rather than a card or control.
+    /// Walks from the tapped element up to the content frame: a real control or an opaque card
+    /// surface in the path means content; structural hosts (Frame / Page / ScrollViewer) and
+    /// transparent layout panels are passthroughs that read as backdrop.</summary>
+    private bool IsBackdropTap(DependencyObject? source)
+    {
+        for (var node = source; node is not null && node != ContentFrame; node = VisualTreeHelper.GetParent(node))
+        {
+            switch (node)
+            {
+                case ScrollViewer or Frame or Page:
+                    continue;
+                case Control:
+                    return false;
+                case Border { Background: { } border } when IsOpaque(border):
+                    return false;
+                case Panel { Background: { } panel } when IsOpaque(panel):
+                    return false;
+            }
+        }
+        return true;
+    }
+
+    private static bool IsOpaque(Brush brush) => brush is not SolidColorBrush scb || scb.Color.A != 0;
 
     // ---- In-app toast ----
 
@@ -166,6 +216,9 @@ public sealed partial class MainWindow : Window, IDisposable
         NavigateTo(first);
         NavView.SelectedItem = first;
 
+        // Background init is done and the first page is in the frame; drop the startup skeleton.
+        LoadingOverlay.Visibility = Visibility.Collapsed;
+
         // Without this, initial focus falls on the first focusable element (the title-bar pane
         // toggle); a keyboard-initiated launch then renders its focus rectangle. Set focus to the
         // selected nav item with Programmatic state so no high-visibility ring shows on launch. If
@@ -173,7 +226,7 @@ public sealed partial class MainWindow : Window, IDisposable
         // the ring on the toggle button itself.
         if (!first.Focus(FocusState.Programmatic))
         {
-            PaneToggleButton.Focus(FocusState.Programmatic);
+            AppTitleBar.Focus(FocusState.Programmatic);
         }
     }
 
@@ -258,7 +311,7 @@ public sealed partial class MainWindow : Window, IDisposable
         ISystemBackdropControllerWithTargets? controller = mode switch
         {
             BackdropMode.Acrylic when DesktopAcrylicController.IsSupported() => new DesktopAcrylicController(),
-            BackdropMode.Mica when MicaController.IsSupported() => new MicaController { Kind = MicaKind.BaseAlt },
+            BackdropMode.Mica when MicaController.IsSupported() => new MicaController { Kind = MicaKind.Base },
             _ => null,
         };
 
@@ -316,27 +369,77 @@ public sealed partial class MainWindow : Window, IDisposable
         }
     }
 
-    private void OnPaneToggleClick(object sender, RoutedEventArgs e)
+    // The TitleBar's built-in pane toggle (waffle). Persist the explicit collapse/expand so it
+    // survives a relaunch. Fire-and-forget; the settings service serialises writes and logs
+    // failures (matches the window-size save path).
+    private void OnTitleBarPaneToggleRequested(TitleBar sender, object args)
     {
         NavView.IsPaneOpen = !NavView.IsPaneOpen;
-        // Persist the explicit collapse/expand so it survives a relaunch. Fire-and-forget; the
-        // settings service serialises writes and logs failures (matches the window-size save path).
         _settings.Current.NavigationPaneOpen = NavView.IsPaneOpen;
         _ = _settings.SaveAsync();
     }
 
-    // Reserve room for the system caption buttons so the update pill never slides under them.
-    // RightInset is in physical pixels; divide by the rasterization scale to get DIPs.
-    private void UpdateTitleBarInset()
+    private void OnTitleBarBackRequested(TitleBar sender, object args) => GoBack();
+
+    // Mouse back / forward buttons. WinUI exposes them as XButton1 (back) / XButton2 (forward).
+    private void OnRootPointerPressed(object sender, PointerRoutedEventArgs e)
     {
-        if (AppWindow?.TitleBar is not { } titleBar)
+        if (e.Pointer.PointerDeviceType != Microsoft.UI.Input.PointerDeviceType.Mouse)
         {
             return;
         }
 
-        var scale = RootGrid.XamlRoot?.RasterizationScale ?? 1.0;
-        var rightDip = scale > 0 ? titleBar.RightInset / scale : 138.0;
-        UpdateButton.Margin = new Thickness(0, 0, rightDip + 8, 0);
+        var props = e.GetCurrentPoint(RootGrid).Properties;
+        if (props.IsXButton1Pressed)
+        {
+            GoBack();
+            e.Handled = true;
+        }
+        else if (props.IsXButton2Pressed)
+        {
+            GoForward();
+            e.Handled = true;
+        }
+    }
+
+    private void GoBack() => SyncSelectionTo(_navigation.GoBack());
+
+    private void GoForward() => SyncSelectionTo(_navigation.GoForward());
+
+    // After a history navigation the content is already swapped; move the nav selection to match so
+    // the highlight tracks the page. Setting SelectedItem re-raises SelectionChanged -> NavigateTo
+    // -> Navigate, which no-ops because the frame already shows that page (so no new history entry).
+    private void SyncSelectionTo(Type? pageType)
+    {
+        if (pageType is null)
+        {
+            return;
+        }
+
+        var tag = TagForPage(pageType);
+        var target = NavView.MenuItems.Concat(NavView.FooterMenuItems)
+            .OfType<NavigationViewItem>()
+            .FirstOrDefault(i => (i.Tag as string) == tag);
+        if (target is not null && !ReferenceEquals(NavView.SelectedItem, target))
+        {
+            NavView.SelectedItem = target;
+        }
+    }
+
+    private void OnNavigationHistoryChanged(object? sender, EventArgs e)
+    {
+        // Back button stays visible at all times (hiding/showing it is jarring); just enable it
+        // when there's somewhere to go back to.
+        void Apply() => AppTitleBar.IsBackButtonEnabled = _navigation.CanGoBack;
+
+        if (DispatcherQueue.HasThreadAccess)
+        {
+            Apply();
+        }
+        else
+        {
+            DispatcherQueue.TryEnqueue(Apply);
+        }
     }
 
     private void OnUpdateStatusChanged(object? sender, EventArgs e)
@@ -388,6 +491,15 @@ public sealed partial class MainWindow : Window, IDisposable
             return;
         }
 
-        _navigation.Navigate(pageType, new DrillInNavigationTransitionInfo());
+        _navigation.Navigate(pageType);
     }
+
+    private static string? TagForPage(Type pageType) => pageType switch
+    {
+        _ when pageType == typeof(HomePage) => "Home",
+        _ when pageType == typeof(RulesPage) => "Rules",
+        _ when pageType == typeof(SessionsPage) => "Sessions",
+        _ when pageType == typeof(SettingsPage) => "Settings",
+        _ => null,
+    };
 }

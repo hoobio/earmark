@@ -9,6 +9,7 @@ internal sealed class FileLoggerProvider : ILoggerProvider
 {
     private readonly string _path;
     private readonly Lock _gate = new();
+    private readonly StreamWriter? _writer;
     private volatile LogLevel _minimumLevel = LogLevel.Information;
 
     public FileLoggerProvider(string path)
@@ -16,6 +17,19 @@ internal sealed class FileLoggerProvider : ILoggerProvider
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         _path = path;
         Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
+
+        // One held handle, flushed per write (crash-safe) but never reopened: startup at Debug
+        // emits hundreds of lines and File.AppendAllText would open/close the file on each one.
+        // FileShare.ReadWrite so the log can still be tailed while the app runs.
+        try
+        {
+            var stream = new FileStream(_path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
+            _writer = new StreamWriter(stream, Encoding.UTF8) { AutoFlush = true };
+        }
+        catch
+        {
+            // Couldn't open the log file; logging degrades to a no-op rather than crashing the app.
+        }
     }
 
     public string FilePath => _path;
@@ -29,11 +43,12 @@ internal sealed class FileLoggerProvider : ILoggerProvider
 
     internal void Append(string line)
     {
+        if (_writer is null) return;
         lock (_gate)
         {
             try
             {
-                File.AppendAllText(_path, line + Environment.NewLine, Encoding.UTF8);
+                _writer.WriteLine(line);
             }
             catch
             {
@@ -44,6 +59,10 @@ internal sealed class FileLoggerProvider : ILoggerProvider
 
     public void Dispose()
     {
+        lock (_gate)
+        {
+            _writer?.Dispose();
+        }
     }
 }
 

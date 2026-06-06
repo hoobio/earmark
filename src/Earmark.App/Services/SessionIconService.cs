@@ -33,10 +33,16 @@ internal sealed class SessionIconService : ISessionIconService
     /// VMs subscribe to invalidate their <c>Icon</c> binding without polling.</summary>
     public event Action<string, ImageSource?>? IconLoaded;
 
-    public ImageSource? TryGetIcon(uint processId, string executablePath, int sizePx = 32)
+    public ImageSource? TryGetIcon(uint processId, string executablePath, string? iconResourcePath = null, int sizePx = 32)
     {
-        if (string.IsNullOrEmpty(executablePath)) return null;
-        var key = executablePath + "|" + sizePx;
+        var hasExe = !string.IsNullOrEmpty(executablePath);
+        var hasResource = !string.IsNullOrEmpty(iconResourcePath);
+        if (!hasExe && !hasResource) return null;
+
+        // Key by the exe path when there is one (the common case); fall back to the resource
+        // reference for sessions that only expose an icon path. Either way the key is stable
+        // across the peak-tick re-polls that pick up the completed load.
+        var key = (hasExe ? executablePath : iconResourcePath!) + "|" + sizePx;
         if (_cache.TryGetValue(key, out var entry))
         {
             return entry.Icon;
@@ -48,11 +54,11 @@ internal sealed class SessionIconService : ISessionIconService
             return _cache.TryGetValue(key, out entry) ? entry.Icon : null;
         }
 
-        _ = Task.Run(() => Load(processId, executablePath, sizePx, key));
+        _ = Task.Run(() => Load(processId, executablePath, iconResourcePath, sizePx, key));
         return null;
     }
 
-    private void Load(uint processId, string path, int sizePx, string cacheKey)
+    private void Load(uint processId, string path, string? iconResourcePath, int sizePx, string cacheKey)
     {
         // File path FIRST. IShellItemImageFactory uses the shell's cache that includes
         // high-res icons that the taskbar would show (the .exe's largest embedded icon
@@ -69,12 +75,20 @@ internal sealed class SessionIconService : ISessionIconService
             source = "window";
             if (pixels is null || width <= 0 || height <= 0)
             {
-                _logger.LogInformation(
-                    "Icon load failed for pid={Pid} path={Path}: file={FileReason}, window=null",
-                    processId, path, fileFailure);
-                _cache[cacheKey] = new CacheEntry(null, Loading: false);
-                _dispatcher.Enqueue(() => IconLoaded?.Invoke(path, null));
-                return;
+                // Last resort: the session's own icon reference (IAudioSessionControl::GetIconPath).
+                // System Sounds reports "@%SystemRoot%\System32\AudioSrv.Dll,-203" - a resource the
+                // host exe (taskhostw.exe) doesn't carry, so only this route finds it.
+                pixels = TryResourcePixels(iconResourcePath, sizePx, out width, out height);
+                source = "resource";
+                if (pixels is null || width <= 0 || height <= 0)
+                {
+                    _logger.LogInformation(
+                        "Icon load failed for pid={Pid} path={Path}: file={FileReason}, window=null, resource={Resource}",
+                        processId, path, fileFailure, string.IsNullOrEmpty(iconResourcePath) ? "(none)" : iconResourcePath);
+                    _cache[cacheKey] = new CacheEntry(null, Loading: false);
+                    _dispatcher.Enqueue(() => IconLoaded?.Invoke(path, null));
+                    return;
+                }
             }
         }
         _logger.LogInformation(
@@ -351,6 +365,47 @@ internal sealed class SessionIconService : ISessionIconService
         return ExtractIconPixels(hIcon, out width, out height);
     }
 
+    /// <summary>
+    /// Resolves an icon from a shell icon-location reference - the <c>@file,-id</c> / <c>file,index</c>
+    /// form that <c>IAudioSessionControl::GetIconPath</c> hands back. Strips the leading '@', splits
+    /// the trailing index, expands environment variables (the System Sounds reference uses
+    /// <c>%SystemRoot%</c>), and extracts via PrivateExtractIcons. A negative index is a resource ID
+    /// (its absolute value) - exactly how System Sounds points at <c>AudioSrv.Dll,-203</c>.
+    /// </summary>
+    private static byte[]? TryResourcePixels(string? resourceRef, int sizePx, out int width, out int height)
+    {
+        width = 0;
+        height = 0;
+        if (string.IsNullOrWhiteSpace(resourceRef)) return null;
+
+        var raw = resourceRef.Trim();
+        if (raw.StartsWith('@')) raw = raw[1..];
+
+        var index = 0;
+        var filePart = raw;
+        var lastComma = raw.LastIndexOf(',');
+        if (lastComma >= 0 && int.TryParse(raw.AsSpan(lastComma + 1).Trim(), out var parsedIndex))
+        {
+            index = parsedIndex;
+            filePart = raw[..lastComma];
+        }
+
+        var filePath = Environment.ExpandEnvironmentVariables(filePart.Trim().Trim('"'));
+        if (string.IsNullOrEmpty(filePath) || !File.Exists(filePath)) return null;
+
+        var target = sizePx <= 20 ? 32 : 128;
+        var hIcon = TryPrivateExtractIcons(filePath, index, target);
+        if (hIcon == IntPtr.Zero) return null;
+        try
+        {
+            return ExtractIconPixels(hIcon, out width, out height);
+        }
+        finally
+        {
+            DestroyIcon(hIcon);
+        }
+    }
+
     private static IntPtr TryShellItemImage(string path, int size)
     {
         try
@@ -380,11 +435,13 @@ internal sealed class SessionIconService : ISessionIconService
         }
     }
 
-    private static IntPtr TryPrivateExtractIcons(string path, int size)
+    private static IntPtr TryPrivateExtractIcons(string path, int size) => TryPrivateExtractIcons(path, 0, size);
+
+    private static IntPtr TryPrivateExtractIcons(string path, int index, int size)
     {
         var icons = new IntPtr[1];
         var ids = new uint[1];
-        var count = PrivateExtractIcons(path, 0, size, size, icons, ids, 1, 0);
+        var count = PrivateExtractIcons(path, index, size, size, icons, ids, 1, 0);
         if (count == 0 || count == uint.MaxValue) return IntPtr.Zero;
         return icons[0];
     }

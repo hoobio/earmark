@@ -91,7 +91,7 @@ public sealed partial class QuickControlsWindow : Window
         Repeater.ItemsSource = null;
         Root.UpdateLayout();
         Repeater.ItemsSource = blocks.ToList();
-        Scroller.VerticalScrollBarVisibility = ScrollBarVisibility.Disabled;
+        Scroller.VerticalScrollBarVisibility = ScrollingScrollBarVisibility.Hidden;
         AppWindow.Resize(new SizeInt32(width, Math.Max(1, workArea.Height - (OverlayMargin * 2))));
         AppWindow.Move(new PointInt32(-40000, -40000));
 
@@ -117,8 +117,8 @@ public sealed partial class QuickControlsWindow : Window
         ConfigureWindow();
         var height = Math.Min(desiredHeight, boundedMaxHeight);
         Scroller.VerticalScrollBarVisibility = desiredHeight - boundedMaxHeight > ScrollOverflowTolerance
-            ? ScrollBarVisibility.Auto
-            : ScrollBarVisibility.Disabled;
+            ? ScrollingScrollBarVisibility.Auto
+            : ScrollingScrollBarVisibility.Hidden;
 
         AppWindow.Resize(new SizeInt32(width, height));
         AppWindow.Move(new PointInt32(left, Math.Clamp(boundedBottom - height, workTop, workBottom - height)));
@@ -128,11 +128,22 @@ public sealed partial class QuickControlsWindow : Window
 
     public void ShowPrepared()
     {
+        RevealCover.Opacity = 1;
         AppWindow.Show();
-        // Give the panel focus so the Escape accelerator has an active focus scope (the window has no
-        // title bar to take focus on its own). Pointer focus state avoids drawing the focus rectangle.
-        Root.Focus(FocusState.Pointer);
+        ShowAnimation.Begin();
         IsOpen = true;
+    }
+
+    /// <summary>Pulls this panel to the foreground and focuses it. The owning service calls this once on
+    /// the top panel after the stack is shown: a background process can't steal foreground with
+    /// Activate() alone, but the registered hotkey that opened us grants the right, so SetForegroundWindow
+    /// lands. Without an active window, a click on another app never fires Deactivated (so click-away
+    /// can't dismiss) and the Escape accelerator has no focus scope. Pointer focus skips the focus rect.</summary>
+    public void GrabForeground()
+    {
+        SetForegroundWindow(_hwnd);
+        Activate();
+        Root.Focus(FocusState.Pointer);
     }
 
     public void Hide()
@@ -213,7 +224,7 @@ public sealed partial class QuickControlsWindow : Window
         ISystemBackdropControllerWithTargets? controller = mode switch
         {
             BackdropMode.Acrylic when DesktopAcrylicController.IsSupported() => new DesktopAcrylicController(),
-            BackdropMode.Mica when MicaController.IsSupported() => new MicaController { Kind = MicaKind.BaseAlt },
+            BackdropMode.Mica when MicaController.IsSupported() => new MicaController { Kind = MicaKind.Base },
             _ => null,
         };
 
@@ -240,6 +251,13 @@ public sealed partial class QuickControlsWindow : Window
     {
         var effective = Root.RequestedTheme == ElementTheme.Default ? Root.ActualTheme : Root.RequestedTheme;
         _backdropConfig.Theme = effective == ElementTheme.Light ? SystemBackdropTheme.Light : SystemBackdropTheme.Dark;
+
+        // Match the reveal cover to the backdrop so the dissolve lands on the right colour: Acrylic
+        // settles darker and more translucent than Mica's solid base, so reuse its in-app brush.
+        RevealCover.Background = (Brush)Application.Current.Resources[
+            ResolveBackdrop() == BackdropMode.Acrylic
+                ? "AcrylicInAppFillColorDefaultBrush"
+                : "SolidBackgroundFillColorBaseBrush"];
     }
 
     private void OnRootActualThemeChanged(FrameworkElement sender, object args) => UpdateBackdropTheme();
@@ -321,6 +339,9 @@ public sealed partial class QuickControlsWindow : Window
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool SetWindowPos(nint hWnd, nint hWndInsertAfter, int x, int y, int cx, int cy, uint uFlags);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(nint hWnd);
 
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(nint hwnd, int dwAttribute, ref int pvAttribute, int cbAttribute);

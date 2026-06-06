@@ -168,11 +168,10 @@
         <!-- Full-bleed content: cards scroll up to the window title bar; loading / empty overlay it. -->
         <Grid>
             <!-- Loading: shown while the first device enumeration is in flight, so the empty
-                 state below isn't mistaken for "no devices". -->
-            <Border Style="{StaticResource SectionCardStyle}"
-                    Padding="32"
-                    Margin="{StaticResource DevicesPlaceholderMargin}"
-                    Visibility="{x:Bind ViewModel.ShowLoadingState, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
+                 state below isn't mistaken for "no devices". Full-bleed and transparent (no card
+                 chrome) so the ring sits centred on the natural page background, not an inset box -
+                 a seamless continuation of the window's startup skeleton. -->
+            <Grid Visibility="{x:Bind ViewModel.ShowLoadingState, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
                 <StackPanel Spacing="{StaticResource SpacingMedium}" HorizontalAlignment="Center" VerticalAlignment="Center">
                     <ProgressRing IsActive="{x:Bind ViewModel.ShowLoadingState, Mode=OneWay}"
                                   Width="32" Height="32" HorizontalAlignment="Center" />
@@ -180,7 +179,7 @@
                                Style="{StaticResource MutedCaptionTextStyle}"
                                HorizontalAlignment="Center" />
                 </StackPanel>
-            </Border>
+            </Grid>
 
             <!-- Empty (genuine): no devices exist at all, live or remembered. -->
             <Border Style="{StaticResource SectionCardStyle}"
@@ -233,9 +232,11 @@
                           Padding="{StaticResource DevicesScrollPadding}"
                           VerticalContentAlignment="Top">
                 <!-- Scroll content: an optional "Devices" title header (scrolls away) above the drop
-                     surface. The top inset (28) matches the side inset and is part of the scroll
-                     content, so cards rest below the title bar but scroll up flush to it. -->
-                <StackPanel Padding="0,28,0,0">
+                     surface. The top inset aligns the first content row (the "Devices" title, or the
+                     first group / card when the header is hidden) with the top of the first nav-rail
+                     item - both regions share the NavigationView's title-bar TopPadding, so this small
+                     inset is what matches the title's cap to the icon-centred nav row. -->
+                <StackPanel Padding="0">
                     <StackPanel Orientation="Horizontal" Spacing="{StaticResource SpacingSmall}" Margin="0,0,0,16"
                                 Visibility="{x:Bind ViewModel.ShowDevicesHeader, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
                         <TextBlock Text="Devices" Style="{StaticResource PageHeaderTextStyle}" />

@@ -38,88 +38,38 @@
         </DataTemplate>
     </UserControl.Resources>
 
-    <Grid>
-        <!-- Right-click anywhere on the card for show/hide, quick-pin, customise, and group actions. -->
+    <!-- Transparent background so the whole card surface is hit-test captured by this Grid: without it,
+         right-clicks landing in the gaps between child elements fall through to the host Border behind
+         (which isn't in this Grid's subtree), so ContextRequested bubbles to the page's backdrop menu
+         instead of the card menu below. -->
+    <Grid Background="Transparent">
+        <!-- Right-click anywhere on the card for show/hide, quick-pin, customise, and group actions.
+             Items are built in code-behind (OnDeviceCardFlyoutOpening -> AppendDeviceMenuItems), the
+             single source the app-chip menu also appends, so the two presentations can't drift. -->
         <Grid.ContextFlyout>
-            <MenuFlyout>
-                <MenuFlyoutItem Text="{x:Bind Card.HideToggleTooltip, Mode=OneWay}"
-                                Click="OnDeviceVisibilityClicked"
-                                Tag="{x:Bind Card}">
-                    <MenuFlyoutItem.Icon>
-                        <FontIcon Glyph="{x:Bind Card.HideToggleGlyph, Mode=OneWay}" />
-                    </MenuFlyoutItem.Icon>
-                </MenuFlyoutItem>
-                <MenuFlyoutItem Text="{x:Bind Card.QuickPinToggleLabel, Mode=OneWay}"
-                                Command="{x:Bind Card.ToggleQuickPinCommand}"
-                                Visibility="{x:Bind Card.CanQuickPin, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
-                    <MenuFlyoutItem.Icon>
-                        <FontIcon Glyph="{x:Bind Card.QuickPinToggleGlyph, Mode=OneWay}" />
-                    </MenuFlyoutItem.Icon>
-                </MenuFlyoutItem>
-                <MenuFlyoutItem Text="Customise…"
-                                Click="OnCustomiseClicked"
-                                Tag="{x:Bind Card}">
-                    <MenuFlyoutItem.Icon>
-                        <FontIcon Glyph="&#xE790;" />
-                    </MenuFlyoutItem.Icon>
-                </MenuFlyoutItem>
-                <MenuFlyoutItem Text="Forget device"
-                                Click="OnForgetDeviceClicked"
-                                Tag="{x:Bind Card}"
-                                Visibility="{x:Bind Card.ShowDisconnectedBadge, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
-                                ToolTipService.ToolTip="Stop remembering this disconnected device, clearing its saved order, group, and customisation. It returns as new if it reconnects.">
-                    <MenuFlyoutItem.Icon>
-                        <FontIcon Glyph="&#xE74D;" />
-                    </MenuFlyoutItem.Icon>
-                </MenuFlyoutItem>
-                <MenuFlyoutSeparator Visibility="{x:Bind Card.IsGroupMember, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                <MenuFlyoutItem Text="Ungroup device"
-                                Click="OnUngroupDeviceClicked"
-                                Tag="{x:Bind Card}"
-                                Visibility="{x:Bind Card.IsGroupMember, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
-                    <MenuFlyoutItem.Icon>
-                        <FontIcon Glyph="&#xF0B4;" />
-                    </MenuFlyoutItem.Icon>
-                </MenuFlyoutItem>
-                <MenuFlyoutSeparator Visibility="{x:Bind Card.IsGroupMember, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                <MenuFlyoutItem Text="Rename group"
-                                Click="OnRenameGroupClicked"
-                                Tag="{x:Bind Card}"
-                                Visibility="{x:Bind Card.IsGroupMember, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
-                    <MenuFlyoutItem.Icon>
-                        <FontIcon Glyph="&#xE8AC;" />
-                    </MenuFlyoutItem.Icon>
-                </MenuFlyoutItem>
-                <MenuFlyoutItem Text="Delete group"
-                                Click="OnUngroupAllClicked"
-                                Tag="{x:Bind Card}"
-                                Visibility="{x:Bind Card.IsGroupMember, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
-                    <MenuFlyoutItem.Resources>
-                        <SolidColorBrush x:Key="MenuFlyoutItemForeground" Color="{ThemeResource SystemFillColorCritical}" />
-                        <SolidColorBrush x:Key="MenuFlyoutItemForegroundPointerOver" Color="{ThemeResource SystemFillColorCritical}" />
-                        <SolidColorBrush x:Key="MenuFlyoutItemForegroundPressed" Color="{ThemeResource SystemFillColorCritical}" />
-                    </MenuFlyoutItem.Resources>
-                    <MenuFlyoutItem.Icon>
-                        <FontIcon Glyph="&#xE74D;" Foreground="{ThemeResource SystemFillColorCriticalBrush}" />
-                    </MenuFlyoutItem.Icon>
-                </MenuFlyoutItem>
-            </MenuFlyout>
+            <MenuFlyout Opening="OnDeviceCardFlyoutOpening" />
         </Grid.ContextFlyout>
 
         <!-- Optional now-playing card background: the primary session's artwork, dimmed behind the whole
-             card (opt-in, default off). The card's own border clips it to the rounded corners. -->
-        <Grid Visibility="{x:Bind Card.ShowCardBackground, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
-            <Border>
-                <Border.Background>
-                    <ImageBrush ImageSource="{x:Bind Card.PrimaryNowPlaying.BackdropSource, Mode=OneWay}"
-                                Stretch="UniformToFill" />
-                </Border.Background>
-            </Border>
-            <!-- Scrim so the artwork is dimmed enough for the card's text / meter / chips to stay
-                 legible. Theme-aware: darkens in dark theme, lightens in light theme, to track the
-                 themed text it sits behind. -->
-            <Border Background="{ThemeResource NowPlayingScrimBrush}" />
-        </Grid>
+             card (opt-in, default off). One rounded Border clips the whole stack (art + frost/scrim) so
+             every layer shares an identical corner: rounding each layer on its own left the acrylic's
+             corner anti-aliasing a hair short of the art's, leaking bright art pixels at the corners. -->
+        <Border CornerRadius="{StaticResource CardCornerRadius}"
+                Visibility="{x:Bind Card.ShowCardBackground, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
+            <Grid>
+                <controls:CrossfadeImage Source="{x:Bind Card.PrimaryNowPlaying.BackdropSource, Mode=OneWay}"
+                                         Stretch="UniformToFill" />
+                <!-- Frost: in-app acrylic over low-res art only (high-res fills sharp), so the compositor
+                     blurs the fill into a soft album-coloured backdrop. -->
+                <Border Background="{ThemeResource NowPlayingFrostBrush}"
+                        Visibility="{x:Bind Card.PrimaryNowPlaying.BackdropFrosted, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                <!-- Scrim for sharp (high-res) art only: dims it so the card's text / meter / chips stay
+                     legible. When the art is frosted the acrylic above already carries the theme-aware
+                     dimming, so the scrim is dropped to avoid double-darkening (washed-out art). -->
+                <Border Background="{ThemeResource NowPlayingScrimBrush}"
+                        Visibility="{x:Bind Card.PrimaryNowPlaying.BackdropFrosted, Mode=OneWay, Converter={StaticResource NegatedBooleanToVisibilityConverter}}" />
+            </Grid>
+        </Border>
 
         <!-- Muted tint fills the whole card; shown only when muted. -->
         <Border Background="{ThemeResource SystemFillColorCriticalBackgroundBrush}"
@@ -390,17 +340,22 @@
 
             <!-- Now playing: one full-bleed strip row per app on this card that exposes SMTC media info
                  (a media app reports one session even across tabs, so a browser is a single row; distinct
-                 apps each get a row). Each matched app's chip is hoisted here and hidden from the apps
-                 row. Full-bleed to the card edges; each row carries a top hairline so the first row also
-                 divides the section and extra rows are separated. Lives on the Devices page and in Quick
-                 Controls alike (independent of ShowRules). -->
-            <!-- Now playing: one full-bleed dark strip per app with a media session. No dividers around
-                 it - the dark band is its own separator; multiple rows are spaced apart. The external
-                 volume->rules divider is hidden while this shows. -->
+                 apps each get a row). Each matched app's chip is hoisted here and hidden from the apps row.
+                 In fill-card-background mode the over-art hairline below brackets the section like any other;
+                 in strip mode the band is a filled block whose own edges separate it (no bracketing
+                 hairlines - it also suppresses the divider directly below it; see DeviceCard). Lives on the
+                 Devices page and in Quick Controls alike (independent of ShowRules). -->
+            <Border Height="1" Margin="-16,0,-16,-6"
+                    Background="{ThemeResource DividerStrokeColorDefaultBrush}"
+                    Visibility="{x:Bind Card.ShowNowPlayingDivider, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
+            <!-- Bleed to the card edges (-16) but keep the natural section spacing top/bottom: with no
+                 bracketing hairlines (strip mode) the band would otherwise butt straight against the rows
+                 above/below. Zero vertical margin lets the StackPanel's 12px spacing sit it apart like every
+                 other section (no negative margin, so nothing to round at fractional DPI). -->
             <ItemsControl ItemsSource="{x:Bind Card.NowPlayingStrips, Mode=OneWay}"
                           HorizontalAlignment="Stretch"
                           HorizontalContentAlignment="Stretch"
-                          Margin="-16,0"
+                          Margin="-16,0,-16,0"
                           Visibility="{x:Bind Card.ShowNowPlaying, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
                 <ItemsControl.ItemsPanel>
                     <ItemsPanelTemplate>
@@ -421,20 +376,27 @@
                                          is on, because the whole card already shows the artwork + a single
                                          scrim; painting it again here would double up and look inconsistent. -->
                                     <Grid Visibility="{x:Bind MeterOptions.NowPlayingCardBackground, Mode=OneWay, Converter={StaticResource NegatedBooleanToVisibilityConverter}}">
-                                        <!-- Artwork backdrop painted as a Brush, not an Image element, so
-                                             it cover-fills the content height instead of inflating it. -->
-                                        <Border>
-                                            <Border.Background>
-                                                <ImageBrush ImageSource="{x:Bind BackdropSource, Mode=OneWay}"
-                                                            Stretch="UniformToFill" />
-                                            </Border.Background>
-                                        </Border>
-                                        <!-- Theme-aware scrim: keeps the card's themed text/controls legible
-                                             over the art in both light and dark. -->
-                                        <Border Background="{ThemeResource NowPlayingScrimBrush}" />
+                                        <!-- Artwork backdrop. CrossfadeImage reports zero desired size
+                                             (like a Brush) so it cover-fills the content height instead of
+                                             inflating it, and eases between artworks on a track change. -->
+                                        <controls:CrossfadeImage Source="{x:Bind BackdropSource, Mode=OneWay}"
+                                                                 Stretch="UniformToFill" />
+                                        <!-- Frost: in-app acrylic over low-res art only (high-res fills
+                                             sharp); the compositor blurs the fill, no Win2D. -->
+                                        <Border Background="{ThemeResource NowPlayingFrostBrush}"
+                                                Visibility="{x:Bind BackdropFrosted, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                                        <!-- Scrim for sharp art only: keeps the card's themed text/controls
+                                             legible. Frosted art is dimmed by the acrylic above, so the scrim
+                                             is dropped there to avoid double-darkening. -->
+                                        <Border Background="{ThemeResource NowPlayingScrimBrush}"
+                                                Visibility="{x:Bind BackdropFrosted, Mode=OneWay, Converter={StaticResource NegatedBooleanToVisibilityConverter}}" />
                                     </Grid>
 
-                                    <Grid Padding="16" ColumnSpacing="10">
+                                    <!-- Horizontal inset stays 16 so the strip content lines up with the
+                                         rest of the card. Top inset is 12 (matches the row spacing); the
+                                         bottom is trimmed to 6 because the seek slider already carries its
+                                         own height below the track, which otherwise reads as too much gap. -->
+                                    <Grid Padding="16,12,16,6" ColumnSpacing="10">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="Auto" />
@@ -539,11 +501,11 @@
                                                 Tag="{x:Bind}"
                                                 Loaded="OnSeekSliderLoaded"
                                                 Visibility="{x:Bind HasProgress, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                            <!-- Default (theme-aware, accessible) slider chrome; only the
-                                                 thumb is slimmed to suit the compact strip. -->
+                                            <!-- Default (theme-aware, accessible) slider chrome; thumb
+                                                 sized to match the volume slider for visual consistency. -->
                                             <Slider.Resources>
-                                                <x:Double x:Key="SliderHorizontalThumbWidth">12</x:Double>
-                                                <x:Double x:Key="SliderHorizontalThumbHeight">12</x:Double>
+                                                <x:Double x:Key="SliderHorizontalThumbWidth">14</x:Double>
+                                                <x:Double x:Key="SliderHorizontalThumbHeight">14</x:Double>
                                             </Slider.Resources>
                                         </Slider>
 
@@ -569,83 +531,13 @@
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
 
-            <!-- Volume -> rules divider. Hidden in the Quick Controls flyout (ShowRules=false) and while
-                 the now-playing section shows (no dividers touch the strip then). -->
+            <!-- Apps row carries the hairline above itself (section dividers on + a row present). -->
             <Border Height="1" Margin="-16,0,-16,-6"
-                    Background="{ThemeResource CardStrokeColorDefaultBrush}"
-                    Visibility="{x:Bind VolumeRulesDividerVis(ShowRules, Card.ShowVolumeDivider, Card.ShowNowPlaying), Mode=OneWay}" />
-
-            <!-- Rules section. First rule chip always visible; the chevron toggles the rest. -->
-            <StackPanel Spacing="{StaticResource SpacingXSmall}"
-                        Visibility="{x:Bind RuleVis(ShowRules, Card.ShowRulesSection), Mode=OneWay}">
-                <TextBlock Text="Rules"
-                           Style="{StaticResource CaptionTextBlockStyle}"
-                           Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
-
-                <controls:ExpanderPill Margin="0,2,0,0"
-                                       IsExpanded="{x:Bind Card.IsRulesExpanded, Mode=TwoWay}"
-                                       ChevronVisible="{x:Bind Card.HasMultipleRules, Mode=OneWay}"
-                                       ToggleTooltip="{x:Bind Card.AdditionalRulesLabel}"
-                                       ToggleOnBodyTap="False">
-                    <controls:ExpanderPill.PillContent>
-                        <Button Style="{StaticResource SubtleRuleChipButtonStyle}"
-                                Background="Transparent"
-                                Opacity="{x:Bind Card.FirstRule.Opacity, FallbackValue=1.0, Mode=OneWay}"
-                                DataContext="{x:Bind Card.FirstRule, Mode=OneWay}"
-                                Click="OnRuleChipClicked"
-                                ToolTipService.ToolTip="Open in Rules">
-                            <StackPanel Spacing="{StaticResource SpacingXXSmall}">
-                                <TextBlock Text="{x:Bind Card.FirstRule.Name, Mode=OneWay, FallbackValue=''}"
-                                           Style="{StaticResource BodyStrongTextBlockStyle}"
-                                           TextTrimming="CharacterEllipsis"
-                                           TextWrapping="NoWrap" />
-                                <StackPanel Orientation="Horizontal" Spacing="6">
-                                    <TextBlock Text="{x:Bind Card.FirstRule.StatusMessage, Mode=OneWay, FallbackValue=''}"
-                                               Style="{StaticResource CaptionTextBlockStyle}"
-                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                    <TextBlock Text="·"
-                                               Style="{StaticResource CaptionTextBlockStyle}"
-                                               Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                               Visibility="{x:Bind Card.FirstRule.HasMatchSummary, Mode=OneWay, FallbackValue=Collapsed}" />
-                                    <TextBlock Text="{x:Bind Card.FirstRule.MatchSummary, Mode=OneWay, FallbackValue=''}"
-                                               Style="{StaticResource CaptionTextBlockStyle}"
-                                               Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                               Visibility="{x:Bind Card.FirstRule.HasMatchSummary, Mode=OneWay, FallbackValue=Collapsed}" />
-                                </StackPanel>
-                            </StackPanel>
-                        </Button>
-                    </controls:ExpanderPill.PillContent>
-                </controls:ExpanderPill>
-
-                <ItemsControl ItemsSource="{x:Bind Card.AdditionalRules}"
-                              HorizontalAlignment="Stretch"
-                              HorizontalContentAlignment="Stretch"
-                              Visibility="{x:Bind Card.IsRulesExpanded, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
-                    <ItemsControl.ItemContainerStyle>
-                        <Style TargetType="ContentPresenter">
-                            <Setter Property="HorizontalAlignment" Value="Stretch" />
-                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                        </Style>
-                    </ItemsControl.ItemContainerStyle>
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate x:DataType="vm:RuleSummary">
-                            <ContentControl HorizontalAlignment="Stretch"
-                                            HorizontalContentAlignment="Stretch"
-                                            Content="{x:Bind}"
-                                            ContentTemplate="{StaticResource RuleChipTemplate}" />
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
-            </StackPanel>
-
-            <TextBlock Text="No rules target this device."
-                       Style="{StaticResource MutedCaptionTextStyle}"
-                       Visibility="{x:Bind RuleVis(ShowRules, Card.ShowNoRulesMessage), Mode=OneWay}" />
-
-            <!-- Divider between rules and apps; shows only when the apps row is present. -->
-            <Border Height="1" Margin="-16,0"
-                    Background="{ThemeResource CardStrokeColorDefaultBrush}"
-                    Visibility="{x:Bind Card.ShowAppsDivider, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                    Background="{ThemeResource DividerStrokeColorDefaultBrush}"
+                    Visibility="{x:Bind DividerOverArt(Card.ShowAppsDivider, Card.ShowCardBackground), Mode=OneWay}" />
+            <Border Height="1" Margin="-16,0,-16,-6"
+                    Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+                    Visibility="{x:Bind DividerPlain(Card.ShowAppsDivider, Card.ShowCardBackground), Mode=OneWay}" />
 
             <!-- Apps row. Each chip is the app's icon with a peak underbar; drag a chip onto another
                  render card to move the app's output there (the drop is handled by the host Border). -->
@@ -669,96 +561,10 @@
                                     AutomationProperties.Name="{x:Bind DisplayLabel, Mode=OneWay}"
                                     ToolTipService.ToolTip="{x:Bind Tooltip}"
                                     Visibility="{x:Bind IsInNowPlaying, Mode=OneWay, Converter={StaticResource NegatedBooleanToVisibilityConverter}}">
+                                <!-- Chip-specific actions (hide app, close/terminate process) plus the shared
+                                     device menu, both appended in code-behind (OnAppChipFlyoutOpening). -->
                                 <Border.ContextFlyout>
-                                    <MenuFlyout Opening="OnAppChipFlyoutOpening">
-                                        <MenuFlyoutSubItem Text="Hide this app">
-                                            <MenuFlyoutSubItem.Icon>
-                                                <FontIcon Glyph="&#xED1A;" />
-                                            </MenuFlyoutSubItem.Icon>
-                                            <MenuFlyoutItem Text="On this device"
-                                                            Command="{x:Bind HideOnDeviceCommand}"
-                                                            ToolTipService.ToolTip="Hide this app's chip on this device only; it stays on other devices. Unhide it from Settings &#x2192; App indicators." />
-                                            <MenuFlyoutItem Text="Everywhere"
-                                                            Command="{x:Bind HideCommand}"
-                                                            ToolTipService.ToolTip="Permanently hide this app's chip from every device. Unhide it from Settings &#x2192; App indicators." />
-                                        </MenuFlyoutSubItem>
-                                        <MenuFlyoutItem Text="{x:Bind CloseActionLabel, Mode=OneWay}"
-                                                        Command="{x:Bind CloseCommand}"
-                                                        IsEnabled="{x:Bind CanCloseProcess, Mode=OneWay}"
-                                                        Visibility="{x:Bind ShowProcessActions, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
-                                                        ToolTipService.ToolTip="Ask this app to close, like clicking its X (it can save or prompt first).">
-                                            <MenuFlyoutItem.Icon>
-                                                <FontIcon Glyph="&#xE711;" />
-                                            </MenuFlyoutItem.Icon>
-                                        </MenuFlyoutItem>
-                                        <MenuFlyoutItem Text="{x:Bind TerminateActionLabel, Mode=OneWay}"
-                                                        Command="{x:Bind TerminateCommand}"
-                                                        IsEnabled="{x:Bind CanControlProcess, Mode=OneWay}"
-                                                        Visibility="Collapsed"
-                                                        Tag="{x:Bind}"
-                                                        ToolTipService.ToolTip="Force this app to quit now. Unsaved work is lost.">
-                                            <MenuFlyoutItem.Resources>
-                                                <SolidColorBrush x:Key="MenuFlyoutItemForeground" Color="{ThemeResource SystemFillColorCritical}" />
-                                                <SolidColorBrush x:Key="MenuFlyoutItemForegroundPointerOver" Color="{ThemeResource SystemFillColorCritical}" />
-                                                <SolidColorBrush x:Key="MenuFlyoutItemForegroundPressed" Color="{ThemeResource SystemFillColorCritical}" />
-                                            </MenuFlyoutItem.Resources>
-                                            <MenuFlyoutItem.Icon>
-                                                <FontIcon Glyph="&#xE733;" Foreground="{ThemeResource SystemFillColorCriticalBrush}" />
-                                            </MenuFlyoutItem.Icon>
-                                        </MenuFlyoutItem>
-                                        <MenuFlyoutSeparator />
-                                        <MenuFlyoutItem Text="{x:Bind OwnerCard.HideToggleTooltip, Mode=OneWay}"
-                                                        Click="OnDeviceVisibilityClicked"
-                                                        Tag="{x:Bind OwnerCard}">
-                                            <MenuFlyoutItem.Icon>
-                                                <FontIcon Glyph="{x:Bind OwnerCard.HideToggleGlyph, Mode=OneWay}" />
-                                            </MenuFlyoutItem.Icon>
-                                        </MenuFlyoutItem>
-                                        <MenuFlyoutItem Text="{x:Bind OwnerCard.QuickPinToggleLabel, Mode=OneWay}"
-                                                        Command="{x:Bind OwnerCard.ToggleQuickPinCommand}"
-                                                        Visibility="{x:Bind OwnerCard.CanQuickPin, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                            <MenuFlyoutItem.Icon>
-                                                <FontIcon Glyph="{x:Bind OwnerCard.QuickPinToggleGlyph, Mode=OneWay}" />
-                                            </MenuFlyoutItem.Icon>
-                                        </MenuFlyoutItem>
-                                        <MenuFlyoutItem Text="{x:Bind OwnerCard.VolumeControlsToggleLabel, Mode=OneWay}"
-                                                        Command="{x:Bind OwnerCard.ToggleVolumeControlsCommand}">
-                                            <MenuFlyoutItem.Icon>
-                                                <FontIcon Glyph="{x:Bind OwnerCard.VolumeControlsToggleGlyph, Mode=OneWay}" />
-                                            </MenuFlyoutItem.Icon>
-                                        </MenuFlyoutItem>
-                                        <MenuFlyoutSeparator Visibility="{x:Bind OwnerCard.IsGroupMember, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                        <MenuFlyoutItem Text="Ungroup device"
-                                                        Click="OnUngroupDeviceClicked"
-                                                        Tag="{x:Bind OwnerCard}"
-                                                        Visibility="{x:Bind OwnerCard.IsGroupMember, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                            <MenuFlyoutItem.Icon>
-                                                <FontIcon Glyph="&#xF0B4;" />
-                                            </MenuFlyoutItem.Icon>
-                                        </MenuFlyoutItem>
-                                        <MenuFlyoutSeparator Visibility="{x:Bind OwnerCard.IsGroupMember, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                        <MenuFlyoutItem Text="Rename group"
-                                                        Click="OnRenameGroupClicked"
-                                                        Tag="{x:Bind OwnerCard}"
-                                                        Visibility="{x:Bind OwnerCard.IsGroupMember, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                            <MenuFlyoutItem.Icon>
-                                                <FontIcon Glyph="&#xE8AC;" />
-                                            </MenuFlyoutItem.Icon>
-                                        </MenuFlyoutItem>
-                                        <MenuFlyoutItem Text="Delete group"
-                                                        Click="OnUngroupAllClicked"
-                                                        Tag="{x:Bind OwnerCard}"
-                                                        Visibility="{x:Bind OwnerCard.IsGroupMember, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                            <MenuFlyoutItem.Resources>
-                                                <SolidColorBrush x:Key="MenuFlyoutItemForeground" Color="{ThemeResource SystemFillColorCritical}" />
-                                                <SolidColorBrush x:Key="MenuFlyoutItemForegroundPointerOver" Color="{ThemeResource SystemFillColorCritical}" />
-                                                <SolidColorBrush x:Key="MenuFlyoutItemForegroundPressed" Color="{ThemeResource SystemFillColorCritical}" />
-                                            </MenuFlyoutItem.Resources>
-                                            <MenuFlyoutItem.Icon>
-                                                <FontIcon Glyph="&#xE74D;" Foreground="{ThemeResource SystemFillColorCriticalBrush}" />
-                                            </MenuFlyoutItem.Icon>
-                                        </MenuFlyoutItem>
-                                    </MenuFlyout>
+                                    <MenuFlyout Opening="OnAppChipFlyoutOpening" />
                                 </Border.ContextFlyout>
                                 <Grid Opacity="{x:Bind ChipOpacity, Mode=OneWay}">
                                     <Grid.RowDefinitions>
@@ -839,6 +645,86 @@
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
             </StackPanel>
+
+            <!-- Rules block carries the hairline above itself (host ShowRules + section dividers on
+                 + the block has content - a rules list or the "no rules" message). -->
+            <Border Height="1" Margin="-16,0,-16,-6"
+                    Background="{ThemeResource DividerStrokeColorDefaultBrush}"
+                    Visibility="{x:Bind RuleDividerOverArt(ShowRules, Card.ShowRulesDivider, Card.ShowCardBackground), Mode=OneWay}" />
+            <Border Height="1" Margin="-16,0,-16,-6"
+                    Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+                    Visibility="{x:Bind RuleDividerPlain(ShowRules, Card.ShowRulesDivider, Card.ShowCardBackground), Mode=OneWay}" />
+
+            <!-- Rules section. First rule chip always visible; the chevron toggles the rest. -->
+            <StackPanel Spacing="{StaticResource SpacingXSmall}"
+                        Visibility="{x:Bind RuleVis(ShowRules, Card.ShowRulesSection), Mode=OneWay}">
+                <TextBlock Text="Rules"
+                           Style="{StaticResource CaptionTextBlockStyle}"
+                           Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+
+                <controls:ExpanderPill Margin="0,2,0,0"
+                                       IsExpanded="{x:Bind Card.IsRulesExpanded, Mode=TwoWay}"
+                                       ChevronVisible="{x:Bind Card.HasMultipleRules, Mode=OneWay}"
+                                       ToggleTooltip="{x:Bind Card.AdditionalRulesLabel}"
+                                       ToggleOnBodyTap="False">
+                    <controls:ExpanderPill.PillContent>
+                        <Button Style="{StaticResource SubtleRuleChipButtonStyle}"
+                                Background="Transparent"
+                                Opacity="{x:Bind Card.FirstRule.Opacity, FallbackValue=1.0, Mode=OneWay}"
+                                DataContext="{x:Bind Card.FirstRule, Mode=OneWay}"
+                                Click="OnRuleChipClicked"
+                                ToolTipService.ToolTip="Open in Rules">
+                            <StackPanel Spacing="{StaticResource SpacingXXSmall}">
+                                <TextBlock Text="{x:Bind Card.FirstRule.Name, Mode=OneWay, FallbackValue=''}"
+                                           Style="{StaticResource BodyStrongTextBlockStyle}"
+                                           TextTrimming="CharacterEllipsis"
+                                           TextWrapping="NoWrap" />
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <TextBlock Text="{x:Bind Card.FirstRule.StatusMessage, Mode=OneWay, FallbackValue=''}"
+                                               Style="{StaticResource CaptionTextBlockStyle}"
+                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                    <TextBlock Text="·"
+                                               Style="{StaticResource CaptionTextBlockStyle}"
+                                               Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                               Visibility="{x:Bind Card.FirstRule.HasMatchSummary, Mode=OneWay, FallbackValue=Collapsed}" />
+                                    <TextBlock Text="{x:Bind Card.FirstRule.MatchSummary, Mode=OneWay, FallbackValue=''}"
+                                               Style="{StaticResource CaptionTextBlockStyle}"
+                                               Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                               Visibility="{x:Bind Card.FirstRule.HasMatchSummary, Mode=OneWay, FallbackValue=Collapsed}" />
+                                </StackPanel>
+                            </StackPanel>
+                        </Button>
+                    </controls:ExpanderPill.PillContent>
+                </controls:ExpanderPill>
+
+                <!-- Reveal is animated in code-behind (SetRulesPanelState): MaxHeight drives the real
+                     reflow so siblings glide, opacity fades the content, an InsetClip hides the overflow
+                     while it grows. Starts Collapsed; code-behind owns Visibility from the first card bind. -->
+                <ItemsControl x:Name="AdditionalRulesPanel"
+                              ItemsSource="{x:Bind Card.AdditionalRules}"
+                              HorizontalAlignment="Stretch"
+                              HorizontalContentAlignment="Stretch"
+                              Visibility="Collapsed">
+                    <ItemsControl.ItemContainerStyle>
+                        <Style TargetType="ContentPresenter">
+                            <Setter Property="HorizontalAlignment" Value="Stretch" />
+                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                        </Style>
+                    </ItemsControl.ItemContainerStyle>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:RuleSummary">
+                            <ContentControl HorizontalAlignment="Stretch"
+                                            HorizontalContentAlignment="Stretch"
+                                            Content="{x:Bind}"
+                                            ContentTemplate="{StaticResource RuleChipTemplate}" />
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+
+            <TextBlock Text="No rules target this device."
+                       Style="{StaticResource MutedCaptionTextStyle}"
+                       Visibility="{x:Bind RuleVis(ShowRules, Card.ShowNoRulesMessage), Mode=OneWay}" />
         </StackPanel>
 
         <!-- Transient accent dotted outline shown while a drag hovers this card's centre to group. -->

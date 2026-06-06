@@ -128,13 +128,9 @@ public sealed class AppSettings
     /// strip and returns the app's chip to the regular apps row.</summary>
     public bool ShowNowPlaying { get; set; } = true;
 
-    /// <summary>How the now-playing strip blurs low-resolution artwork to fill its backdrop. High-res
-    /// art fills sharp regardless of this setting.</summary>
-    public NowPlayingBackdropBlurMode NowPlayingBackdropBlur { get; set; } = NowPlayingBackdropBlurMode.Gaussian;
-
     /// <summary>Whether the primary now-playing artwork also fills the whole device card as a dimmed
-    /// background (the playing session wins when a card has several). Default off.</summary>
-    public bool NowPlayingCardBackground { get; set; }
+    /// background (the playing session wins when a card has several). Default on.</summary>
+    public bool NowPlayingCardBackground { get; set; } = true;
 
     /// <summary>How device cards size their height within a row. <see cref="CardHeightMode.Balanced"/>
     /// (default) aligns plain cards to the row's tallest plain card while letting a card with apps /
@@ -217,11 +213,6 @@ public sealed class AppSettings
     /// </summary>
     public List<HiddenAppOnDevice> HiddenAppsOnDevice { get; set; } = new();
 
-    /// <summary>Persisted window size in physical pixels. Null until the user has resized
-    /// at least once (so first launch picks the WinUI default).</summary>
-    public int? WindowWidth { get; set; }
-    public int? WindowHeight { get; set; }
-
     /// <summary>Whether the navigation pane is expanded. Persisted so the collapse/expand state of the
     /// left sidebar survives a relaunch. Default true (expanded), matching the WinUI default.</summary>
     public bool NavigationPaneOpen { get; set; } = true;
@@ -296,11 +287,43 @@ public sealed class DeviceConfig
     /// the default tile when there is none).</summary>
     public string? AccentColour { get; set; }
 
+    // ---- Per-device display overrides ----
+    //
+    // Each mirrors a global display setting but is tri-state: null = follow the global setting,
+    // true / false = force on / off for this device alone. Resolved by the card's effective
+    // PeakMeterOptions (override ?? global). Null entries are omitted from the JSON.
+
+    /// <summary>Override for the now-playing strip (global <see cref="AppSettings.ShowNowPlaying"/>).</summary>
+    public bool? ShowNowPlaying { get; set; }
+
+    /// <summary>Override for now-playing fill-card-background vs strip-only
+    /// (global <see cref="AppSettings.NowPlayingCardBackground"/>).</summary>
+    public bool? NowPlayingFill { get; set; }
+
+    /// <summary>Override for the app-indicator chips row (global <see cref="AppSettings.ShowAppIndicators"/>).</summary>
+    public bool? ShowAppIndicators { get; set; }
+
+    /// <summary>Override for the per-chip peak-level underbar (global <see cref="AppSettings.ShowAppPeakMeters"/>).</summary>
+    public bool? ShowAppMeters { get; set; }
+
+    /// <summary>Override for the volume-slider level meter itself - on/off (global is the
+    /// <see cref="AppSettings.PeakMeterColourMode"/>: Off = meter hidden). Forcing it on while the
+    /// global mode is Off uses the Gradient style for this device.</summary>
+    public bool? MeterEnabled { get; set; }
+
+    /// <summary>Override for the volume-slider peak-hold indicator (global <see cref="AppSettings.PeakMeterShowHold"/>).</summary>
+    public bool? ShowPeakIndicator { get; set; }
+
+    /// <summary>Override for the rules section (global <see cref="AppSettings.ShowRules"/>).</summary>
+    public bool? ShowRules { get; set; }
+
     /// <summary>True when every flag is unset/false, so the entry carries no information and can be
     /// pruned from the map on save. Not serialised (it's a derived helper, not stored state).</summary>
     [JsonIgnore]
     public bool IsDefault => Hidden is not true && Pinned is not true && VolumeControlsHidden is not true
-        && PinnedToQuickControls is not true && Glyph is null && AccentColour is null;
+        && PinnedToQuickControls is not true && Glyph is null && AccentColour is null
+        && ShowNowPlaying is null && NowPlayingFill is null && ShowAppIndicators is null
+        && ShowAppMeters is null && MeterEnabled is null && ShowPeakIndicator is null && ShowRules is null;
 }
 
 /// <summary>

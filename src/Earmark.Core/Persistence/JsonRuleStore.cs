@@ -26,8 +26,11 @@ public sealed class JsonRuleStore : IRuleStore, IDisposable
         _path = path;
     }
 
+    // Fallback only: the app passes an explicit channel-aware path (see HostBuilderExtensions).
+    // Lives in %APPDATA% rather than the OneDrive-backed Documents folder. The Core layer can't
+    // know the build channel, so this base path carries no channel segment.
     public static string DefaultPath { get; } = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "Hoobi",
         "Earmark",
         "rules.json");

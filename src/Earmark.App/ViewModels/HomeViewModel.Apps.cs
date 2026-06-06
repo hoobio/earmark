@@ -33,7 +33,9 @@ public partial class HomeViewModel
         Dictionary<string, AudioSession> liveSessionByIdentity,
         bool alwaysShowPinned)
     {
-        if (card.Endpoint.Flow != EndpointFlow.Render)
+        // App chips off for this card (global off, or a per-device override forces them off): keep
+        // the row empty. Capture devices never show chips either.
+        if (card.Endpoint.Flow != EndpointFlow.Render || !card.MeterOptions.ShowAppIndicators)
         {
             if (card.Apps.Count > 0)
             {
@@ -175,7 +177,7 @@ public partial class HomeViewModel
         foreach (var add in additions.Values
             .OrderBy(a => a.Session.IsSystemSounds ? "System Sounds" : a.Session.DisplayName, StringComparer.OrdinalIgnoreCase))
         {
-            var chip = new AppChip(add.Session, card.Endpoint.Id, _iconService, _meterOptions, add.Rule, startsActive: add.Audible, ownerCard: card, onHide: HideApp, onHideOnDevice: HideAppOnDevice, onClose: CloseApp, onTerminate: TerminateApp, canControlProcess: _processControl.CanControl(add.Session.ProcessId), canCloseProcess: _processControl.CanClose(add.Session.ProcessId), isElevated: _processControl.IsElevated(add.Session.ProcessId))
+            var chip = new AppChip(add.Session, card.Endpoint.Id, _iconService, card.MeterOptions, add.Rule, startsActive: add.Audible, ownerCard: card, onHide: HideApp, onHideOnDevice: HideAppOnDevice, onClose: CloseApp, onTerminate: TerminateApp, canControlProcess: _processControl.CanControl(add.Session.ProcessId), canCloseProcess: _processControl.CanClose(add.Session.ProcessId), isElevated: _processControl.IsElevated(add.Session.ProcessId))
             {
                 RulePinnedHere = add.PinnedHere,
             };
@@ -568,11 +570,14 @@ public partial class HomeViewModel
     /// </summary>
     private void SyncNowPlaying()
     {
-        var enabled = _meterOptions.ShowNowPlaying;
-        IReadOnlyList<NowPlayingInfo> sessions = enabled ? _nowPlaying.GetSessions() : Array.Empty<NowPlayingInfo>();
+        // Fetch the SMTC snapshot once if any card shows the strip; cards with it off (global or a
+        // per-device override) get an empty match set below, which clears their strips.
+        var anyEnabled = AnyCardShowsNowPlaying;
+        IReadOnlyList<NowPlayingInfo> sessions = anyEnabled ? _nowPlaying.GetSessions() : Array.Empty<NowPlayingInfo>();
 
         foreach (var card in _allCards)
         {
+            var enabled = card.MeterOptions.ShowNowPlaying;
             var matches = new List<(AppChip Chip, NowPlayingInfo Info)>();
             if (enabled && card.Endpoint.Flow == EndpointFlow.Render)
             {
@@ -628,7 +633,7 @@ public partial class HomeViewModel
             var cur = IndexOfStrip(strips, chip);
             if (cur < 0)
             {
-                strips.Insert(Math.Min(idx, strips.Count), new NowPlayingStrip(chip, info, _nowPlaying, _nowPlayingArtwork, _meterOptions));
+                strips.Insert(Math.Min(idx, strips.Count), new NowPlayingStrip(chip, info, _nowPlaying, _nowPlayingArtwork, card.MeterOptions));
             }
             else
             {

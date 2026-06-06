@@ -40,9 +40,20 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     private readonly IEndpointWriter _writer;
     private readonly Action<DeviceCard, VisibilityState> _onVisibilityToggled;
     private readonly Action<DeviceCard> _onQuickPinToggled;
-    private readonly Action<DeviceCard> _onVolumeControlsToggled;
     private readonly Action<DeviceCard> _onCustomisationChanged;
     private readonly Action<DeviceCard> _onBluetoothToggle;
+
+    // The shared global display options (the template SyncEffectiveOptions folds this card's
+    // overrides onto), plus the six tri-state per-device overrides (null = follow global).
+    private readonly PeakMeterOptions _globalOptions;
+    private bool? _showNowPlayingOverride;
+    private bool? _nowPlayingFillOverride;
+    private bool? _showAppIndicatorsOverride;
+    private bool? _showAppMetersOverride;
+    private bool? _meterEnabledOverride;
+    private bool? _showPeakIndicatorOverride;
+    private bool? _showRulesOverride;
+
     private bool _suppressVolumeWrite;
     private float _leftHold;
     private float _rightHold;
@@ -63,7 +74,6 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         DeviceCardSnapshot snapshot,
         Action<DeviceCard, VisibilityState> onUserVisibilityToggled,
         Action<DeviceCard> onQuickPinToggled,
-        Action<DeviceCard> onVolumeControlsToggled,
         Action<DeviceCard> onCustomisationChanged,
         Action<DeviceCard> onBluetoothToggle)
     {
@@ -72,13 +82,20 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         _writer = writer;
         _onVisibilityToggled = onUserVisibilityToggled;
         _onQuickPinToggled = onQuickPinToggled;
-        _onVolumeControlsToggled = onVolumeControlsToggled;
         _onCustomisationChanged = onCustomisationChanged;
         _onBluetoothToggle = onBluetoothToggle;
         _userGlyphOverride = snapshot.UserGlyphOverride;
         _userAccent = snapshot.UserAccent;
         _userAccentNone = snapshot.UserAccentNone;
-        MeterOptions = meterOptions;
+        _globalOptions = meterOptions;
+        _showNowPlayingOverride = snapshot.ShowNowPlayingOverride;
+        _nowPlayingFillOverride = snapshot.NowPlayingFillOverride;
+        _showAppIndicatorsOverride = snapshot.ShowAppIndicatorsOverride;
+        _showAppMetersOverride = snapshot.ShowAppMetersOverride;
+        _meterEnabledOverride = snapshot.MeterEnabledOverride;
+        _showPeakIndicatorOverride = snapshot.ShowPeakIndicatorOverride;
+        _showRulesOverride = snapshot.ShowRulesOverride;
+        SyncEffectiveOptions();
         DeviceKey = snapshot.DeviceKey;
         Endpoint = snapshot.Endpoint;
         IsConnected = snapshot.IsConnected;
@@ -124,14 +141,108 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     public AudioEndpoint Endpoint { get; private set; }
     public IReadOnlyList<RuleSummary> Rules { get; private set; }
 
-    /// <summary>Shared peak-meter styling (colour mode / channels / hold), bound by the meter and
-    /// the slider layering. The same instance backs every card so a settings change applies live.</summary>
-    public PeakMeterOptions MeterOptions { get; }
+    /// <summary>This card's <b>effective</b> peak-meter / display styling: a per-card copy of the
+    /// shared global options with this device's tri-state overrides folded in (see
+    /// <see cref="SyncEffectiveOptions"/>). Bound by the meter, slider layering, app chips, and the
+    /// now-playing strip - all of which therefore honour the per-device overrides without any
+    /// binding-site changes. Re-synced from the global template whenever either changes.</summary>
+    public PeakMeterOptions MeterOptions { get; } = new();
 
-    /// <summary>Refreshes meter-style-derived bindings after <see cref="MeterOptions"/> changes.
+    /// <summary>Folds the global options plus this device's overrides into <see cref="MeterOptions"/>.
+    /// Style-only fields (colour / channels / card height / dividers / always-show-pinned) mirror the
+    /// global verbatim; the six overridable display flags resolve as <c>override ?? global</c>.</summary>
+    private void SyncEffectiveOptions()
+    {
+        var g = _globalOptions;
+        // The meter on/off override rides on the colour mode (Off = no meter). Forcing it on while
+        // the global mode is Off falls back to Gradient, since there's no per-device colour choice.
+        MeterOptions.ColourMode = _meterEnabledOverride switch
+        {
+            false => PeakMeterColourMode.Off,
+            true => g.ColourMode == PeakMeterColourMode.Off ? PeakMeterColourMode.Gradient : g.ColourMode,
+            _ => g.ColourMode,
+        };
+        MeterOptions.ChannelMode = g.ChannelMode;
+        MeterOptions.SingleColour = g.SingleColour;
+        MeterOptions.CardHeight = g.CardHeight;
+        MeterOptions.ShowCardDividers = g.ShowCardDividers;
+        MeterOptions.AlwaysShowPinnedApps = g.AlwaysShowPinnedApps;
+        MeterOptions.ShowHold = _showPeakIndicatorOverride ?? g.ShowHold;
+        MeterOptions.ShowAppIndicators = _showAppIndicatorsOverride ?? g.ShowAppIndicators;
+        MeterOptions.ShowAppMeters = _showAppMetersOverride ?? g.ShowAppMeters;
+        MeterOptions.ShowRules = _showRulesOverride ?? g.ShowRules;
+        MeterOptions.ShowNowPlaying = _showNowPlayingOverride ?? g.ShowNowPlaying;
+        MeterOptions.NowPlayingCardBackground = _nowPlayingFillOverride ?? g.NowPlayingCardBackground;
+    }
+
+    // ---- Per-device display overrides (tri-state: null = follow global) ----
+
+    /// <summary>The now-playing-strip override (null = follow the global setting).</summary>
+    public bool? ShowNowPlayingOverride => _showNowPlayingOverride;
+
+    /// <summary>The fill-card-background vs strip-only override (null = follow global).</summary>
+    public bool? NowPlayingFillOverride => _nowPlayingFillOverride;
+
+    /// <summary>The app-indicator-chips override (null = follow global).</summary>
+    public bool? ShowAppIndicatorsOverride => _showAppIndicatorsOverride;
+
+    /// <summary>The app-chip peak-meter underbar override (null = follow global).</summary>
+    public bool? ShowAppMetersOverride => _showAppMetersOverride;
+
+    /// <summary>The volume-slider level-meter on/off override (null = follow global).</summary>
+    public bool? MeterEnabledOverride => _meterEnabledOverride;
+
+    /// <summary>The volume-slider peak-hold-indicator override (null = follow global).</summary>
+    public bool? ShowPeakIndicatorOverride => _showPeakIndicatorOverride;
+
+    /// <summary>The rules-section override (null = follow global).</summary>
+    public bool? ShowRulesOverride => _showRulesOverride;
+
+    // Current global defaults for the six overridable flags, so the Customise dialog can label its
+    // "Use global (On/Off)" option with what following the global would currently do.
+    public bool GlobalShowNowPlaying => _globalOptions.ShowNowPlaying;
+    public bool GlobalNowPlayingFill => _globalOptions.NowPlayingCardBackground;
+    public bool GlobalShowAppIndicators => _globalOptions.ShowAppIndicators;
+    public bool GlobalShowAppMeters => _globalOptions.ShowAppMeters;
+    public bool GlobalMeterEnabled => _globalOptions.ShowMeter;
+    public bool GlobalShowPeakIndicator => _globalOptions.ShowHold;
+    public bool GlobalShowRules => _globalOptions.ShowRules;
+
+    /// <summary>Sets the per-device display overrides without persisting (used by the in-place
+    /// rebuild and the Settings "Clear overrides" path, which re-reads from the saved config).
+    /// Re-folds the effective options and re-raises the dependent bindings. Returns true if any
+    /// override actually changed, so the caller can decide whether to re-run the apps reconcile.</summary>
+    public bool ApplyFeatureOverrides(
+        bool? showNowPlaying, bool? nowPlayingFill, bool? showAppIndicators,
+        bool? showAppMeters, bool? meterEnabled, bool? showPeakIndicator, bool? showRules)
+    {
+        var changed =
+            _showNowPlayingOverride != showNowPlaying
+            || _nowPlayingFillOverride != nowPlayingFill
+            || _showAppIndicatorsOverride != showAppIndicators
+            || _showAppMetersOverride != showAppMeters
+            || _meterEnabledOverride != meterEnabled
+            || _showPeakIndicatorOverride != showPeakIndicator
+            || _showRulesOverride != showRules;
+        if (!changed) return false;
+
+        _showNowPlayingOverride = showNowPlaying;
+        _nowPlayingFillOverride = nowPlayingFill;
+        _showAppIndicatorsOverride = showAppIndicators;
+        _showAppMetersOverride = showAppMeters;
+        _meterEnabledOverride = meterEnabled;
+        _showPeakIndicatorOverride = showPeakIndicator;
+        _showRulesOverride = showRules;
+        NotifyMeterStyleChanged();
+        return true;
+    }
+
+    /// <summary>Refreshes meter-style-derived bindings after the global options or this card's
+    /// overrides change. Re-folds the effective options first, then re-raises the dependent flags.
     /// Called by <c>HomeViewModel</c> so cards don't each subscribe to the shared options.</summary>
     public void NotifyMeterStyleChanged()
     {
+        SyncEffectiveOptions();
         OnPropertyChanged(nameof(ChannelMeterTooltip));
         // ShowMeter feeds the row-collapse and off-mode-slider visibility.
         OnPropertyChanged(nameof(ShowVolumeRow));
@@ -146,8 +257,7 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         OnPropertyChanged(nameof(ShowNowPlaying));
         OnPropertyChanged(nameof(ShowCardBackground));
         // Section-divider toggle (and the rows they bracket) may have changed.
-        OnPropertyChanged(nameof(ShowVolumeDivider));
-        OnPropertyChanged(nameof(ShowAppsDivider));
+        NotifyDividersChanged();
     }
 
     /// <summary>
@@ -170,13 +280,29 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     [ObservableProperty]
     public partial NowPlayingStrip? PrimaryNowPlaying { get; set; }
 
-    partial void OnPrimaryNowPlayingChanged(NowPlayingStrip? value) => OnPropertyChanged(nameof(ShowCardBackground));
+    partial void OnPrimaryNowPlayingChanged(NowPlayingStrip? value)
+    {
+        // Toggling fill-card-background flips which dividers show (strip mode suppresses the band's
+        // brackets; fill mode keeps them), so re-raise them alongside the background flag.
+        OnPropertyChanged(nameof(ShowCardBackground));
+        NotifyDividersChanged();
+    }
 
     /// <summary>Raises the now-playing visibility flags after the strip collection is reconciled.</summary>
     public void NotifyNowPlayingChanged()
     {
         OnPropertyChanged(nameof(ShowNowPlaying));
         OnPropertyChanged(nameof(ShowCardBackground));
+        NotifyDividersChanged();
+    }
+
+    /// <summary>Re-raises the three section-divider flags together: they all hinge on the now-playing /
+    /// fill-mode state, so any change there flips which hairlines show.</summary>
+    private void NotifyDividersChanged()
+    {
+        OnPropertyChanged(nameof(ShowNowPlayingDivider));
+        OnPropertyChanged(nameof(ShowAppsDivider));
+        OnPropertyChanged(nameof(ShowRulesDivider));
     }
 
     /// <summary>Whether the now-playing section renders: at least one strip AND the user hasn't turned
@@ -186,6 +312,11 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     /// <summary>Whether the card paints the primary now-playing artwork as its full background: the
     /// feature and the card-background option are both on AND a primary strip exists.</summary>
     public bool ShowCardBackground => MeterOptions.ShowNowPlaying && MeterOptions.NowPlayingCardBackground && PrimaryNowPlaying is not null;
+
+    /// <summary>Whether the hairline above the now-playing section shows. Only in fill-card-background
+    /// mode: there the lighter over-art divider brackets the now-playing content like every other section.
+    /// In strip mode the band is a filled block whose own edge is the separator, so it has no top hairline.</summary>
+    public bool ShowNowPlayingDivider => MeterOptions.ShowCardDividers && ShowNowPlaying && ShowCardBackground;
 
     /// <summary>Whether any chip would actually show in the apps row (i.e. isn't currently hoisted into
     /// the now-playing strip). The matched now-playing chip is collapsed out of the row, so a card whose
@@ -227,18 +358,22 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     {
         CardHeightMode.MatchRow => false,
         CardHeightMode.Dynamic => true,
-        _ => IsRulesExpanded,
+        _ => IsRulesExpanded || IsRulesCollapsing,
     };
 
-    /// <summary>Whether the hairline between the volume row and the rules block shows: only when the
-    /// user has opted into section dividers AND the volume row above it is present, and only while
-    /// the rules section is visible.</summary>
-    public bool ShowVolumeDivider => MeterOptions.ShowCardDividers && MeterOptions.ShowRules && ShowVolumeRow;
+    /// <summary>Whether the hairline above the rules block shows: only when the user has opted into
+    /// section dividers AND the block has content (a rules list or the "no rules" message). Suppressed
+    /// only in strip mode when the now-playing band sits directly above (no apps row between), so the
+    /// band's own edge is the separator; in fill-card-background mode the lighter over-art divider is
+    /// kept. The host's own ShowRules flag (false in Quick Controls) is applied at the binding too.</summary>
+    public bool ShowRulesDivider => MeterOptions.ShowCardDividers && (ShowRulesSection || ShowNoRulesMessage)
+        && !(ShowNowPlaying && !ShowCardBackground && !ShowAppsSection);
 
-    /// <summary>Whether the hairline immediately above the apps row shows: only when the user has
-    /// opted into section dividers AND the apps row is present. This still shows when rules are
-    /// hidden so the apps row remains separated from the volume row.</summary>
-    public bool ShowAppsDivider => MeterOptions.ShowCardDividers && ShowAppsSection;
+    /// <summary>Whether the hairline above the apps row shows: only when the user has opted into section
+    /// dividers AND the apps row is present. Suppressed only in strip mode when the now-playing band sits
+    /// directly above (band edge separates); in fill-card-background mode the over-art divider is kept.</summary>
+    public bool ShowAppsDivider => MeterOptions.ShowCardDividers && ShowAppsSection
+        && (ShowCardBackground || !ShowNowPlaying);
 
     /// <summary>Tells the page that <see cref="HasApps"/> may have flipped. Raised from
     /// <c>HomeViewModel</c> after it adds/removes chips so the section visibility binding
@@ -250,6 +385,8 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         OnPropertyChanged(nameof(ShowAppsSection));
         OnPropertyChanged(nameof(IsLayoutCustomSized));
         OnPropertyChanged(nameof(ShowAppsDivider));
+        // ShowRulesDivider depends on whether an apps row sits between the band and the rules block.
+        OnPropertyChanged(nameof(ShowRulesDivider));
     }
 
     public string DisplayName => Endpoint.FriendlyName;
@@ -469,15 +606,6 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     public bool ShowVolumeLockIcon => IsVolumeLockedByRule && ShowVolumeControls;
     public bool ShowVolumeLockOverlay => IsVolumeLocked && ShowVolumeControls;
 
-    /// <summary>Context-menu label, flips with the current state.</summary>
-    public string VolumeControlsToggleLabel =>
-        IsVolumeControlsHiddenByUser ? "Show volume controls" : "Hide volume controls";
-
-    /// <summary>Context-menu glyph: speaker when controls can be shown, muted-speaker when hidden.</summary>
-    public string VolumeControlsToggleGlyph => IsVolumeControlsHiddenByUser
-        ? new string((char)0xE767, 1)   // Volume
-        : new string((char)0xE74F, 1);  // Volume Mute
-
     // ---- Reorder drag ----
     //
     // While this card is the one being dragged for a reorder it renders invisible: the OS shows a
@@ -606,6 +734,14 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     [ObservableProperty]
     public partial bool IsRulesExpanded { get; set; }
 
+    /// <summary>Set by the card view while a rules <b>collapse</b> animation is in flight. The panel is
+    /// shrinking back to zero, but the card must keep managing its own height (stay opted out of the row
+    /// baseline) until it lands - otherwise its still-tall content would inflate the baseline the instant
+    /// <see cref="IsRulesExpanded"/> flips false, yanking every sibling in the row up and back down. Folds
+    /// into <see cref="IsLayoutCustomSized"/>; not persisted.</summary>
+    [ObservableProperty]
+    public partial bool IsRulesCollapsing { get; set; }
+
     /// <summary>The first rule chip - always visible (when any rules apply at all). Sits
     /// outside the Expander so users see at-a-glance which rule is active without having
     /// to expand anything.</summary>
@@ -731,6 +867,31 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
 
     // ---- Commands & sync entry points ----
 
+    /// <summary>Refreshes rule status, match counts, and lock state from a fresh rule-summary result.
+    /// Called by the debounced in-place session reconcile so device-card rule chips stay current as
+    /// apps open/close, without a full card rebuild.</summary>
+    internal void UpdateRuleSummary(DeviceRulesSummary.Result summary)
+    {
+        IsVolumeLockedByRule = summary.VolumeLocked;
+        IsMuteLockedByRule = summary.MuteLocked;
+        RuleMutedTarget = summary.RuleMutedTarget;
+        RuleMutedSource = summary.RuleMutedSource;
+        RuleVolumeSource = summary.RuleVolumeSource;
+
+        Rules = summary.Rules;
+        AdditionalRules.Clear();
+        for (var i = 1; i < Rules.Count; i++) AdditionalRules.Add(Rules[i]);
+
+        OnPropertyChanged(nameof(HasRules));
+        OnPropertyChanged(nameof(HasNoRules));
+        OnPropertyChanged(nameof(HasMultipleRules));
+        OnPropertyChanged(nameof(ShowRulesSection));
+        OnPropertyChanged(nameof(ShowNoRulesMessage));
+        OnPropertyChanged(nameof(ShowRulesDivider));
+        OnPropertyChanged(nameof(FirstRule));
+        OnPropertyChanged(nameof(AdditionalRulesLabel));
+    }
+
     /// <summary>
     /// Updates a <b>reused</b> card instance in place from a fresh snapshot (same
     /// <see cref="DeviceKey"/>), re-raising every constructor-set binding so nothing renders stale.
@@ -775,6 +936,13 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         _userAccent = snapshot.UserAccentNone ? null : snapshot.UserAccent;
         _userAccentNone = snapshot.UserAccentNone;
 
+        // Per-device display overrides (also persist-free here): re-folds the effective options and
+        // re-raises the now-playing / apps / rules / meter bindings via NotifyMeterStyleChanged.
+        ApplyFeatureOverrides(
+            snapshot.ShowNowPlayingOverride, snapshot.NowPlayingFillOverride,
+            snapshot.ShowAppIndicatorsOverride, snapshot.ShowAppMetersOverride,
+            snapshot.MeterEnabledOverride, snapshot.ShowPeakIndicatorOverride, snapshot.ShowRulesOverride);
+
         // Endpoint-derived bindings (defaults can shift, the id can change on reinstall). The
         // observable setters above already raised their own dependents; these are the non-observable
         // (Endpoint / RuleMuted* / customisation) ones, raised explicitly.
@@ -799,6 +967,7 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         OnPropertyChanged(nameof(HasMultipleRules));
         OnPropertyChanged(nameof(ShowRulesSection));
         OnPropertyChanged(nameof(ShowNoRulesMessage));
+        OnPropertyChanged(nameof(ShowRulesDivider));
         OnPropertyChanged(nameof(FirstRule));
         OnPropertyChanged(nameof(AdditionalRulesLabel));
         OnPropertyChanged(nameof(IsVolumeEditable));
@@ -878,16 +1047,6 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
             IsHiddenByUser = false;
         }
         _onQuickPinToggled?.Invoke(this);
-    }
-
-    /// <summary>Toggles whether this device's volume slider + mute control are shown. Persisted by
-    /// the host; no undo entry (it's trivially reversed from the same menu, and the card stays
-    /// visible so nothing "disappears").</summary>
-    [RelayCommand]
-    public void ToggleVolumeControls()
-    {
-        IsVolumeControlsHiddenByUser = !IsVolumeControlsHiddenByUser;
-        _onVolumeControlsToggled?.Invoke(this);
     }
 
     /// <summary>
@@ -1076,6 +1235,11 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         OnPropertyChanged(nameof(IsLayoutCustomSized));
     }
 
+    partial void OnIsRulesCollapsingChanged(bool value)
+    {
+        OnPropertyChanged(nameof(IsLayoutCustomSized));
+    }
+
     partial void OnChannelCountChanged(int value) => OnPropertyChanged(nameof(ChannelMeterTooltip));
 
     // OnIsHiddenByUserChanged / OnIsPinnedByUserChanged do not fire the visibility callback
@@ -1119,13 +1283,10 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     {
         OnPropertyChanged(nameof(ShowVolumeControls));
         OnPropertyChanged(nameof(ShowVolumeRow));
-        OnPropertyChanged(nameof(ShowVolumeDivider));
         OnPropertyChanged(nameof(ShowPlainSlider));
         OnPropertyChanged(nameof(ShowVolumeLockIcon));
         OnPropertyChanged(nameof(ShowVolumeLockOverlay));
         OnPropertyChanged(nameof(MeterMargin));
         OnPropertyChanged(nameof(VolumeMeterColumnSpan));
-        OnPropertyChanged(nameof(VolumeControlsToggleLabel));
-        OnPropertyChanged(nameof(VolumeControlsToggleGlyph));
     }
 }

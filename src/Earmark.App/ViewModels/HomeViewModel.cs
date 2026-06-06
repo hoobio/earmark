@@ -65,7 +65,6 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     private bool? _lastShowAppIndicators;
     private bool? _lastAlwaysShowPinned;
     private bool? _lastShowNowPlaying;
-    private NowPlayingBackdropBlurMode? _lastNowPlayingBlur;
     private int? _lastHiddenAppsCount;
     private int? _lastHiddenAppsOnDeviceCount;
     /// <summary>Identity keys of apps the user has permanently hidden from the chip rows, mirrored
@@ -83,8 +82,25 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     private static readonly TimeSpan ToastRateLimit = TimeSpan.FromSeconds(15);
     private readonly Lock _gate = new();
     private readonly List<DeviceCard> _allCards = new();
+    // Reused across the 20Hz TickAppMeters pass so the tick doesn't allocate a dictionary + a
+    // per-card hash set 20x/sec. Cleared at the start of the tick / per card. UI-thread only,
+    // and DispatcherTimer ticks never overlap, so sharing these is safe.
+    private readonly Dictionary<string, List<uint>> _tickPidsByAppKey = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _tickSeenAppsOnCard = new(StringComparer.Ordinal);
     private readonly PeakMeterOptions _meterOptions = new();
     private readonly DeviceUndoStack _undoStack = new();
+
+    // Effective-flag fans across cards: true when the feature is on globally OR forced on for any
+    // device. Each card's MeterOptions already resolves override-or-global, so these just OR them.
+    // Used to decide whether the (global) build/tick passes need to run at all.
+    private bool AnyCardShowsAppIndicators
+    {
+        get { foreach (var c in _allCards) { if (c.MeterOptions.ShowAppIndicators) return true; } return false; }
+    }
+    private bool AnyCardShowsNowPlaying
+    {
+        get { foreach (var c in _allCards) { if (c.MeterOptions.ShowNowPlaying) return true; } return false; }
+    }
     private CancellationTokenSource? _refreshCts;
     private CancellationTokenSource? _settingsSaveCts;
     private CancellationTokenSource? _sessionsSyncCts;
@@ -398,18 +414,16 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         // after ~1s (IdleSampleStopMs). Hiding the chips alone wouldn't reclaim that cost;
         // skipping the read does. App meters off (underbar only) doesn't qualify - chip
         // placement, the playing/idle brightness, sort order, and linger all need the peak.
-        if (_meterOptions.ShowAppIndicators)
+        if (AnyCardShowsAppIndicators)
         {
             TickAppMeters();
         }
 
-        // Advance each visible card's now-playing progress lines between SMTC snapshots.
-        if (_meterOptions.ShowNowPlaying)
+        // Advance each visible card's now-playing progress lines between SMTC snapshots. A card with
+        // the strip off (global or override) carries no strips, so the inner loop is a no-op for it.
+        foreach (var card in _visibleCards)
         {
-            foreach (var card in _visibleCards)
-            {
-                foreach (var strip in card.NowPlayingStrips) strip.Tick();
-            }
+            foreach (var strip in card.NowPlayingStrips) strip.Tick();
         }
     }
 
@@ -461,7 +475,8 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         // Group every showable session's pid by app identity (executable path). One chip stands
         // in for an app's several processes, so its meter must reflect the loudest sibling - this
         // map lets Phase 1 take the max peak across them without a nested per-tick scan.
-        var pidsByAppKey = new Dictionary<string, List<uint>>(StringComparer.Ordinal);
+        var pidsByAppKey = _tickPidsByAppKey;
+        foreach (var list in pidsByAppKey.Values) list.Clear();
         foreach (var session in sessionsSnapshot)
         {
             if (!ShouldShow(session)) continue;
@@ -475,6 +490,10 @@ public partial class HomeViewModel : ObservableObject, IDisposable
 
         foreach (var card in _visibleCards)
         {
+            // This card's app chips are off (global or a per-device override): nothing to tick or
+            // place. SyncCardApps clears its row; here we just skip the peak work.
+            if (!card.MeterOptions.ShowAppIndicators) continue;
+
             // Phase 1: tick peaks on existing chips, advancing their playing/stopped run state. Each
             // chip's peak is the max across all processes of its app on this endpoint. When a chip's
             // active state flips its tier changes, so re-sort the card (SortCardApps slides chips
@@ -499,7 +518,8 @@ public partial class HomeViewModel : ObservableObject, IDisposable
                 // Track app identities (not pids) already on the card: one chip stands in for an
                 // app's several processes, so a second process of an app already shown must not
                 // spawn a duplicate chip.
-                var seenAppsOnThisCard = new HashSet<string>(StringComparer.Ordinal);
+                var seenAppsOnThisCard = _tickSeenAppsOnCard;
+                seenAppsOnThisCard.Clear();
                 foreach (var chip in card.Apps) seenAppsOnThisCard.Add(chip.Session.IdentityKey);
 
                 foreach (var session in sessionsSnapshot)
@@ -516,7 +536,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
                         .Concat(_endpoints.GetEndpoints(EndpointFlow.Capture))
                         .ToList();
                     var match = _matcher.FindAppRoute(session, EndpointFlow.Render, rulesSnapshot, combinedEndpointsCache, sessionsSnapshot);
-                    var revivedChip = new AppChip(session, card.Endpoint.Id, _iconService, _meterOptions, match?.Rule, ownerCard: card, onHide: HideApp, onHideOnDevice: HideAppOnDevice, onClose: CloseApp, onTerminate: TerminateApp, canControlProcess: _processControl.CanControl(session.ProcessId), canCloseProcess: _processControl.CanClose(session.ProcessId), isElevated: _processControl.IsElevated(session.ProcessId))
+                    var revivedChip = new AppChip(session, card.Endpoint.Id, _iconService, card.MeterOptions, match?.Rule, ownerCard: card, onHide: HideApp, onHideOnDevice: HideAppOnDevice, onClose: CloseApp, onTerminate: TerminateApp, canControlProcess: _processControl.CanControl(session.ProcessId), canCloseProcess: _processControl.CanClose(session.ProcessId), isElevated: _processControl.IsElevated(session.ProcessId))
                     {
                         RulePinnedHere = match is not null &&
                             string.Equals(match.Endpoint.Id, card.Endpoint.Id, StringComparison.OrdinalIgnoreCase),
@@ -920,7 +940,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             {
                 card = new DeviceCard(
                     _endpoints, _writer, _meterOptions, snap,
-                    OnCardVisibilityToggled, OnCardQuickPinToggled, OnCardVolumeControlsToggled, OnCardCustomisationChanged,
+                    OnCardVisibilityToggled, OnCardQuickPinToggled, OnCardCustomisationChanged,
                     OnCardBluetoothToggle);
             }
             rebuilt.Add(card);
@@ -939,6 +959,11 @@ public partial class HomeViewModel : ObservableObject, IDisposable
                 ShowRules = _settings.Current.ShowRules;
             }
             SyncMeterOptions();
+            // Re-read each card's per-device display overrides from the (possibly just-rewritten)
+            // config. This is the path by which a Settings "Clear overrides" reset reaches the live
+            // cards; a card whose effective app-chip / now-playing state changed gets an apps
+            // reconcile so its row / strip rebuilds or clears.
+            ReapplyDeviceFeatureOverrides();
             // The forwarder filter and the app-indicators master toggle both change which chips
             // exist, so a change re-runs the in-place reconcile (not just a restyle). When
             // indicators are off the reconcile clears every row and the 20Hz app-meter tick is
@@ -958,14 +983,12 @@ public partial class HomeViewModel : ObservableObject, IDisposable
                 _settings.Current.FilterAudioForwarders != _lastFilterForwarders ||
                 _settings.Current.ShowAppIndicators != _lastShowAppIndicators ||
                 _settings.Current.AlwaysShowPinnedApps != _lastAlwaysShowPinned ||
-                _settings.Current.ShowNowPlaying != _lastShowNowPlaying ||
-                _settings.Current.NowPlayingBackdropBlur != _lastNowPlayingBlur)
+                _settings.Current.ShowNowPlaying != _lastShowNowPlaying)
             {
                 _lastFilterForwarders = _settings.Current.FilterAudioForwarders;
                 _lastShowAppIndicators = _settings.Current.ShowAppIndicators;
                 _lastAlwaysShowPinned = _settings.Current.AlwaysShowPinnedApps;
                 _lastShowNowPlaying = _settings.Current.ShowNowPlaying;
-                _lastNowPlayingBlur = _settings.Current.NowPlayingBackdropBlur;
                 QueueAppsReconcile();
             }
             if (_settings.Current.WaveLinkChannelStyle == _lastAppliedStyle) return;
@@ -989,7 +1012,6 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         _meterOptions.ShowCardDividers = s.ShowCardDividers;
         _meterOptions.ShowRules = s.ShowRules;
         _meterOptions.ShowNowPlaying = s.ShowNowPlaying;
-        _meterOptions.NowPlayingBlur = s.NowPlayingBackdropBlur;
         _meterOptions.NowPlayingCardBackground = s.NowPlayingCardBackground;
         foreach (var card in _allCards) card.NotifyMeterStyleChanged();
     }
@@ -1070,9 +1092,10 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     /// the snapshot may have drifted (rule edit, endpoint default change).</summary>
     private void SyncAllCardsApps()
     {
-        // App indicators off: no chips at all. Clear any that exist and skip the peak-reading
-        // reconcile so the session meter service idles. Re-enabling re-runs this and repopulates.
-        if (!_meterOptions.ShowAppIndicators)
+        // App indicators off on every card (global off and no per-device override forces them on):
+        // no chips at all. Clear any that exist and skip the peak-reading reconcile so the session
+        // meter service idles. Re-enabling (globally or for one device) re-runs this and repopulates.
+        if (!AnyCardShowsAppIndicators)
         {
             ClearAllCardApps();
             return;
@@ -1146,6 +1169,23 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         }
 
         SyncNowPlaying();
+        RefreshCardRuleSummaries(sessions);
+    }
+
+    /// <summary>Refreshes rule status, match counts, and lock state on every card using the current
+    /// session snapshot. Called at the end of the debounced in-place session reconcile so device-card
+    /// rule chips stay current as apps open/close, without a full card rebuild.</summary>
+    private void RefreshCardRuleSummaries(IReadOnlyList<AudioSession> sessions)
+    {
+        if (_allCards.Count == 0) return;
+        var rules = _rules.Rules;
+        var renderEndpoints = _endpoints.GetEndpoints(EndpointFlow.Render);
+        var captureEndpoints = _endpoints.GetEndpoints(EndpointFlow.Capture);
+        foreach (var card in _allCards)
+        {
+            var summary = DeviceRulesSummary.For(card.Endpoint, rules, renderEndpoints, captureEndpoints, sessions, _matcher, _evaluator);
+            card.UpdateRuleSummary(summary);
+        }
     }
 
     /// <summary>
@@ -1305,7 +1345,14 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             IsVolumeControlsHiddenByUser: cfg?.VolumeControlsHidden == true,
             UserGlyphOverride: cfg?.Glyph,
             UserAccent: Controls.DeviceAccentPalette.TryParseHex(cfg?.AccentColour),
-            UserAccentNone: Controls.DeviceAccentPalette.IsNoneSentinel(cfg?.AccentColour));
+            UserAccentNone: Controls.DeviceAccentPalette.IsNoneSentinel(cfg?.AccentColour),
+            ShowNowPlayingOverride: cfg?.ShowNowPlaying,
+            NowPlayingFillOverride: cfg?.NowPlayingFill,
+            ShowAppIndicatorsOverride: cfg?.ShowAppIndicators,
+            ShowAppMetersOverride: cfg?.ShowAppMeters,
+            MeterEnabledOverride: cfg?.MeterEnabled,
+            ShowPeakIndicatorOverride: cfg?.ShowPeakIndicator,
+            ShowRulesOverride: cfg?.ShowRules);
 
     /// <summary>
     /// Seeds / refreshes the known-devices table from the live endpoints, then prunes it (age-out
@@ -2127,19 +2174,35 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         card.ToggleUserVisibilityCommand.Execute(null);
     }
 
-    private void OnCardVolumeControlsToggled(DeviceCard card)
-    {
-        UpdateDeviceConfig(card);
-        QueueSettingsSave();
-        // No resync: the card stays listed, only its inner controls toggle, and that's already
-        // bound live on the existing card instance.
-    }
-
     private void OnCardCustomisationChanged(DeviceCard card)
     {
         UpdateDeviceConfig(card);
         QueueSettingsSave();
-        // No resync: glyph + accent are bound live on the existing card; visibility is unaffected.
+        // Glyph + accent are bound live on the existing card, but the per-device display overrides
+        // (app chips / now-playing) change which chips and strips should exist, so reconcile the
+        // apps rows. Cheap + debounced; a glyph-only edit just no-ops the reconcile.
+        QueueAppsReconcile();
+    }
+
+    /// <summary>Re-reads every card's per-device display overrides from the saved config and applies
+    /// them (persist-free). The conduit for the Settings "Clear overrides" reset, which mutates the
+    /// config from the Settings view-model; a card whose effective state changed triggers an apps
+    /// reconcile so its chip row / now-playing strip rebuilds or clears.</summary>
+    private void ReapplyDeviceFeatureOverrides()
+    {
+        var configs = _settings.Current.Devices;
+        var anyChanged = false;
+        foreach (var card in _allCards)
+        {
+            var cfg = LookupConfig(configs, card.DeviceKey, card.Endpoint.Id);
+            if (card.ApplyFeatureOverrides(
+                cfg?.ShowNowPlaying, cfg?.NowPlayingFill, cfg?.ShowAppIndicators,
+                cfg?.ShowAppMeters, cfg?.MeterEnabled, cfg?.ShowPeakIndicator, cfg?.ShowRules))
+            {
+                anyChanged = true;
+            }
+        }
+        if (anyChanged) QueueAppsReconcile();
     }
 
     /// <summary>
@@ -2272,6 +2335,13 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             VolumeControlsHidden = card.IsVolumeControlsHiddenByUser ? true : null,
             Glyph = card.CurrentGlyphOverride,
             AccentColour = card.AccentOverrideHex,
+            ShowNowPlaying = card.ShowNowPlayingOverride,
+            NowPlayingFill = card.NowPlayingFillOverride,
+            ShowAppIndicators = card.ShowAppIndicatorsOverride,
+            ShowAppMeters = card.ShowAppMetersOverride,
+            MeterEnabled = card.MeterEnabledOverride,
+            ShowPeakIndicator = card.ShowPeakIndicatorOverride,
+            ShowRules = card.ShowRulesOverride,
         };
         if (cfg.IsDefault) map.Remove(card.DeviceKey);
         else map[card.DeviceKey] = cfg;
