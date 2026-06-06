@@ -128,7 +128,9 @@ public sealed partial class QuickControlsWindow : Window
 
     public void ShowPrepared()
     {
+        Root.Opacity = 0;
         AppWindow.Show();
+        ShowAnimation.Begin();
         IsOpen = true;
     }
 

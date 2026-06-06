@@ -10,7 +10,33 @@
     <Border x:Name="Root"
             Background="Transparent"
             IsTabStop="True">
+        <Border.RenderTransform>
+            <CompositeTransform x:Name="RootTransform" />
+        </Border.RenderTransform>
         <Border.Resources>
+            <Storyboard x:Name="ShowAnimation">
+                <DoubleAnimation Storyboard.TargetName="Root"
+                                 Storyboard.TargetProperty="Opacity"
+                                 From="0" To="1" Duration="0:0:0.25">
+                    <DoubleAnimation.EasingFunction>
+                        <CubicEase EasingMode="EaseOut" />
+                    </DoubleAnimation.EasingFunction>
+                </DoubleAnimation>
+                <DoubleAnimation Storyboard.TargetName="RootTransform"
+                                 Storyboard.TargetProperty="TranslateX"
+                                 From="12" To="0" Duration="0:0:0.25">
+                    <DoubleAnimation.EasingFunction>
+                        <CubicEase EasingMode="EaseOut" />
+                    </DoubleAnimation.EasingFunction>
+                </DoubleAnimation>
+                <DoubleAnimation Storyboard.TargetName="RootTransform"
+                                 Storyboard.TargetProperty="TranslateY"
+                                 From="12" To="0" Duration="0:0:0.25">
+                    <DoubleAnimation.EasingFunction>
+                        <CubicEase EasingMode="EaseOut" />
+                    </DoubleAnimation.EasingFunction>
+                </DoubleAnimation>
+            </Storyboard>
             <!-- Compact card: the shared DeviceCardView with rules suppressed for the flyout. -->
             <DataTemplate x:Key="QuickCardTemplate" x:DataType="vm:DeviceCard">
                 <Border Style="{StaticResource SectionCardStyle}"
