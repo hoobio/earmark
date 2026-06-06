@@ -64,6 +64,7 @@ internal static class HostBuilderExtensions
         builder.Services.AddSingleton<IDispatcherQueueProvider, DispatcherQueueProvider>();
         builder.Services.AddSingleton<INavigationService, NavigationService>();
         builder.Services.AddSingleton<IWindowChromeManager, WindowChromeManager>();
+        builder.Services.AddSingleton<ITaskbarMediaControls, TaskbarMediaControlsManager>();
         builder.Services.AddSingleton<INotificationService, NotificationService>();
         builder.Services.AddSingleton<IInAppNotificationService, InAppNotificationService>();
         builder.Services.AddSingleton<IProcessControlService, ProcessControlService>();

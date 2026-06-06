@@ -17,6 +17,12 @@ public interface INowPlayingService
     /// <summary>Current now-playing sessions, keyed by <see cref="NowPlayingInfo.SessionKey"/>.</summary>
     IReadOnlyList<NowPlayingInfo> GetSessions();
 
+    /// <summary>The single "primary" session - whatever Windows exposes as the current SMTC session
+    /// (<c>GetCurrentSession</c>), falling back to the first playing session, then the first listed.
+    /// Drives surfaces that can only show one session (e.g. the taskbar thumbnail toolbar). Null when
+    /// nothing is playing.</summary>
+    NowPlayingInfo? GetPrimary();
+
     /// <summary>Toggles play/pause on the session with the given key. No-op if it's gone.</summary>
     Task TogglePlayPauseAsync(string sessionKey);
 

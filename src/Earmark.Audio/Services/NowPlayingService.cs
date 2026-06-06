@@ -22,8 +22,10 @@ public sealed class NowPlayingService : INowPlayingService, IDisposable
     private static readonly TimeSpan RebuildDebounce = TimeSpan.FromMilliseconds(120);
     // When a session disappears (e.g. a browser reloads the page between YouTube videos) keep showing its
     // last snapshot, frozen as paused, for this long before dropping it - so flicking between tracks
-    // doesn't blink the strip out and back in. The app must still be running (its chip present) for the
-    // held strip to render, so this only papers over the brief mid-navigation gap.
+    // doesn't blink the strip out and back in. Applies whether SMTC merely blanks the session's metadata
+    // or drops it from the manager entirely (browser back/forward does the latter mid-navigation). The
+    // strip only renders while the app's chip is present, so a genuine app-close still clears promptly
+    // (the chip goes with the process); this grace only papers over the brief mid-navigation gap.
     private static readonly TimeSpan GraceWindow = TimeSpan.FromSeconds(6);
     private static readonly char[] PathSeparators = { '\\', '/' };
 
@@ -43,6 +45,9 @@ public sealed class NowPlayingService : INowPlayingService, IDisposable
     // thumbnails (a track's artwork only changes when the track does).
     private Dictionary<string, NowPlayingInfo> _byKey = new(StringComparer.OrdinalIgnoreCase);
     private IReadOnlyList<NowPlayingInfo> _snapshot = Array.Empty<NowPlayingInfo>();
+    // SourceAppUserModelId of the session Windows reports as current (GetCurrentSession), captured each
+    // rebuild. GetPrimary prefers this so the taskbar toolbar tracks the same session the OS overlay does.
+    private string? _currentKey;
     // When each key first went missing (session still listed but metadata blank), so grace counts from
     // the gap itself, not from the last SMTC event - a track can play for ages between events, which
     // would otherwise make the grace clock stale before the gap even starts. Cleared the moment a key is
@@ -70,12 +75,33 @@ public sealed class NowPlayingService : INowPlayingService, IDisposable
         lock (_gate) return _snapshot;
     }
 
+    public NowPlayingInfo? GetPrimary()
+    {
+        lock (_gate)
+        {
+            if (_snapshot.Count == 0) return null;
+            if (!string.IsNullOrEmpty(_currentKey))
+            {
+                foreach (var info in _snapshot)
+                {
+                    if (string.Equals(info.SessionKey, _currentKey, StringComparison.OrdinalIgnoreCase)) return info;
+                }
+            }
+            foreach (var info in _snapshot)
+            {
+                if (info.IsPlaying) return info;
+            }
+            return _snapshot[0];
+        }
+    }
+
     private async Task InitialiseAsync()
     {
         try
         {
             _manager = await GlobalSystemMediaTransportControlsSessionManager.RequestAsync();
             _manager.SessionsChanged += OnSessionsChanged;
+            _manager.CurrentSessionChanged += OnCurrentSessionChanged;
             AttachSessions();
             _logger.LogInformation("NowPlaying: SMTC session manager ready (sessions={Count})",
                 _manager.GetSessions()?.Count ?? 0);
@@ -136,6 +162,8 @@ public sealed class NowPlayingService : INowPlayingService, IDisposable
 
     private void OnSessionChanged(GlobalSystemMediaTransportControlsSession sender, object args) => RequestRebuild();
 
+    private void OnCurrentSessionChanged(GlobalSystemMediaTransportControlsSessionManager sender, CurrentSessionChangedEventArgs args) => RequestRebuild();
+
     /// <summary>Debounces rebuilds: SMTC fires position/metadata events in bursts (a seek spams
     /// TimelinePropertiesChanged), so collapse them into one async rebuild.</summary>
     private void RequestRebuild()
@@ -189,19 +217,18 @@ public sealed class NowPlayingService : INowPlayingService, IDisposable
             try { sessions = manager.GetSessions(); }
             catch (Exception ex) { _logger.LogDebug(ex, "NowPlaying: GetSessions failed during rebuild"); return; }
 
+            string? currentKey = null;
+            try { currentKey = manager.GetCurrentSession()?.SourceAppUserModelId; }
+            catch (Exception ex) { _logger.LogDebug(ex, "NowPlaying: GetCurrentSession failed during rebuild"); }
+
             var previous = _byKey;
             var now = DateTime.UtcNow;
             var built = new List<NowPlayingInfo>(sessions.Count);
             var byKey = new Dictionary<string, NowPlayingInfo>(StringComparer.OrdinalIgnoreCase);
-            // Every key the manager still lists, even ones whose metadata is momentarily empty. Used to
-            // tell a mid-navigation gap (session present, blank metadata) from an app close (session gone).
-            var presentKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
             foreach (var session in sessions)
             {
                 if (token.IsCancellationRequested) return;
-                var sessionKey = SafeKey(session);
-                if (!string.IsNullOrEmpty(sessionKey)) presentKeys.Add(sessionKey);
                 var info = await TryBuildAsync(session, previous).ConfigureAwait(false);
                 if (info is null) continue;
                 if (byKey.ContainsKey(info.SessionKey)) continue; // one entry per app key
@@ -210,21 +237,18 @@ public sealed class NowPlayingService : INowPlayingService, IDisposable
                 _missingSince.Remove(info.SessionKey); // produced again: not missing
             }
 
-            // Hold recently-blanked sessions as frozen (paused) ghosts within the grace window, so a
-            // page reload between tracks doesn't clear the strip. Grace counts from when the key first
-            // went missing (not from the last event), and a rebuild is scheduled at the soonest expiry
-            // so a held ghost still clears even if SMTC fires nothing more.
+            // Hold recently-vanished sessions as frozen (paused) ghosts within the grace window, so a
+            // page reload between tracks doesn't clear the strip. Covers both a metadata blank-out (the
+            // session stays listed) and the session leaving the manager outright (browser back/forward
+            // briefly drops it mid-navigation) - both are just navigation flicker to the user. Grace
+            // counts from when the key first went missing (not from the last event), and a rebuild is
+            // scheduled at the soonest expiry so a held ghost still clears even if SMTC fires nothing more.
+            // A real app-close is bounded separately: the strip only renders while the app's chip is
+            // present, and the chip leaves with the process.
             TimeSpan? soonestExpiry = null;
             foreach (var (key, prior) in previous)
             {
                 if (byKey.ContainsKey(key)) continue;
-                // App closed: its session left the manager entirely. Drop now, no grace - leniency is
-                // only for the metadata blank-out while the app stays open (the session stays listed).
-                if (!presentKeys.Contains(key))
-                {
-                    _missingSince.Remove(key);
-                    continue;
-                }
                 if (!_missingSince.TryGetValue(key, out var since)) _missingSince[key] = since = now;
                 var age = now - since;
                 if (age >= GraceWindow) { _missingSince.Remove(key); continue; }
@@ -240,6 +264,7 @@ public sealed class NowPlayingService : INowPlayingService, IDisposable
             {
                 _byKey = byKey;
                 _snapshot = built;
+                _currentKey = currentKey;
             }
             Changed?.Invoke(this, EventArgs.Empty);
 
@@ -422,7 +447,11 @@ public sealed class NowPlayingService : INowPlayingService, IDisposable
         {
             _debounceCts?.Cancel();
             _graceCts?.Cancel();
-            if (_manager is not null) _manager.SessionsChanged -= OnSessionsChanged;
+            if (_manager is not null)
+            {
+                _manager.SessionsChanged -= OnSessionsChanged;
+                _manager.CurrentSessionChanged -= OnCurrentSessionChanged;
+            }
             foreach (var session in _hooked) Detach(session);
             _hooked.Clear();
         }

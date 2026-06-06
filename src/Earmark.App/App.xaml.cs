@@ -114,6 +114,10 @@ public partial class App : Application
             var chrome = _host.Services.GetRequiredService<IWindowChromeManager>();
             chrome.Attach(_window);
 
+            // Wire the taskbar thumbnail toolbar (prev / play-pause / next) before Activate so the
+            // subclass catches the first TaskbarButtonCreated message.
+            _host.Services.GetRequiredService<ITaskbarMediaControls>().Attach(_window);
+
             // Show the window NOW with its loading skeleton. Everything not needed to paint the
             // shell (notification registration, the Quick Controls hotkey window, the update check)
             // is deferred to a low-priority dispatch that runs after the first frame, so nothing
