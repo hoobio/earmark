@@ -27,74 +27,51 @@
                 Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
                 Visibility="Collapsed" />
 
-        <!-- Only AppTitleBarDragRegion is handed to SetTitleBar. The pane toggle must NOT be
-             parented under it: the system treats the SetTitleBar element as the caption and
-             swallows pointer input to any control inside it, which made the toggle drop clicks
-             (including mid-animation). Keeping the button a sibling leaves it in the client area
-             so it always receives input. -->
-        <Grid x:Name="AppTitleBar" Height="32">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="*" />
-            </Grid.ColumnDefinitions>
-
-            <Button x:Name="PaneToggleButton"
-                    Grid.Column="0"
-                    Click="OnPaneToggleClick"
-                    Background="Transparent"
-                    BorderBrush="Transparent"
-                    CornerRadius="0"
-                    Width="48"
-                    Height="32"
-                    Padding="0"
-                    ToolTipService.ToolTip="Toggle navigation">
-                <FontIcon Glyph="&#xE700;" FontSize="14" />
-            </Button>
-
-            <Grid x:Name="AppTitleBarDragRegion"
-                  Grid.Column="1"
-                  Background="Transparent">
-                <StackPanel Orientation="Horizontal"
-                            Spacing="8"
-                            VerticalAlignment="Center">
-                    <TextBlock Text="Earmark"
-                               Style="{ThemeResource CaptionTextBlockStyle}"
-                               FontWeight="SemiBold"
-                               VerticalAlignment="Center"
-                               Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
-                    <TextBlock Text="Audio rules engine"
-                               Style="{ThemeResource CaptionTextBlockStyle}"
-                               VerticalAlignment="Center"
-                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                </StackPanel>
-            </Grid>
-
-            <!-- "Update available" pill. A sibling of (not parented under) AppTitleBarDragRegion so
-                 it stays in the client area and receives clicks - the SetTitleBar element swallows
-                 pointer input. Its right margin is set in code from TitleBar.RightInset so it never
-                 slides under the system caption buttons. Hidden unless an update is found. -->
-            <Button x:Name="UpdateButton"
-                    Grid.Column="1"
-                    HorizontalAlignment="Right"
-                    VerticalAlignment="Center"
-                    Height="28"
-                    Padding="10,0"
-                    Margin="0,0,144,0"
-                    Visibility="Collapsed"
-                    Style="{ThemeResource AccentButtonStyle}"
-                    CornerRadius="{ThemeResource ControlCornerRadius}"
-                    Click="OnUpdateButtonClick"
-                    ToolTipService.ToolTip="A new version of Earmark is available. Click to view the release.">
-                <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                    <FontIcon Glyph="&#xE896;" FontSize="12" Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}" />
-                    <TextBlock Text="Update available"
-                               FontSize="12"
-                               FontWeight="SemiBold"
-                               Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}"
-                               VerticalAlignment="Center" />
-                </StackPanel>
-            </Button>
-        </Grid>
+        <!-- WinUI TitleBar control (matches WinUI Gallery): Tall height with caption buttons that
+             fill it, a built-in animated pane-toggle (waffle) and back button, icon, and title /
+             subtitle. The control owns its drag regions and keeps its interactive elements hit-
+             testable, so SetTitleBar(AppTitleBar) no longer swallows clicks the way a raw element
+             did. Back/forward history is custom (see NavigationService) because pages are swapped
+             as DI singletons rather than via Frame.Navigate, so Frame.CanGoBack is never set. -->
+        <TitleBar x:Name="AppTitleBar"
+                  Grid.Row="0"
+                  Title="Earmark"
+                  Subtitle="Audio rules engine"
+                  IsBackButtonVisible="True"
+                  IsBackButtonEnabled="False"
+                  IsPaneToggleButtonVisible="True"
+                  BackRequested="OnTitleBarBackRequested"
+                  PaneToggleRequested="OnTitleBarPaneToggleRequested">
+            <TitleBar.Resources>
+                <!-- The disabled back button otherwise paints a solid square (ControlFillColorDisabled).
+                     We keep it always-visible-but-disabled, so drop that fill; the dimmed glyph
+                     (TextFillColorDisabled) is enough to read as disabled. -->
+                <SolidColorBrush x:Key="TitleBarBackButtonBackgroundDisabled" Color="Transparent" />
+            </TitleBar.Resources>
+            <TitleBar.RightHeader>
+                <!-- "Update available" pill. The TitleBar reserves room for the system caption
+                     buttons, so the RightHeader slot sits clear of them automatically (no manual
+                     RightInset math). Hidden unless an update is found. -->
+                <Button x:Name="UpdateButton"
+                        VerticalAlignment="Center"
+                        Height="28"
+                        Padding="10,0"
+                        Visibility="Collapsed"
+                        Style="{ThemeResource AccentButtonStyle}"
+                        CornerRadius="{ThemeResource ControlCornerRadius}"
+                        Click="OnUpdateButtonClick"
+                        ToolTipService.ToolTip="A new version of Earmark is available. Click to view the release.">
+                    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                        <FontIcon Glyph="&#xE896;" FontSize="12" Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}" />
+                        <TextBlock Text="Update available"
+                                   FontSize="12"
+                                   FontWeight="SemiBold"
+                                   Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}"
+                                   VerticalAlignment="Center" />
+                    </StackPanel>
+                </Button>
+            </TitleBar.RightHeader>
+        </TitleBar>
 
         <NavigationView
             x:Name="NavView"

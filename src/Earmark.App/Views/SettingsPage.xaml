@@ -41,7 +41,7 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <TextBlock Text="Settings" Style="{StaticResource PageHeaderTextStyle}" Margin="0,12,0,16" />
+        <TextBlock Text="Settings" Style="{StaticResource PageHeaderTextStyle}" Margin="0,0,0,16" />
 
         <ScrollViewer Grid.Row="1" Padding="0,0,16,0">
             <StackPanel Spacing="{StaticResource SpacingXSmall}" MaxWidth="720" HorizontalAlignment="Stretch">

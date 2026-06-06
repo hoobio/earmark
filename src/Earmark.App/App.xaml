@@ -78,7 +78,9 @@
                  (Fluent 2 layout). Pages centre their content within this. -->
             <x:Double x:Key="ContentMaxWidth">1120</x:Double>
 
-            <Thickness x:Key="PagePadding">16,8,16,20</Thickness>
+            <!-- Top inset is 0 so each page's H1 title lines up with the top of the first nav-rail
+                 item (both share the NavigationView's title-bar TopPadding). -->
+            <Thickness x:Key="PagePadding">16,0,16,20</Thickness>
             <Thickness x:Key="SectionPadding">16</Thickness>
             <Thickness x:Key="SubtleCardPadding">12,10</Thickness>
 

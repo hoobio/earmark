@@ -232,9 +232,11 @@
                           Padding="{StaticResource DevicesScrollPadding}"
                           VerticalContentAlignment="Top">
                 <!-- Scroll content: an optional "Devices" title header (scrolls away) above the drop
-                     surface. The top inset (28) matches the side inset and is part of the scroll
-                     content, so cards rest below the title bar but scroll up flush to it. -->
-                <StackPanel Padding="0,16,0,0">
+                     surface. The top inset aligns the first content row (the "Devices" title, or the
+                     first group / card when the header is hidden) with the top of the first nav-rail
+                     item - both regions share the NavigationView's title-bar TopPadding, so this small
+                     inset is what matches the title's cap to the icon-centred nav row. -->
+                <StackPanel Padding="0">
                     <StackPanel Orientation="Horizontal" Spacing="{StaticResource SpacingSmall}" Margin="0,0,0,16"
                                 Visibility="{x:Bind ViewModel.ShowDevicesHeader, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
                         <TextBlock Text="Devices" Style="{StaticResource PageHeaderTextStyle}" />
