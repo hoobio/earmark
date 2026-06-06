@@ -1,13 +1,14 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
 
 namespace Earmark.App.Services;
 
 public interface INavigationService
 {
-    bool Navigate(Type pageType, NavigationTransitionInfo? transition = null);
+    bool Navigate(Type pageType);
     void Register(Frame frame);
 
     bool CanGoBack { get; }
@@ -50,7 +51,7 @@ internal sealed class NavigationService : INavigationService
 
     // A forward navigation: records the current page on the back stack and clears the forward
     // stack (standard browser semantics). No-ops if already on the target page.
-    public bool Navigate(Type pageType, NavigationTransitionInfo? transition = null)
+    public bool Navigate(Type pageType)
     {
         if (_frame is null)
         {
@@ -100,9 +101,36 @@ internal sealed class NavigationService : INavigationService
         return target;
     }
 
+    // Pages are DI singletons swapped in via Content= (so Frame.Navigate's NavigationThemeTransition
+    // never fires). Element Transitions (EntranceThemeTransition) only play on an element's FIRST
+    // realisation, so a re-shown cached page wouldn't animate. Drive the entrance with an explicit
+    // storyboard instead, which runs on every swap.
     private void SwapTo(Type pageType)
     {
         var page = (Page)_services.GetRequiredService(pageType);
         _frame!.Content = page;
+        PlayEntrance(page);
+    }
+
+    private static void PlayEntrance(UIElement page)
+    {
+        var translate = new TranslateTransform { Y = 18 };
+        page.RenderTransform = translate;
+
+        var storyboard = new Storyboard();
+        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+        var duration = new Duration(TimeSpan.FromMilliseconds(220));
+
+        var fade = new DoubleAnimation { From = 0, To = 1, Duration = duration, EasingFunction = ease };
+        Storyboard.SetTarget(fade, page);
+        Storyboard.SetTargetProperty(fade, "Opacity");
+
+        var slide = new DoubleAnimation { To = 0, Duration = duration, EasingFunction = ease };
+        Storyboard.SetTarget(slide, translate);
+        Storyboard.SetTargetProperty(slide, "Y");
+
+        storyboard.Children.Add(fade);
+        storyboard.Children.Add(slide);
+        storyboard.Begin();
     }
 }

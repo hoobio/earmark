@@ -491,7 +491,7 @@ public sealed partial class MainWindow : Window, IDisposable
             return;
         }
 
-        _navigation.Navigate(pageType, new DrillInNavigationTransitionInfo());
+        _navigation.Navigate(pageType);
     }
 
     private static string? TagForPage(Type pageType) => pageType switch

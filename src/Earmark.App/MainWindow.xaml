@@ -111,17 +111,10 @@
                 </NavigationViewItem>
             </NavigationView.FooterMenuItems>
 
-            <Frame x:Name="ContentFrame">
-                <!-- NavigationService swaps pages via Content= (DI singletons), so there's no
-                     Frame.Navigate transition. A content transition removes the old page at once
-                     and animates the new one in, instead of the old tiles ghosting while the new
-                     page does its first layout. -->
-                <Frame.ContentTransitions>
-                    <TransitionCollection>
-                        <NavigationThemeTransition />
-                    </TransitionCollection>
-                </Frame.ContentTransitions>
-            </Frame>
+            <!-- NavigationService swaps pages via Content= (DI singletons), so Frame.Navigate's
+                 NavigationThemeTransition never fires. The page-in animation lives on each page's
+                 Transitions (set in NavigationService.SwapTo) instead. -->
+            <Frame x:Name="ContentFrame" />
         </NavigationView>
 
         <!-- Instant loading skeleton: a centred ring over the Mica shell, shown from the moment the
