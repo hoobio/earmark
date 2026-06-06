@@ -4,8 +4,6 @@ using Earmark.Core.Audio;
 using Earmark.Core.Models;
 
 using Microsoft.Extensions.Logging;
-using Microsoft.Graphics.Canvas;
-using Microsoft.Graphics.Canvas.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.Windows.BadgeNotifications;
 
@@ -14,6 +12,8 @@ using Windows.UI;
 using Windows.UI.ViewManagement;
 
 using WinRT.Interop;
+
+using Drawing = System.Drawing;
 
 namespace Earmark.App.Services;
 
@@ -252,7 +252,7 @@ internal sealed class TaskbarMediaControlsManager : ITaskbarMediaControls, IDisp
         dwFlags = enabled ? THUMBBUTTONFLAGS.THBF_ENABLED : THUMBBUTTONFLAGS.THBF_DISABLED,
     };
 
-    // -------- Icon rendering (Win2D glyph -> HICON) --------
+    // -------- Icon rendering (GDI+ glyph -> HICON) --------
 
     private void RebuildIcons()
     {
@@ -282,26 +282,18 @@ internal sealed class TaskbarMediaControlsManager : ITaskbarMediaControls, IDisp
     {
         try
         {
-            using var target = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), size, size, 96f);
-            using (var ds = target.CreateDrawingSession())
+            using var bitmap = new Drawing.Bitmap(size, size, Drawing.Imaging.PixelFormat.Format32bppArgb);
+            using (var g = Drawing.Graphics.FromImage(bitmap))
             {
-                ds.Clear(Microsoft.UI.Colors.Transparent);
-                using var format = new CanvasTextFormat
-                {
-                    FontFamily = "Segoe Fluent Icons",
-                    FontSize = size * 0.7f,
-                    HorizontalAlignment = CanvasHorizontalAlignment.Center,
-                    VerticalAlignment = CanvasVerticalAlignment.Center,
-                };
-                ds.DrawText(glyph, new Rect(0, 0, size, size), colour, format);
+                g.SmoothingMode = Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                g.TextRenderingHint = Drawing.Text.TextRenderingHint.AntiAlias; // grayscale AA keeps alpha on a transparent bg
+                using var font = new Drawing.Font("Segoe Fluent Icons", size * 0.7f, Drawing.FontStyle.Regular, Drawing.GraphicsUnit.Pixel);
+                using var brush = new Drawing.SolidBrush(Drawing.Color.FromArgb(colour.A, colour.R, colour.G, colour.B));
+                using var format = CentredGlyphFormat();
+                g.DrawString(glyph, font, brush, new Drawing.RectangleF(0, 0, size, size), format);
             }
 
-            // Win2D renders to a premultiplied BGRA target, but CreateIconIndirect's colour bitmap
-            // expects straight (non-premultiplied) alpha (like Bitmap.GetHicon). Feeding premultiplied
-            // bytes darkens the anti-aliased strokes (the "faded glyph" look), so un-premultiply first.
-            var pixels = target.GetPixelBytes();
-            UnPremultiply(pixels);
-            return CreateHIcon(pixels, size, size);
+            return CreateHIcon(bitmap, size);
         }
         catch (Exception ex)
         {
@@ -314,25 +306,21 @@ internal sealed class TaskbarMediaControlsManager : ITaskbarMediaControls, IDisp
     {
         try
         {
-            using var target = new CanvasRenderTarget(CanvasDevice.GetSharedDevice(), size, size, 96f);
-            using (var ds = target.CreateDrawingSession())
+            var accent = GetAccentColour();
+            using var bitmap = new Drawing.Bitmap(size, size, Drawing.Imaging.PixelFormat.Format32bppArgb);
+            using (var g = Drawing.Graphics.FromImage(bitmap))
             {
-                ds.Clear(Microsoft.UI.Colors.Transparent);
-                var radius = size / 2f;
-                ds.FillCircle(radius, radius, radius, GetAccentColour());
-                using var format = new CanvasTextFormat
-                {
-                    FontFamily = "Segoe Fluent Icons",
-                    FontSize = size * 0.5f,
-                    HorizontalAlignment = CanvasHorizontalAlignment.Center,
-                    VerticalAlignment = CanvasVerticalAlignment.Center,
-                };
-                ds.DrawText(glyph, new Rect(0, 0, size, size), Microsoft.UI.Colors.White, format);
+                g.SmoothingMode = Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                g.TextRenderingHint = Drawing.Text.TextRenderingHint.AntiAlias;
+                using var disc = new Drawing.SolidBrush(Drawing.Color.FromArgb(accent.A, accent.R, accent.G, accent.B));
+                g.FillEllipse(disc, 0, 0, size, size);
+                using var font = new Drawing.Font("Segoe Fluent Icons", size * 0.5f, Drawing.FontStyle.Regular, Drawing.GraphicsUnit.Pixel);
+                using var white = new Drawing.SolidBrush(Drawing.Color.White);
+                using var format = CentredGlyphFormat();
+                g.DrawString(glyph, font, white, new Drawing.RectangleF(0, 0, size, size), format);
             }
 
-            var pixels = target.GetPixelBytes();
-            UnPremultiply(pixels);
-            return CreateHIcon(pixels, size, size);
+            return CreateHIcon(bitmap, size);
         }
         catch (Exception ex)
         {
@@ -341,23 +329,42 @@ internal sealed class TaskbarMediaControlsManager : ITaskbarMediaControls, IDisp
         }
     }
 
+    private static Drawing.StringFormat CentredGlyphFormat() => new(Drawing.StringFormat.GenericTypographic)
+    {
+        Alignment = Drawing.StringAlignment.Center,
+        LineAlignment = Drawing.StringAlignment.Center,
+        FormatFlags = Drawing.StringFormatFlags.NoWrap,
+    };
+
     private static Color GetAccentColour()
     {
         try { return new UISettings().GetColorValue(UIColorType.Accent); }
         catch { return Color.FromArgb(255, 0, 120, 215); }
     }
 
-    /// <summary>Converts premultiplied BGRA (Win2D's output) to straight alpha in place: c = c * 255 / a.
-    /// Fully opaque and fully transparent pixels are untouched.</summary>
-    private static void UnPremultiply(byte[] bgra)
+    /// <summary>Copies a 32bpp ARGB bitmap into a tightly-packed top-down BGRA buffer and builds an
+    /// HICON. GDI+ Format32bppArgb is straight (non-premultiplied) alpha, which is exactly what
+    /// CreateIconIndirect's colour bitmap expects, so no premultiply conversion is needed.</summary>
+    private static nint CreateHIcon(Drawing.Bitmap bitmap, int size)
     {
-        for (var i = 0; i + 3 < bgra.Length; i += 4)
+        var data = bitmap.LockBits(
+            new Drawing.Rectangle(0, 0, size, size),
+            Drawing.Imaging.ImageLockMode.ReadOnly,
+            Drawing.Imaging.PixelFormat.Format32bppArgb);
+        try
         {
-            var a = bgra[i + 3];
-            if (a == 0 || a == 255) continue;
-            bgra[i] = (byte)(bgra[i] * 255 / a);
-            bgra[i + 1] = (byte)(bgra[i + 1] * 255 / a);
-            bgra[i + 2] = (byte)(bgra[i + 2] * 255 / a);
+            // The lock stride may be padded past size*4, so copy row by row into a tight buffer.
+            var rowBytes = size * 4;
+            var bgra = new byte[rowBytes * size];
+            for (var row = 0; row < size; row++)
+            {
+                Marshal.Copy(data.Scan0 + (row * data.Stride), bgra, row * rowBytes, rowBytes);
+            }
+            return CreateHIcon(bgra, size, size);
+        }
+        finally
+        {
+            bitmap.UnlockBits(data);
         }
     }
 
