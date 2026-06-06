@@ -1,1 +1,2 @@
-See [AGENTS.md](./AGENTS.md) for the full project instructions (layout, build/run pattern, rule schema, commit/PR conventions). Treat AGENTS.md as the authoritative source - this file exists only so Claude Code's auto-context loader picks it up.
+See [AGENTS.md](./AGENTS.md) for the full project instructions (layout, build/run pattern, rule schema, commit/PR conventions). Treat AGENTS.md as the authoritative source.
+ALWAYS READ THIS INSTANTLY.
