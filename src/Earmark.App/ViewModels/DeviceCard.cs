@@ -40,7 +40,6 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     private readonly IEndpointWriter _writer;
     private readonly Action<DeviceCard, VisibilityState> _onVisibilityToggled;
     private readonly Action<DeviceCard> _onQuickPinToggled;
-    private readonly Action<DeviceCard> _onVolumeControlsToggled;
     private readonly Action<DeviceCard> _onCustomisationChanged;
     private readonly Action<DeviceCard> _onBluetoothToggle;
     private bool _suppressVolumeWrite;
@@ -63,7 +62,6 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         DeviceCardSnapshot snapshot,
         Action<DeviceCard, VisibilityState> onUserVisibilityToggled,
         Action<DeviceCard> onQuickPinToggled,
-        Action<DeviceCard> onVolumeControlsToggled,
         Action<DeviceCard> onCustomisationChanged,
         Action<DeviceCard> onBluetoothToggle)
     {
@@ -72,7 +70,6 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         _writer = writer;
         _onVisibilityToggled = onUserVisibilityToggled;
         _onQuickPinToggled = onQuickPinToggled;
-        _onVolumeControlsToggled = onVolumeControlsToggled;
         _onCustomisationChanged = onCustomisationChanged;
         _onBluetoothToggle = onBluetoothToggle;
         _userGlyphOverride = snapshot.UserGlyphOverride;
@@ -475,15 +472,6 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     /// it annotates is shown.</summary>
     public bool ShowVolumeLockIcon => IsVolumeLockedByRule && ShowVolumeControls;
     public bool ShowVolumeLockOverlay => IsVolumeLocked && ShowVolumeControls;
-
-    /// <summary>Context-menu label, flips with the current state.</summary>
-    public string VolumeControlsToggleLabel =>
-        IsVolumeControlsHiddenByUser ? "Show volume controls" : "Hide volume controls";
-
-    /// <summary>Context-menu glyph: speaker when controls can be shown, muted-speaker when hidden.</summary>
-    public string VolumeControlsToggleGlyph => IsVolumeControlsHiddenByUser
-        ? new string((char)0xE767, 1)   // Volume
-        : new string((char)0xE74F, 1);  // Volume Mute
 
     // ---- Reorder drag ----
     //
@@ -921,16 +909,6 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         _onQuickPinToggled?.Invoke(this);
     }
 
-    /// <summary>Toggles whether this device's volume slider + mute control are shown. Persisted by
-    /// the host; no undo entry (it's trivially reversed from the same menu, and the card stays
-    /// visible so nothing "disappears").</summary>
-    [RelayCommand]
-    public void ToggleVolumeControls()
-    {
-        IsVolumeControlsHiddenByUser = !IsVolumeControlsHiddenByUser;
-        _onVolumeControlsToggled?.Invoke(this);
-    }
-
     /// <summary>
     /// Restores explicit visibility state without invoking the toggle callback. Used by the
     /// undo path so reversing a hide/show doesn't push another entry onto the undo stack.
@@ -1170,7 +1148,5 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         OnPropertyChanged(nameof(ShowVolumeLockOverlay));
         OnPropertyChanged(nameof(MeterMargin));
         OnPropertyChanged(nameof(VolumeMeterColumnSpan));
-        OnPropertyChanged(nameof(VolumeControlsToggleLabel));
-        OnPropertyChanged(nameof(VolumeControlsToggleGlyph));
     }
 }
