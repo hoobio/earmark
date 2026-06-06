@@ -397,7 +397,7 @@
                  band drops out (the whole card shows the artwork), so hairlines bracket the strip instead.
                  The external volume->rules divider is hidden while this shows. -->
             <Border Height="1" Margin="-16,0,-16,-6"
-                    Background="{ThemeResource ControlStrokeColorDefaultBrush}"
+                    Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
                     Visibility="{x:Bind Card.ShowNowPlayingDividers, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
             <ItemsControl ItemsSource="{x:Bind Card.NowPlayingStrips, Mode=OneWay}"
                           HorizontalAlignment="Stretch"
@@ -572,13 +572,13 @@
             </ItemsControl>
 
             <Border Height="1" Margin="-16,-6,-16,0"
-                    Background="{ThemeResource ControlStrokeColorDefaultBrush}"
+                    Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
                     Visibility="{x:Bind NowPlayingBottomDividerVis(ShowRules, Card.ShowNowPlayingDividers, Card.ShowRulesSection, Card.ShowNoRulesMessage, Card.ShowAppsSection), Mode=OneWay}" />
 
             <!-- Volume -> rules divider. Hidden in the Quick Controls flyout (ShowRules=false) and while
                  the now-playing section shows (no dividers touch the strip then). -->
             <Border Height="1" Margin="-16,0,-16,-6"
-                    Background="{ThemeResource ControlStrokeColorDefaultBrush}"
+                    Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
                     Visibility="{x:Bind VolumeRulesDividerVis(ShowRules, Card.ShowVolumeDivider, Card.ShowNowPlaying), Mode=OneWay}" />
 
             <!-- Rules section. First rule chip always visible; the chevron toggles the rest. -->
@@ -650,7 +650,7 @@
 
             <!-- Divider between rules and apps; shows only when the apps row is present. -->
             <Border Height="1" Margin="-16,0"
-                    Background="{ThemeResource ControlStrokeColorDefaultBrush}"
+                    Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
                     Visibility="{x:Bind Card.ShowAppsDivider, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
 
             <!-- Apps row. Each chip is the app's icon with a peak underbar; drag a chip onto another
