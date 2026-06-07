@@ -63,6 +63,41 @@ public sealed partial class DeviceCardView : UserControl
         set => SetValue(CardProperty, value);
     }
 
+    /// <summary>The display options this view renders the card with. Unset (the main window) falls back to
+    /// the card's own (global) options; Quick Controls sets its own so the overlay's rules / now-playing /
+    /// badges / dividers / compact differ from the Devices page. Drives <see cref="Presentation"/>.</summary>
+    public static readonly DependencyProperty OptionsProperty = DependencyProperty.Register(
+        nameof(Options), typeof(PeakMeterOptions), typeof(DeviceCardView), new PropertyMetadata(null, OnOptionsChanged));
+
+    public PeakMeterOptions? Options
+    {
+        get => (PeakMeterOptions?)GetValue(OptionsProperty);
+        set => SetValue(OptionsProperty, value);
+    }
+
+    /// <summary>Per-view presentation (card + this view's options) the XAML binds for display geometry and
+    /// the combine-with-data visibility flags. Rebuilt whenever <see cref="Card"/> or <see cref="Options"/>
+    /// changes.</summary>
+    public static readonly DependencyProperty PresentationProperty = DependencyProperty.Register(
+        nameof(Presentation), typeof(CardPresentation), typeof(DeviceCardView), new PropertyMetadata(null));
+
+    public CardPresentation? Presentation
+    {
+        get => (CardPresentation?)GetValue(PresentationProperty);
+        private set => SetValue(PresentationProperty, value);
+    }
+
+    private static void OnOptionsChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is DeviceCardView view) view.RebuildPresentation();
+    }
+
+    private void RebuildPresentation()
+    {
+        (Presentation as IDisposable)?.Dispose();
+        Presentation = Card is { } card ? new CardPresentation(card, Options ?? card.MeterOptions) : null;
+    }
+
     // ---- Rules expand/collapse animation ----
 
     private Storyboard? _rulesStoryboard;
@@ -77,6 +112,7 @@ public sealed partial class DeviceCardView : UserControl
             oldCard.IsRulesCollapsing = false;   // don't leave a recycled card stuck opted-out mid-collapse
         }
         if (e.NewValue is DeviceCard newCard) newCard.PropertyChanged += view.OnCardPropertyChanged;
+        view.RebuildPresentation();
         // Recycle / first bind: snap the rules panel to the new card's resting state, no animation.
         view.SetRulesPanelState(e.NewValue as DeviceCard, animate: false);
     }
@@ -197,17 +233,6 @@ public sealed partial class DeviceCardView : UserControl
         sb.Begin();
     }
 
-    /// <summary>When false (the Quick Controls flyout), the rules divider / section / "no rules"
-    /// message never render. Constant per host.</summary>
-    public static readonly DependencyProperty ShowRulesProperty = DependencyProperty.Register(
-        nameof(ShowRules), typeof(bool), typeof(DeviceCardView), new PropertyMetadata(true));
-
-    public bool ShowRules
-    {
-        get => (bool)GetValue(ShowRulesProperty);
-        set => SetValue(ShowRulesProperty, value);
-    }
-
     /// <summary>When false (the Quick Controls flyout), the card and app-chip right-click menus are
     /// suppressed. Customisation belongs in the main app, not the overlay. Constant per host.</summary>
     public static readonly DependencyProperty AllowContextMenuProperty = DependencyProperty.Register(
@@ -219,10 +244,17 @@ public sealed partial class DeviceCardView : UserControl
         set => SetValue(AllowContextMenuProperty, value);
     }
 
-    /// <summary>x:Bind function: a rule element shows only when rules are enabled for this host AND the
-    /// card wants it. Re-evaluates when either argument changes, replacing the old collapse watchdog.</summary>
-    public Visibility RuleVis(bool showRules, bool cardWants) =>
-        showRules && cardWants ? Visibility.Visible : Visibility.Collapsed;
+    /// <summary>When true (the Quick Controls flyout, where <see cref="AllowContextMenu"/> is false),
+    /// right-clicking a card or app chip shows a single "Settings" item that restores the main window on
+    /// the Quick Controls settings, instead of the full device menu. Constant per host.</summary>
+    public static readonly DependencyProperty QuickControlsMenuProperty = DependencyProperty.Register(
+        nameof(QuickControlsMenu), typeof(bool), typeof(DeviceCardView), new PropertyMetadata(false));
+
+    public bool QuickControlsMenu
+    {
+        get => (bool)GetValue(QuickControlsMenuProperty);
+        set => SetValue(QuickControlsMenuProperty, value);
+    }
 
     // Section dividers split into an over-art variant (a subtle stroke, shown when the card paints its
     // artwork background) and a plain variant (the window base fill, otherwise). Two elements rather
@@ -234,12 +266,6 @@ public sealed partial class DeviceCardView : UserControl
 
     public Visibility DividerPlain(bool wantsDivider, bool overArt) =>
         wantsDivider && !overArt ? Visibility.Visible : Visibility.Collapsed;
-
-    public Visibility RuleDividerOverArt(bool showRules, bool cardWants, bool overArt) =>
-        showRules && cardWants && overArt ? Visibility.Visible : Visibility.Collapsed;
-
-    public Visibility RuleDividerPlain(bool showRules, bool cardWants, bool overArt) =>
-        showRules && cardWants && !overArt ? Visibility.Visible : Visibility.Collapsed;
 
     /// <summary>Raised when "Rename group" is picked from a card/app-chip menu, so the host can focus
     /// the group's title editor (which lives in the page's tree, not here).</summary>
@@ -384,7 +410,13 @@ public sealed partial class DeviceCardView : UserControl
     private void OnAppChipFlyoutOpening(object sender, object e)
     {
         if (sender is not MenuFlyout flyout) return;
-        if (!AllowContextMenu) { flyout.Hide(); return; }
+        if (!AllowContextMenu)
+        {
+            if (!QuickControlsMenu) { flyout.Hide(); return; }
+            flyout.Items.Clear();
+            flyout.Items.Add(BuildQuickControlsSettingsItem());
+            return;
+        }
         if ((flyout.Target as FrameworkElement)?.Tag is not AppChip chip) return;
         flyout.Items.Clear();
 
@@ -483,7 +515,13 @@ public sealed partial class DeviceCardView : UserControl
     private void OnDeviceCardFlyoutOpening(object sender, object e)
     {
         if (sender is not MenuFlyout flyout || Card is not { } card) return;
-        if (!AllowContextMenu) { flyout.Hide(); return; }
+        if (!AllowContextMenu)
+        {
+            if (!QuickControlsMenu) { flyout.Hide(); return; }
+            flyout.Items.Clear();
+            flyout.Items.Add(BuildQuickControlsSettingsItem());
+            return;
+        }
         flyout.Items.Clear();
         AppendDeviceMenuItems(flyout.Items, card);
     }
@@ -535,6 +573,18 @@ public sealed partial class DeviceCardView : UserControl
         item.Click += click;
         return item;
     }
+
+    /// <summary>The Quick Controls flyout's sole item: restore the main window, jump to Settings, and
+    /// reveal the Quick Controls section. Built fresh per open, like the other menus.</summary>
+    private MenuFlyoutItem BuildQuickControlsSettingsItem()
+    {
+        var item = new MenuFlyoutItem { Text = "Settings", Icon = Glyph("") };
+        item.Click += OnQuickControlsSettingsClicked;
+        return item;
+    }
+
+    private void OnQuickControlsSettingsClicked(object sender, RoutedEventArgs e) =>
+        App.Current.OpenQuickControlsSettings();
 
     private static FontIcon Glyph(string glyph) => new() { Glyph = glyph };
 

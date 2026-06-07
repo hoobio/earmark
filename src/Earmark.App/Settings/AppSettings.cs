@@ -41,6 +41,28 @@ public sealed class AppSettings
 
     public QuickControlsDisplayMode QuickControlsDisplay { get; set; } = QuickControlsDisplayMode.CurrentlyActive;
 
+    // Quick Controls display overrides. The overlay is its own configurable view: these win over the
+    // matching Devices-page settings for the cards rendered in Quick Controls (the main window keeps the
+    // Devices-page settings). Defaults suit a dense, glanceable overlay.
+
+    /// <summary>Quick Controls: show each card's rules section. Default false (the overlay is for quick
+    /// volume/now-playing access, not rule editing).</summary>
+    public bool QuickControlsShowRules { get; set; }
+
+    /// <summary>Quick Controls: show the now-playing strip. Default true.</summary>
+    public bool QuickControlsShowNowPlaying { get; set; } = true;
+
+    /// <summary>Quick Controls: show the header badge row (flow / Default / Communications pills). Default false
+    /// (the dense overlay drops badges to keep cards short).</summary>
+    public bool QuickControlsShowDeviceBadges { get; set; }
+
+    /// <summary>Quick Controls: draw the hairline section dividers. Default false (the dense overlay relies on
+    /// spacing instead).</summary>
+    public bool QuickControlsShowDividers { get; set; }
+
+    /// <summary>Quick Controls: render cards in the compact layout. Default true.</summary>
+    public bool QuickControlsCompact { get; set; } = true;
+
     public bool VerboseLogging { get; set; }
 
     /// <summary>

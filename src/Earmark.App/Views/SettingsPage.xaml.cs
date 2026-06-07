@@ -38,6 +38,27 @@ public sealed partial class SettingsPage : Page
 
     public AboutViewModel About { get; }
 
+    /// <summary>Expands the Quick Controls settings and scrolls it into view. Invoked when "Settings" is
+    /// chosen from a Quick Controls card's context menu. Deferred to the dispatcher (and the Loaded event
+    /// when the singleton page is off-screen) so it runs after the page is shown and laid out.</summary>
+    public void RevealQuickControls()
+    {
+        void Reveal()
+        {
+            QuickControlsExpander.IsExpanded = true;
+            QuickControlsExpander.StartBringIntoView(new BringIntoViewOptions { VerticalAlignmentRatio = 0 });
+        }
+
+        void OnLoadedReveal(object sender, RoutedEventArgs e)
+        {
+            Loaded -= OnLoadedReveal;
+            DispatcherQueue.TryEnqueue(Reveal);
+        }
+
+        if (IsLoaded) DispatcherQueue.TryEnqueue(Reveal);
+        else Loaded += OnLoadedReveal;
+    }
+
     private void OnMeterPickerColourChanged(DependencyObject sender, DependencyProperty dp)
     {
         if (_syncingMeterColour || MeterColourPicker.SelectedColour is not Color colour) return;

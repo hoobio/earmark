@@ -88,11 +88,20 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     private readonly Dictionary<string, List<uint>> _tickPidsByAppKey = new(StringComparer.Ordinal);
     private readonly HashSet<string> _tickSeenAppsOnCard = new(StringComparer.Ordinal);
     private readonly PeakMeterOptions _meterOptions = new();
+    // A complete second options set for the Quick Controls overlay: every field mirrors the global
+    // options except the handful the QC settings override (rules / now-playing / badges / dividers /
+    // compact). The QC DeviceCardViews bind their Options to this, so the overlay is configured
+    // independently of the Devices page without duplicating the cards.
+    private readonly PeakMeterOptions _quickMeterOptions = new();
     private readonly DeviceUndoStack _undoStack = new();
 
     /// <summary>The shared meter/display options. Exposed so the page's <see cref="Controls.BlockWrapLayout"/>
     /// can bind its compact-aware <c>MinItemWidth</c> (<see cref="PeakMeterOptions.ColumnMinWidth"/>).</summary>
     public PeakMeterOptions MeterOptions => _meterOptions;
+
+    /// <summary>The Quick Controls overlay's display options (Devices-page settings with the QC overrides
+    /// applied). The overlay's cards bind <c>DeviceCardView.Options</c> to this.</summary>
+    public PeakMeterOptions QuickMeterOptions => _quickMeterOptions;
 
     // Effective-flag fans across cards: true when the feature is on globally OR forced on for any
     // device. Each card's MeterOptions already resolves override-or-global, so these just OR them.
@@ -990,6 +999,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
                     OnCardVisibilityToggled, OnCardQuickPinToggled, OnCardCustomisationChanged,
                     OnCardBluetoothToggle);
             }
+            card.QuickMeterOptions = _quickMeterOptions;
             rebuilt.Add(card);
         }
 
@@ -1075,6 +1085,31 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         _meterOptions.ShowNowPlaying = s.ShowNowPlaying;
         _meterOptions.NowPlayingCardBackground = s.NowPlayingCardBackground;
         foreach (var card in _allCards) card.NotifyMeterStyleChanged();
+        SyncQuickMeterOptions(s);
+    }
+
+    /// <summary>Mirrors the global options onto <see cref="_quickMeterOptions"/>, then applies the Quick
+    /// Controls overrides. The overlay's cards bind this, so QC's rules / now-playing / badges / dividers /
+    /// compact differ from the Devices page while everything else (meter colour, app chips, ...) matches.</summary>
+    private void SyncQuickMeterOptions(AppSettings s)
+    {
+        var q = _quickMeterOptions;
+        // Mirror everything from the global set...
+        q.ColourMode = _meterOptions.ColourMode;
+        q.ChannelMode = _meterOptions.ChannelMode;
+        q.ShowHold = _meterOptions.ShowHold;
+        q.SingleColour = _meterOptions.SingleColour;
+        q.ShowAppIndicators = _meterOptions.ShowAppIndicators;
+        q.ShowAppMeters = _meterOptions.ShowAppMeters;
+        q.AlwaysShowPinnedApps = _meterOptions.AlwaysShowPinnedApps;
+        q.CardHeight = _meterOptions.CardHeight;
+        q.NowPlayingCardBackground = _meterOptions.NowPlayingCardBackground;
+        // ...then override the five QC-specific knobs.
+        q.CompactCards = s.QuickControlsCompact;
+        q.ShowRules = s.QuickControlsShowRules;
+        q.ShowNowPlaying = s.QuickControlsShowNowPlaying;
+        q.ShowDeviceBadges = s.QuickControlsShowDeviceBadges;
+        q.ShowCardDividers = s.QuickControlsShowDividers;
     }
 
     /// <summary>

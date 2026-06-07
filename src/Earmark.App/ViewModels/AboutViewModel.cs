@@ -72,12 +72,17 @@ public partial class AboutViewModel : ObservableObject, IDisposable
     /// never reach the network).</summary>
     public bool CanCheck => !IsChecking && !AppInfo.IsDevBuild;
 
+    /// <summary>Whether update checks run on this build at all. False on local (Dev) builds, where the
+    /// whole update section (manual check and auto-check) is read-only. Settings cards bind IsEnabled to
+    /// this so the section greys out as one, not just the buttons inside it.</summary>
+    public bool IsUpdateCheckEnabled => IsUpdateCheckSupported && !AppInfo.IsDevBuild;
+
     /// <summary>
     /// Whether the auto-check toggle is interactive. Off for local (Dev) builds: they never
     /// auto-check, and a dev build shares settings.json with a side-by-side live install, so the
     /// toggle stays read-only to avoid flipping that shared setting.
     /// </summary>
-    public bool IsAutoCheckEnabled => IsUpdateCheckSupported && !AppInfo.IsDevBuild;
+    public bool IsAutoCheckEnabled => IsUpdateCheckEnabled;
 
     public string AutoCheckDescription => IsAutoCheckEnabled
         ? "Earmark checks GitHub for a newer release when it starts."

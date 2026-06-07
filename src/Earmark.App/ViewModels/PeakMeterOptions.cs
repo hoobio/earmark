@@ -61,11 +61,51 @@ public partial class PeakMeterOptions : ObservableObject
     [ObservableProperty]
     public partial bool CompactCards { get; set; }
 
+    // ---- Card-shell compact geometry ----
+    // Homed here (not on DeviceCard) so a per-view options object drives them: the main window binds the
+    // card's global options, Quick Controls binds its own, and the same card renders at either density.
+    // Roomy values are unchanged from the pre-refactor DeviceCard getters.
+
+    /// <summary>Inner padding of the card content stack. 16 roomy / 10 compact.</summary>
+    public Thickness CardContentPadding => CompactCards ? new Thickness(10) : new Thickness(16);
+
+    /// <summary>Vertical spacing between card sections. 12 roomy / 8 compact.</summary>
+    public double CardSectionSpacing => CompactCards ? 8 : 12;
+
+    /// <summary>Device icon tile size. 56 roomy / 40 compact.</summary>
+    public double IconTileSize => CompactCards ? 40 : 56;
+
+    /// <summary>Icon-tile glyph size. 28 roomy / 22 compact.</summary>
+    public double IconGlyphSize => CompactCards ? 22 : 28;
+
+    /// <summary>Wave Link channel bitmap size in the tile. 40 roomy / 28 compact.</summary>
+    public double WaveLinkIconSize => CompactCards ? 28 : 40;
+
+    /// <summary>Section-divider hairline margin (bleeds to the card edge, pulls the next section up).
+    /// -16/-6 roomy / -10/-4 compact.</summary>
+    public Thickness SectionDividerMargin => CompactCards ? new Thickness(-10, 0, -10, -4) : new Thickness(-16, 0, -16, -6);
+
+    /// <summary>Horizontal-bleed margin for the full-bleed now-playing band. -16 roomy / -10 compact.</summary>
+    public Thickness EdgeBleedMargin => CompactCards ? new Thickness(-10, 0, -10, 0) : new Thickness(-16, 0, -16, 0);
+
+    /// <summary>Volume row height. 28 roomy / 24 compact.</summary>
+    public double VolumeRowHeight => CompactCards ? 24 : 28;
+
+    /// <summary>Stacked peak-meter total height. 20 roomy / 14 compact.</summary>
+    public double MeterTotalHeight => CompactCards ? 14 : 20;
+
+    /// <summary>Meter-overlay volume slider margin (with a compact top-lift so the thumb centres on the
+    /// slim meter). 0,0,2,0 roomy / 0,-2,2,0 compact.</summary>
+    public Thickness VolumeSliderMargin => CompactCards ? new Thickness(0, -2, 2, 0) : new Thickness(0, 0, 2, 0);
+
+    /// <summary>Whether the "Rules" caption above the rule chips shows. Hidden in compact.</summary>
+    public bool ShowRulesCaption => !CompactCards;
+
     /// <summary>Inner padding of each now-playing strip in the current density. The strip band bleeds to
     /// the card edge, so the horizontal inset re-aligns its content to the card padding (16 roomy / 10
     /// compact). Bound from the strip template's own scope; re-raised when <see cref="CompactCards"/>
     /// flips, since the shared options instance (not the per-card properties) backs the strip template.</summary>
-    public Thickness NowPlayingStripPadding => CompactCards ? new Thickness(10, 8, 10, 4) : new Thickness(16, 12, 16, 6);
+    public Thickness NowPlayingStripPadding => CompactCards ? new Thickness(10, 4, 10, 2) : new Thickness(16, 12, 16, 6);
 
     /// <summary>Padding inside a rule summary chip. 12,10 roomy / 8,6 compact. Lives here (not just on
     /// the card) so the expanded additional-rules chips - whose template is RuleSummary-scoped - can
@@ -86,12 +126,79 @@ public partial class PeakMeterOptions : ObservableObject
     public const double DefaultColumnMinWidth = 320;
     public const double CompactColumnMinWidth = 256;
 
+    /// <summary>Top gap above a now-playing strip's title block. Roomy separates the title from the
+    /// app-name/meter line above it (6px); compact hides that line and hoists the title to the top, so
+    /// no gap. Bound from the strip template's own scope so it updates live with the toggle.</summary>
+    public Thickness NowPlayingTitleMargin => CompactCards ? new Thickness(0) : new Thickness(0, 6, 0, 0);
+
+    // Now-playing transport-control sizing. Compact shrinks the play/skip buttons so they're no taller
+    // than the title+artist block, otherwise the buttons drive the strip height (the "extra row" effect).
+    public double NowPlayingPlaySize => CompactCards ? 30 : 36;
+    public CornerRadius NowPlayingPlayCorner => new(CompactCards ? 15 : 18);
+    public double NowPlayingPlayGlyph => CompactCards ? 14 : 16;
+    public double NowPlayingSkipSize => CompactCards ? 28 : 32;
+    public CornerRadius NowPlayingSkipCorner => new(CompactCards ? 14 : 16);
+    public double NowPlayingSkipGlyph => CompactCards ? 12 : 14;
+
+    // Transport placement. Roomy spans the app-name row + title row and centres across both; compact
+    // hides the app-name row, so the controls sit in the title row only and centre with the title+artist
+    // (otherwise they centre against the empty header space and read too high).
+    public int NowPlayingControlsRow => CompactCards ? 1 : 0;
+    public int NowPlayingControlsRowSpan => CompactCards ? 1 : 2;
+    public VerticalAlignment NowPlayingTitleVAlign => CompactCards ? VerticalAlignment.Center : VerticalAlignment.Bottom;
+
+    /// <summary>Margin of the now-playing seek slider. The WinUI thumb renders ~6px below the control's
+    /// centre, so when the slider centres in the slim compact host the thumb hangs below and clips; a
+    /// negative top margin lifts the (overflow-centred) slider so the thumb lands at the host centre
+    /// (shift = (top-bottom)/2). Roomy keeps its original bottom-aligned nudge.</summary>
+    public Thickness NowPlayingSeekMargin => CompactCards ? new Thickness(0, -12, 0, 0) : new Thickness(0, 2, 0, -4);
+
+    /// <summary>Height of the seek slider's host in compact. The Slider template's 32px min body (mostly
+    /// empty around the thin track) padded out the strip's bottom; compact drops the host to 16 and lets
+    /// the slider overflow it centred (the host doesn't clip), so only the track + 14px thumb show and the
+    /// row is 16 tall. NaN (Auto) in the roomy layout so the host fits the slider and normal is unchanged.</summary>
+    public double NowPlayingSeekHostHeight => CompactCards ? 16 : double.NaN;
+
+    /// <summary>Top gap above the compact seek host so the slim seek bar isn't crammed against the
+    /// title/artist above it. Zero in the roomy layout (the slider's own margin spaces it there).</summary>
+    public Thickness NowPlayingSeekHostMargin => CompactCards ? new Thickness(0, 6, 0, 0) : new Thickness(0);
+
+    /// <summary>Seek slider alignment within its host: centred in compact (so the thumb sits in the middle
+    /// of the slim 16px host, not clipped), bottom-aligned in the roomy layout (unchanged).</summary>
+    public VerticalAlignment NowPlayingSeekVAlign => CompactCards ? VerticalAlignment.Center : VerticalAlignment.Bottom;
+
     partial void OnCompactCardsChanged(bool value)
     {
         OnPropertyChanged(nameof(NowPlayingStripPadding));
         OnPropertyChanged(nameof(RuleChipPadding));
         OnPropertyChanged(nameof(RuleChipSpacing));
         OnPropertyChanged(nameof(ColumnMinWidth));
+        OnPropertyChanged(nameof(NowPlayingTitleMargin));
+        OnPropertyChanged(nameof(NowPlayingPlaySize));
+        OnPropertyChanged(nameof(NowPlayingPlayCorner));
+        OnPropertyChanged(nameof(NowPlayingPlayGlyph));
+        OnPropertyChanged(nameof(NowPlayingSkipSize));
+        OnPropertyChanged(nameof(NowPlayingSkipCorner));
+        OnPropertyChanged(nameof(NowPlayingSkipGlyph));
+        OnPropertyChanged(nameof(NowPlayingControlsRow));
+        OnPropertyChanged(nameof(NowPlayingControlsRowSpan));
+        OnPropertyChanged(nameof(NowPlayingTitleVAlign));
+        OnPropertyChanged(nameof(NowPlayingSeekMargin));
+        OnPropertyChanged(nameof(NowPlayingSeekHostHeight));
+        OnPropertyChanged(nameof(NowPlayingSeekHostMargin));
+        OnPropertyChanged(nameof(NowPlayingSeekVAlign));
+        // Card-shell geometry.
+        OnPropertyChanged(nameof(CardContentPadding));
+        OnPropertyChanged(nameof(CardSectionSpacing));
+        OnPropertyChanged(nameof(IconTileSize));
+        OnPropertyChanged(nameof(IconGlyphSize));
+        OnPropertyChanged(nameof(WaveLinkIconSize));
+        OnPropertyChanged(nameof(SectionDividerMargin));
+        OnPropertyChanged(nameof(EdgeBleedMargin));
+        OnPropertyChanged(nameof(VolumeRowHeight));
+        OnPropertyChanged(nameof(MeterTotalHeight));
+        OnPropertyChanged(nameof(VolumeSliderMargin));
+        OnPropertyChanged(nameof(ShowRulesCaption));
     }
 
     /// <summary>Whether device cards show their rules section at all. Default on.</summary>

@@ -74,6 +74,22 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     public partial int QuickControlsDisplayIndex { get; set; }
 
+    // Quick Controls display overrides (win over the Devices page for the overlay).
+    [ObservableProperty]
+    public partial bool QuickControlsShowRules { get; set; }
+
+    [ObservableProperty]
+    public partial bool QuickControlsShowNowPlaying { get; set; }
+
+    [ObservableProperty]
+    public partial bool QuickControlsShowDeviceBadges { get; set; }
+
+    [ObservableProperty]
+    public partial bool QuickControlsShowDividers { get; set; }
+
+    [ObservableProperty]
+    public partial bool QuickControlsCompact { get; set; }
+
     public string QuickControlsHotkeyStatus => _hotkey.IsRegistered
         ? $"Global shortcut: {QuickControlsHotkey}"
         : _hotkey.RegistrationError ?? $"Global shortcut: {QuickControlsHotkey}";
@@ -329,6 +345,11 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
             QuickControlsHotkey = _settings.Current.QuickControlsHotkey;
             QuickControlsBackdropIndex = (int)_settings.Current.QuickControlsBackdrop;
             QuickControlsDisplayIndex = (int)_settings.Current.QuickControlsDisplay;
+            QuickControlsShowRules = _settings.Current.QuickControlsShowRules;
+            QuickControlsShowNowPlaying = _settings.Current.QuickControlsShowNowPlaying;
+            QuickControlsShowDeviceBadges = _settings.Current.QuickControlsShowDeviceBadges;
+            QuickControlsShowDividers = _settings.Current.QuickControlsShowDividers;
+            QuickControlsCompact = _settings.Current.QuickControlsCompact;
             VerboseLogging = _settings.Current.VerboseLogging;
             ShowAppIndicators = _settings.Current.ShowAppIndicators;
             ShowAppPeakMeters = _settings.Current.ShowAppPeakMeters;
@@ -379,6 +400,11 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     partial void OnVerboseLoggingChanged(bool value) => Persist(s => s.VerboseLogging = value);
     partial void OnQuickControlsBackdropIndexChanged(int value) => Persist(s => s.QuickControlsBackdrop = (QuickControlsBackdropMode)value);
     partial void OnQuickControlsDisplayIndexChanged(int value) => Persist(s => s.QuickControlsDisplay = (QuickControlsDisplayMode)value);
+    partial void OnQuickControlsShowRulesChanged(bool value) => Persist(s => s.QuickControlsShowRules = value);
+    partial void OnQuickControlsShowNowPlayingChanged(bool value) => Persist(s => s.QuickControlsShowNowPlaying = value);
+    partial void OnQuickControlsShowDeviceBadgesChanged(bool value) => Persist(s => s.QuickControlsShowDeviceBadges = value);
+    partial void OnQuickControlsShowDividersChanged(bool value) => Persist(s => s.QuickControlsShowDividers = value);
+    partial void OnQuickControlsCompactChanged(bool value) => Persist(s => s.QuickControlsCompact = value);
 
     public bool TrySetQuickControlsHotkey(string hotkey)
     {

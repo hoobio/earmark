@@ -126,6 +126,11 @@ public sealed partial class QuickControlsWindow : Window
         return height;
     }
 
+    // The group title's "Settings" context-menu item (member cards route their own copy through
+    // DeviceCardView). Mirrors the card item: jump to the Quick Controls settings in the main window.
+    private void OnQuickControlsSettingsClicked(object sender, RoutedEventArgs e) =>
+        App.Current.OpenQuickControlsSettings();
+
     public void ShowPrepared(bool animate = true)
     {
         if (animate)
