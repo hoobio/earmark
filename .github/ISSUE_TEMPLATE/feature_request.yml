@@ -33,10 +33,19 @@ body:
       required: false
 
   - type: textarea
+    id: mockup
+    attributes:
+      label: Mockup
+      description: If your idea is visual, drag in a mockup, sketch, or annotated screenshot of how the option could look.
+      placeholder: "Drag an image here to attach it."
+    validations:
+      required: false
+
+  - type: textarea
     id: context
     attributes:
       label: Additional Context
-      description: Screenshots, mockups, links to related issues, audio device specifics, or anything else that helps explain the request.
+      description: Links to related issues, audio device specifics, or anything else that helps explain the request.
     validations:
       required: false
 
