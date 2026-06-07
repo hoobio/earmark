@@ -30,10 +30,20 @@ public partial class NowPlayingStrip : ObservableObject
     // YouTube Music's auto-generated channels report the artist as "<Artist> - Topic".
     private static readonly Regex TopicSuffix =
         new(@"\s*[-\u2013\u2014]\s*topic\s*$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
-    // Strips any ()/[] group containing "Official" (e.g. "(Official Video)", "[Official Music Video]",
-    // "[Official Channel]"). Leading whitespace is absorbed so the trailing trim leaves no double spaces.
-    private static readonly Regex OfficialTag =
-        new(@"\s*[\(\[][^\)\]]*\bofficial\b[^\)\]]*[\)\]]", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    // Matches one ()/[] group (leading whitespace absorbed so removal leaves no double space). Whether
+    // the group is dropped is decided per-match by IsDescriptorNoise, not by the pattern alone.
+    private static readonly Regex BracketGroup =
+        new(@"\s*[\(\[]([^\)\]]*)[\)\]]", RegexOptions.Compiled);
+    private static readonly Regex WordToken = new(@"[\p{L}\p{N}]+", RegexOptions.Compiled);
+    // Words that mark a bracketed group as platform/format noise rather than part of the song name:
+    // "(Official Video)", "(Original Video)", "[Official Music Video]", "(Lyric Video)", "(Audio)",
+    // "(Visualizer)", "(HD)", "(4K)". A group is stripped only when EVERY word in it is noise, so a real
+    // parenthesised qualifier survives - "(Get Out)", "(feat. Drake)", "(Remix)", "(Original Mix)".
+    private static readonly HashSet<string> DescriptorNoise = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "official", "video", "audio", "lyric", "lyrics", "lyrical", "visualizer", "visualiser",
+        "music", "original", "channel", "hd", "hq", "uhd", "sd", "4k", "8k", "mv", "vevo",
+    };
 
     private readonly INowPlayingService _service;
     private readonly INowPlayingArtworkService _artwork;
@@ -51,6 +61,15 @@ public partial class NowPlayingStrip : ObservableObject
     private bool _pendingSeek;
     private double _pendingSeconds;
     private int _pendingTicks;
+    // Smoothed playback clock. SMTC reports Position truncated to whole seconds with a precise
+    // LastUpdatedTime, so re-anchoring to each ~1 Hz snapshot snaps the bar backward by the lost
+    // fraction every second - the visible "jump". Instead we run our own clock forward at 1x and only
+    // hard-resync it on a genuine discontinuity (seek, track change, pause/resume, stall), ignoring the
+    // sub-second truncation noise so playback advances smoothly. Absolute (matches PositionSeconds).
+    private const double ResyncThresholdSeconds = 1.5;
+    private double _clockSeconds;
+    private DateTime _clockAnchorUtc;
+    private bool _clockValid;
 
     public NowPlayingStrip(
         AppChip chip,
@@ -64,6 +83,7 @@ public partial class NowPlayingStrip : ObservableObject
         _service = service ?? throw new ArgumentNullException(nameof(service));
         _artwork = artwork ?? throw new ArgumentNullException(nameof(artwork));
         _meterOptions = meterOptions ?? throw new ArgumentNullException(nameof(meterOptions));
+        SyncClock(playbackChanged: false); // seed the clock from the initial snapshot
         _ = RefreshBackdropAsync();
     }
 
@@ -114,12 +134,40 @@ public partial class NowPlayingStrip : ObservableObject
     private double LivePositionSeconds()
     {
         if (!_info.HasTimeline) return 0;
-        var pos = _info.PositionSeconds;
-        if (_info.IsPlaying)
-        {
-            pos += (DateTime.UtcNow - _info.LastUpdatedUtc).TotalSeconds;
-        }
+        var pos = _clockValid ? ClockNowSeconds() : SnapshotNowSeconds();
         return Math.Clamp(pos, _info.StartSeconds, _info.EndSeconds) - _info.StartSeconds;
+    }
+
+    /// <summary>Absolute position the current SMTC snapshot reports right now (raw value plus the
+    /// elapsed-since-update interpolation while playing). The clock resyncs to this.</summary>
+    private double SnapshotNowSeconds()
+    {
+        var pos = _info.PositionSeconds;
+        if (_info.IsPlaying) pos += (DateTime.UtcNow - _info.LastUpdatedUtc).TotalSeconds;
+        return pos;
+    }
+
+    /// <summary>Absolute position the smoothed clock shows right now: its anchor plus real elapsed time
+    /// while playing (frozen while paused).</summary>
+    private double ClockNowSeconds()
+    {
+        var pos = _clockSeconds;
+        if (_info.IsPlaying) pos += (DateTime.UtcNow - _clockAnchorUtc).TotalSeconds;
+        return pos;
+    }
+
+    /// <summary>Reconciles the smoothed clock with the current snapshot. Keeps it running continuously
+    /// (no visible jump) unless the snapshot diverges past the resync threshold or the play/pause state
+    /// flipped - a real discontinuity worth snapping to.</summary>
+    private void SyncClock(bool playbackChanged)
+    {
+        if (!_info.HasTimeline) { _clockValid = false; return; }
+        var target = SnapshotNowSeconds();
+        var current = ClockNowSeconds();
+        var resync = !_clockValid || playbackChanged || Math.Abs(target - current) > ResyncThresholdSeconds;
+        _clockSeconds = resync ? target : current;
+        _clockAnchorUtc = DateTime.UtcNow;
+        _clockValid = true;
     }
 
     /// <summary>Begins a user seek drag: freezes the position at the current spot so neither the 20 Hz
@@ -196,8 +244,12 @@ public partial class NowPlayingStrip : ObservableObject
             OnPropertyChanged(nameof(IsLive));
         }
         if (Math.Abs(old.DurationSeconds - info.DurationSeconds) > 0.001) OnPropertyChanged(nameof(DurationSeconds));
-        // Don't push a fresh position onto the seek slider mid-drag, or the thumb jumps.
-        if (!_seeking) OnPropertyChanged(nameof(PositionSeconds));
+        // Don't reconcile the clock or push a fresh position onto the seek slider mid-drag, or the thumb jumps.
+        if (!_seeking)
+        {
+            SyncClock(playbackChanged: old.IsPlaying != info.IsPlaying);
+            OnPropertyChanged(nameof(PositionSeconds));
+        }
         _ = RefreshBackdropAsync();
     }
 
@@ -238,7 +290,7 @@ public partial class NowPlayingStrip : ObservableObject
     private static string CleanTitle(string title, string artist)
     {
         if (string.IsNullOrWhiteSpace(title)) return title;
-        title = OfficialTag.Replace(title, string.Empty).Trim();
+        title = StripDescriptorTags(title).Trim();
         if (string.IsNullOrWhiteSpace(artist)) return title;
         var m = ArtistPrefix.Match(title);
         if (!m.Success) return title;
@@ -252,7 +304,27 @@ public partial class NowPlayingStrip : ObservableObject
     /// would yield the space-less "KanyeWest".</summary>
     private static string CleanArtist(string artist) =>
         string.IsNullOrWhiteSpace(artist) ? artist
-            : OfficialTag.Replace(TopicSuffix.Replace(artist, string.Empty), string.Empty).Trim();
+            : StripDescriptorTags(TopicSuffix.Replace(artist, string.Empty)).Trim();
+
+    /// <summary>Removes bracketed platform/format tags ("(Official Video)", "(Original Video)", "[Lyric
+    /// Video]", "(Audio)", "(HD)" ...) wherever they sit in the text. A group is dropped only when every
+    /// word in it is a known descriptor (<see cref="DescriptorNoise"/>), so a meaningful parenthesised
+    /// qualifier - "(Get Out)", "(feat. X)", "(Remix)" - is preserved. Bare numbers (years like
+    /// "(2009)") don't by themselves mark a group as noise.</summary>
+    private static string StripDescriptorTags(string text) =>
+        BracketGroup.Replace(text, m => IsDescriptorNoise(m.Groups[1].Value) ? string.Empty : m.Value);
+
+    private static bool IsDescriptorNoise(string inner)
+    {
+        var noise = false;
+        foreach (Match token in WordToken.Matches(inner))
+        {
+            if (token.Value.All(char.IsDigit)) continue;          // bare number: doesn't decide
+            if (!DescriptorNoise.Contains(token.Value)) return false; // a real word: keep the group
+            noise = true;
+        }
+        return noise;
+    }
 
     /// <summary>Reduces an artist/channel name to a comparable core: strips a trailing "VEVO" or
     /// "- Topic", then keeps only letters/digits, lowercased. "KanyeWestVEVO", "Kanye West" and
