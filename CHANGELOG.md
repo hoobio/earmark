@@ -1,5 +1,29 @@
 # Changelog
 
+## [1.1.0](https://github.com/hoobio/earmark/compare/v1.0.0...v1.1.0) (2026-06-07)
+
+
+### Features
+
+* a Settings context menu on Quick Controls cards and group titles ([4ccac45](https://github.com/hoobio/earmark/commit/4ccac45751a7ce1e8717e0bceadcf674b6a6ce7f))
+* compact card density and Quick Controls display options ([#63](https://github.com/hoobio/earmark/issues/63)) ([4ccac45](https://github.com/hoobio/earmark/commit/4ccac45751a7ce1e8717e0bceadcf674b6a6ce7f))
+* compact card density mode for the Devices page and Quick Controls ([4ccac45](https://github.com/hoobio/earmark/commit/4ccac45751a7ce1e8717e0bceadcf674b6a6ce7f))
+* hideable device badges, globally and per device ([4ccac45](https://github.com/hoobio/earmark/commit/4ccac45751a7ce1e8717e0bceadcf674b6a6ce7f))
+* Quick Controls as a configurable view with its own rules, ([4ccac45](https://github.com/hoobio/earmark/commit/4ccac45751a7ce1e8717e0bceadcf674b6a6ce7f))
+
+
+### Bug Fixes
+
+* disable the whole update-check card on Dev builds, not just the ([4ccac45](https://github.com/hoobio/earmark/commit/4ccac45751a7ce1e8717e0bceadcf674b6a6ce7f))
+* drop platform tags from now-playing titles ([e9d2c92](https://github.com/hoobio/earmark/commit/e9d2c92cfa8b97f8e5d965cc749dc2db4999eb86))
+* even out Devices settings spacing by collapsing closed override ([4ccac45](https://github.com/hoobio/earmark/commit/4ccac45751a7ce1e8717e0bceadcf674b6a6ce7f))
+* smooth now-playing seek bar ([#65](https://github.com/hoobio/earmark/issues/65)) ([e9d2c92](https://github.com/hoobio/earmark/commit/e9d2c92cfa8b97f8e5d965cc749dc2db4999eb86))
+
+
+### Documentation
+
+* ask for an optional mockup in feature request template ([e9d2c92](https://github.com/hoobio/earmark/commit/e9d2c92cfa8b97f8e5d965cc749dc2db4999eb86))
+
 ## [1.0.0](https://github.com/hoobio/earmark/compare/v0.2.0...v1.0.0) (2026-06-06)
 
 
