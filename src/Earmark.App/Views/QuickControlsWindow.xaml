@@ -37,7 +37,7 @@
                 <Border Style="{StaticResource SectionCardStyle}"
                         Padding="0"
                         Opacity="{x:Bind CardOpacity, Mode=OneWay}">
-                    <controls:DeviceCardView Card="{x:Bind}" ShowRules="False" AllowContextMenu="False" />
+                    <controls:DeviceCardView Card="{x:Bind}" Options="{x:Bind QuickMeterOptions, Mode=OneWay}" AllowContextMenu="False" QuickControlsMenu="True" />
                 </Border>
             </DataTemplate>
 
@@ -47,6 +47,15 @@
                  extent (phantom whitespace + a stray recycled card) past the real content. -->
             <DataTemplate x:Key="QuickGroupTemplate" x:DataType="vm:DeviceGroupCard">
                 <StackPanel Spacing="8">
+                    <StackPanel.ContextFlyout>
+                        <MenuFlyout>
+                            <MenuFlyoutItem Text="Settings" Click="OnQuickControlsSettingsClicked">
+                                <MenuFlyoutItem.Icon>
+                                    <FontIcon Glyph="&#xE713;" />
+                                </MenuFlyoutItem.Icon>
+                            </MenuFlyoutItem>
+                        </MenuFlyout>
+                    </StackPanel.ContextFlyout>
                     <TextBlock Text="{x:Bind Title, Mode=OneWay}"
                                Margin="2,0,0,0"
                                FontWeight="SemiBold"

@@ -41,4 +41,5 @@ public sealed record DeviceCardSnapshot(
     bool? ShowAppMetersOverride,
     bool? MeterEnabledOverride,
     bool? ShowPeakIndicatorOverride,
-    bool? ShowRulesOverride);
+    bool? ShowRulesOverride,
+    bool? ShowDeviceBadgesOverride);

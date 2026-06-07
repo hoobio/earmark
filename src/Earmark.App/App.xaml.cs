@@ -167,6 +167,20 @@ public partial class App : Application
         chrome?.RestoreWindow();
     }
 
+    /// <summary>Restores the main window, navigates to Settings, and reveals the Quick Controls section.
+    /// Invoked from the Quick Controls overlay's "Settings" context-menu item (cards and group titles).</summary>
+    public void OpenQuickControlsSettings()
+    {
+        if (_host is null)
+        {
+            return;
+        }
+
+        RestoreFromBackground();
+        _host.Services.GetRequiredService<MainWindow>().NavigateByTag("Settings");
+        _host.Services.GetRequiredService<SettingsPage>().RevealQuickControls();
+    }
+
     public void DisposeHost()
     {
         if (_host is null)

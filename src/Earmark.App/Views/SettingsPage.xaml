@@ -51,9 +51,10 @@
                     <ToggleSwitch IsOn="{x:Bind ViewModel.LaunchOnStartup, Mode=TwoWay}" />
                 </ctrl:SettingsCard>
 
-                <ctrl:SettingsExpander Header="Quick Controls"
+                <ctrl:SettingsExpander x:Name="QuickControlsExpander"
+                                       Header="Quick Controls"
                                        Description="A floating device-control overlay for pinned devices and groups."
-                                       IsExpanded="{x:Bind ViewModel.QuickControlsEnabled, Mode=OneWay}">
+                                       IsExpanded="False">
                     <ctrl:SettingsExpander.HeaderIcon>
                         <FontIcon Glyph="&#xE718;" />
                     </ctrl:SettingsExpander.HeaderIcon>
@@ -82,11 +83,34 @@
                                 <ComboBoxItem Content="Default display" />
                             </ComboBox>
                         </ctrl:SettingsCard>
+                        <ctrl:SettingsCard Header="Compact layout"
+                                           Description="Render Quick Controls cards in the compact layout, independent of the Devices page.">
+                            <ToggleSwitch IsOn="{x:Bind ViewModel.QuickControlsCompact, Mode=TwoWay}" />
+                        </ctrl:SettingsCard>
+                        <ctrl:SettingsCard Header="Show now playing"
+                                           Description="Show the now-playing strip on Quick Controls cards.">
+                            <ToggleSwitch IsOn="{x:Bind ViewModel.QuickControlsShowNowPlaying, Mode=TwoWay}" />
+                        </ctrl:SettingsCard>
+                        <ctrl:SettingsCard Header="Show device badges"
+                                           Description="Show the Input / Output and Default / Communications pills on Quick Controls cards.">
+                            <ToggleSwitch IsOn="{x:Bind ViewModel.QuickControlsShowDeviceBadges, Mode=TwoWay}" />
+                        </ctrl:SettingsCard>
+                        <ctrl:SettingsCard Header="Show dividers"
+                                           Description="Draw the hairline section dividers on Quick Controls cards.">
+                            <ToggleSwitch IsOn="{x:Bind ViewModel.QuickControlsShowDividers, Mode=TwoWay}" />
+                        </ctrl:SettingsCard>
+                        <ctrl:SettingsCard Header="Show rules"
+                                           Description="Show each card's rules section in Quick Controls. Off keeps the overlay focused on volume and now-playing.">
+                            <ToggleSwitch IsOn="{x:Bind ViewModel.QuickControlsShowRules, Mode=TwoWay}" />
+                        </ctrl:SettingsCard>
                     </ctrl:SettingsExpander.Items>
                 </ctrl:SettingsExpander>
 
                 <TextBlock Text="Appearance" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,16,0,0" />
                 <ctrl:SettingsCard Header="Theme" Description="Choose a light or dark appearance, or follow the Windows setting.">
+                    <ctrl:SettingsCard.HeaderIcon>
+                        <FontIcon Glyph="&#xE771;" />
+                    </ctrl:SettingsCard.HeaderIcon>
                     <ComboBox SelectedIndex="{x:Bind ViewModel.AppThemeIndex, Mode=TwoWay}" MinWidth="140">
                         <ComboBoxItem Content="System" />
                         <ComboBoxItem Content="Light" />
@@ -94,40 +118,59 @@
                     </ComboBox>
                 </ctrl:SettingsCard>
                 <ctrl:SettingsCard Header="Backdrop" Description="The window's background material. Mica tints the desktop wallpaper, Acrylic blurs whatever sits behind the window, and Solid is an opaque themed surface.">
+                    <ctrl:SettingsCard.HeaderIcon>
+                        <FontIcon Glyph="&#xE81E;" />
+                    </ctrl:SettingsCard.HeaderIcon>
                     <ComboBox SelectedIndex="{x:Bind ViewModel.BackdropIndex, Mode=TwoWay}" MinWidth="140">
                         <ComboBoxItem Content="Mica" />
                         <ComboBoxItem Content="Acrylic" />
                         <ComboBoxItem Content="Solid" />
                     </ComboBox>
                 </ctrl:SettingsCard>
+                <ctrl:SettingsCard Header="Title bar text"
+                                   Description="Show the &quot;Earmark&quot; title and &quot;Audio rules engine&quot; subtitle in the title bar. Off leaves just the app icon and window buttons. The subtitle hides on its own when the window is too narrow to fit it.">
+                    <ctrl:SettingsCard.HeaderIcon>
+                        <FontIcon Glyph="&#xE7C4;" />
+                    </ctrl:SettingsCard.HeaderIcon>
+                    <ToggleSwitch IsOn="{x:Bind ViewModel.ShowTitleBarText, Mode=TwoWay}" />
+                </ctrl:SettingsCard>
 
                 <TextBlock Text="Devices" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,16,0,0" />
-                <ctrl:SettingsCard Header="Card height"
-                                   Description="How tall device cards are within a row. Balanced matches every card in a row to the tallest, cards playing apps included, but lets a card with its rules expanded keep its own height; Match row matches every card, expanded ones included; Dynamic sizes each card to its own content.">
-                    <ctrl:SettingsCard.HeaderIcon>
+                <ctrl:SettingsExpander Header="Device card appearance"
+                                       Description="Height, density, dividers, badges, and which sections show on each device card."
+                                       IsExpanded="False">
+                    <ctrl:SettingsExpander.HeaderIcon>
                         <FontIcon Glyph="&#xE8A9;" />
-                    </ctrl:SettingsCard.HeaderIcon>
-                    <ComboBox SelectedIndex="{x:Bind ViewModel.CardHeightModeIndex, Mode=TwoWay}" MinWidth="150">
-                        <ComboBoxItem Content="Balanced" />
-                        <ComboBoxItem Content="Match row" />
-                        <ComboBoxItem Content="Dynamic" />
-                    </ComboBox>
-                </ctrl:SettingsCard>
-                <ctrl:SettingsCard Header="Card dividers"
-                                   Description="Draw a thin separator line between each card's sections (volume, rules, apps), stacking them like a Windows Settings card. Off keeps the sections separated by spacing alone.">
-                    <ctrl:SettingsCard.HeaderIcon>
-                        <FontIcon Glyph="&#xE8A1;" />
-                    </ctrl:SettingsCard.HeaderIcon>
-                    <ToggleSwitch IsOn="{x:Bind ViewModel.ShowCardDividers, Mode=TwoWay}" />
-                </ctrl:SettingsCard>
-                <ctrl:SettingsCard Header="Show rules"
-                                   Description="Show each device card's rules section. Off hides the entire rules section on every card.">
-                    <ctrl:SettingsCard.HeaderIcon>
-                        <FontIcon Glyph="&#xE8A5;" />
-                    </ctrl:SettingsCard.HeaderIcon>
-                    <ToggleSwitch IsOn="{x:Bind ViewModel.ShowRules, Mode=TwoWay}" />
-                </ctrl:SettingsCard>
+                    </ctrl:SettingsExpander.HeaderIcon>
+                    <ctrl:SettingsExpander.Items>
+                        <ctrl:SettingsCard Header="Card height"
+                                           Description="How tall device cards are within a row. Balanced matches every card in a row to the tallest, cards playing apps included, but lets a card with its rules expanded keep its own height; Match row matches every card, expanded ones included; Dynamic sizes each card to its own content.">
+                            <ComboBox SelectedIndex="{x:Bind ViewModel.CardHeightModeIndex, Mode=TwoWay}" MinWidth="150">
+                                <ComboBoxItem Content="Balanced" />
+                                <ComboBoxItem Content="Match row" />
+                                <ComboBoxItem Content="Dynamic" />
+                            </ComboBox>
+                        </ctrl:SettingsCard>
+                        <ctrl:SettingsCard Header="Compact cards"
+                                           Description="Denser device cards: tighter padding and spacing, a smaller icon tile, and trimmed now-playing strips. Applies to the Devices page and Quick Controls.">
+                            <ToggleSwitch IsOn="{x:Bind ViewModel.CompactCards, Mode=TwoWay}" />
+                        </ctrl:SettingsCard>
+                        <ctrl:SettingsCard Header="Card dividers"
+                                           Description="Draw a thin separator line between each card's sections (volume, rules, apps), stacking them like a Windows Settings card. Off keeps the sections separated by spacing alone.">
+                            <ToggleSwitch IsOn="{x:Bind ViewModel.ShowCardDividers, Mode=TwoWay}" />
+                        </ctrl:SettingsCard>
+                        <ctrl:SettingsCard Header="Device badges"
+                                           Description="Show the Input / Output flow label and the Default / Communications / Disconnected pills on each card. Off hides that row and frees the space. Override per device in Customise.">
+                            <ToggleSwitch IsOn="{x:Bind ViewModel.ShowDeviceBadges, Mode=TwoWay}" />
+                        </ctrl:SettingsCard>
+                        <ctrl:SettingsCard Header="Show rules"
+                                           Description="Show each device card's rules section. Off hides the entire rules section on every card.">
+                            <ToggleSwitch IsOn="{x:Bind ViewModel.ShowRules, Mode=TwoWay}" />
+                        </ctrl:SettingsCard>
+                    </ctrl:SettingsExpander.Items>
+                </ctrl:SettingsExpander>
                 <InfoBar IsOpen="{x:Bind ViewModel.HasRulesOverrides, Mode=OneWay}" IsClosable="False"
+                         Visibility="{x:Bind ViewModel.HasRulesOverrides, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
                          Severity="Informational" Margin="0,4,0,0"
                          Message="{x:Bind ViewModel.RulesOverrideMessage, Mode=OneWay}"
                          ToolTipService.ToolTip="{x:Bind ViewModel.RulesOverrideTooltip, Mode=OneWay}">
@@ -137,7 +180,7 @@
                 </InfoBar>
                 <ctrl:SettingsExpander Header="App indicators"
                                        Description="Show a chip for each app playing through a device, on that device's card. Drag a chip onto another card to reroute the app."
-                                       IsExpanded="{x:Bind ViewModel.ShowAppIndicators, Mode=OneWay}">
+                                       IsExpanded="False">
                     <ctrl:SettingsExpander.HeaderIcon>
                         <FontIcon Glyph="&#xE71D;" />
                     </ctrl:SettingsExpander.HeaderIcon>
@@ -178,6 +221,7 @@
                     </ctrl:SettingsExpander.Items>
                 </ctrl:SettingsExpander>
                 <InfoBar IsOpen="{x:Bind ViewModel.HasAppIndicatorsOverrides, Mode=OneWay}" IsClosable="False"
+                         Visibility="{x:Bind ViewModel.HasAppIndicatorsOverrides, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
                          Severity="Informational" Margin="0,4,0,0"
                          Message="{x:Bind ViewModel.AppIndicatorsOverrideMessage, Mode=OneWay}"
                          ToolTipService.ToolTip="{x:Bind ViewModel.AppIndicatorsOverrideTooltip, Mode=OneWay}">
@@ -186,6 +230,7 @@
                     </InfoBar.ActionButton>
                 </InfoBar>
                 <InfoBar IsOpen="{x:Bind ViewModel.HasAppMetersOverrides, Mode=OneWay}" IsClosable="False"
+                         Visibility="{x:Bind ViewModel.HasAppMetersOverrides, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
                          Severity="Informational" Margin="0,4,0,0"
                          Title="Volume meters"
                          Message="{x:Bind ViewModel.AppMetersOverrideMessage, Mode=OneWay}"
@@ -197,7 +242,7 @@
 
                 <ctrl:SettingsExpander Header="Now playing"
                                        Description="Show a media strip on a device's card when an app playing through it exposes track info (title, artwork, transport controls) to Windows. The app's chip moves into the strip."
-                                       IsExpanded="{x:Bind ViewModel.ShowNowPlaying, Mode=OneWay}">
+                                       IsExpanded="False">
                     <ctrl:SettingsExpander.HeaderIcon>
                         <FontIcon Glyph="&#xE768;" />
                     </ctrl:SettingsExpander.HeaderIcon>
@@ -211,6 +256,7 @@
                     </ctrl:SettingsExpander.Items>
                 </ctrl:SettingsExpander>
                 <InfoBar IsOpen="{x:Bind ViewModel.HasNowPlayingOverrides, Mode=OneWay}" IsClosable="False"
+                         Visibility="{x:Bind ViewModel.HasNowPlayingOverrides, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
                          Severity="Informational" Margin="0,4,0,0"
                          Message="{x:Bind ViewModel.NowPlayingOverrideMessage, Mode=OneWay}"
                          ToolTipService.ToolTip="{x:Bind ViewModel.NowPlayingOverrideTooltip, Mode=OneWay}">
@@ -219,6 +265,7 @@
                     </InfoBar.ActionButton>
                 </InfoBar>
                 <InfoBar IsOpen="{x:Bind ViewModel.HasNowPlayingFillOverrides, Mode=OneWay}" IsClosable="False"
+                         Visibility="{x:Bind ViewModel.HasNowPlayingFillOverrides, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
                          Severity="Informational" Margin="0,4,0,0"
                          Title="Fill card background"
                          Message="{x:Bind ViewModel.NowPlayingFillOverrideMessage, Mode=OneWay}"
@@ -230,6 +277,9 @@
 
                 <ctrl:SettingsExpander Header="Peak meter"
                                        Description="The level meter behind each device's volume slider. Off hides it and shows a plain slider.">
+                    <ctrl:SettingsExpander.HeaderIcon>
+                        <FontIcon Glyph="&#xE9E9;" />
+                    </ctrl:SettingsExpander.HeaderIcon>
                     <ComboBox SelectedIndex="{x:Bind ViewModel.PeakMeterColourModeIndex, Mode=TwoWay}" MinWidth="150">
                         <ComboBoxItem Content="Gradient" />
                         <ComboBoxItem Content="Blocks" />
@@ -277,6 +327,7 @@
                     </ctrl:SettingsExpander.Items>
                 </ctrl:SettingsExpander>
                 <InfoBar IsOpen="{x:Bind ViewModel.HasMeterEnabledOverrides, Mode=OneWay}" IsClosable="False"
+                         Visibility="{x:Bind ViewModel.HasMeterEnabledOverrides, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
                          Severity="Informational" Margin="0,4,0,0"
                          Title="Peak meter"
                          Message="{x:Bind ViewModel.MeterEnabledOverrideMessage, Mode=OneWay}"
@@ -286,6 +337,7 @@
                     </InfoBar.ActionButton>
                 </InfoBar>
                 <InfoBar IsOpen="{x:Bind ViewModel.HasPeakIndicatorOverrides, Mode=OneWay}" IsClosable="False"
+                         Visibility="{x:Bind ViewModel.HasPeakIndicatorOverrides, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}"
                          Severity="Informational" Margin="0,4,0,0"
                          Title="Peak-hold tick"
                          Message="{x:Bind ViewModel.PeakIndicatorOverrideMessage, Mode=OneWay}"
@@ -306,7 +358,10 @@
                 <TextBlock Text="System tray" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,16,0,0" />
                 <ctrl:SettingsExpander Header="Show tray icon"
                                        Description="Display the Earmark icon in the Windows notification area. The behaviours below need it on."
-                                       IsExpanded="{x:Bind ViewModel.ShowTrayIcon, Mode=OneWay}">
+                                       IsExpanded="False">
+                    <ctrl:SettingsExpander.HeaderIcon>
+                        <FontIcon Glyph="&#xEA8F;" />
+                    </ctrl:SettingsExpander.HeaderIcon>
                     <ToggleSwitch IsOn="{x:Bind ViewModel.ShowTrayIcon, Mode=TwoWay}" />
                     <ctrl:SettingsExpander.Items>
                         <ctrl:SettingsCard Header="Minimize to tray"
@@ -330,7 +385,7 @@
                 <TextBlock Text="Wave Link" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,16,0,0" />
                 <ctrl:SettingsExpander Header="Wave Link integration"
                                        Description="Route Wave Link mix outputs from rules. Earmark connects to Wave Link's local WebSocket while the integration is on."
-                                       IsExpanded="{x:Bind ViewModel.EnableWaveLink, Mode=OneWay}">
+                                       IsExpanded="False">
                     <ctrl:SettingsExpander.HeaderIcon>
                         <FontIcon Glyph="&#xE767;" />
                     </ctrl:SettingsExpander.HeaderIcon>
@@ -362,6 +417,9 @@
 
                 <TextBlock Text="Diagnostics" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,16,0,0" />
                 <ctrl:SettingsCard Header="Verbose logging" Description="Write debug-level diagnostics to the log file. Leave off for normal use.">
+                    <ctrl:SettingsCard.HeaderIcon>
+                        <FontIcon Glyph="&#xE9D9;" />
+                    </ctrl:SettingsCard.HeaderIcon>
                     <ToggleSwitch IsOn="{x:Bind ViewModel.VerboseLogging, Mode=TwoWay}" />
                 </ctrl:SettingsCard>
                 <ctrl:SettingsCard Header="Logs"
@@ -401,8 +459,16 @@
                         <FontIcon Glyph="&#xE946;" />
                     </ctrl:SettingsCard.HeaderIcon>
                 </ctrl:SettingsCard>
+                <ctrl:SettingsCard Header="Support Earmark"
+                                   Description="Earmark is free and open source. If it's useful to you, a donation helps keep it maintained.">
+                    <ctrl:SettingsCard.HeaderIcon>
+                        <FontIcon Glyph="&#xEB51;" />
+                    </ctrl:SettingsCard.HeaderIcon>
+                    <HyperlinkButton Content="Donate" Click="OnDonate" />
+                </ctrl:SettingsCard>
                 <ctrl:SettingsCard Header="Check for updates"
                                    Description="{x:Bind About.UpdateStatusText, Mode=OneWay}"
+                                   IsEnabled="{x:Bind About.IsUpdateCheckEnabled}"
                                    Visibility="{x:Bind About.IsUpdateCheckSupported, Converter={StaticResource BooleanToVisibilityConverter}}">
                     <ctrl:SettingsCard.HeaderIcon>
                         <FontIcon Glyph="&#xE895;" />

@@ -53,6 +53,7 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     private bool? _meterEnabledOverride;
     private bool? _showPeakIndicatorOverride;
     private bool? _showRulesOverride;
+    private bool? _showDeviceBadgesOverride;
 
     private bool _suppressVolumeWrite;
     private float _leftHold;
@@ -95,6 +96,7 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         _meterEnabledOverride = snapshot.MeterEnabledOverride;
         _showPeakIndicatorOverride = snapshot.ShowPeakIndicatorOverride;
         _showRulesOverride = snapshot.ShowRulesOverride;
+        _showDeviceBadgesOverride = snapshot.ShowDeviceBadgesOverride;
         SyncEffectiveOptions();
         DeviceKey = snapshot.DeviceKey;
         Endpoint = snapshot.Endpoint;
@@ -122,6 +124,7 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         RuleMutedSource = snapshot.RuleMutedSource;
         RuleVolumeSource = snapshot.RuleVolumeSource;
         Rules = snapshot.Rules;
+        StampRuleOptions();
         for (var i = 1; i < Rules.Count; i++)
         {
             AdditionalRules.Add(Rules[i]);
@@ -148,6 +151,12 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     /// binding-site changes. Re-synced from the global template whenever either changes.</summary>
     public PeakMeterOptions MeterOptions { get; } = new();
 
+    /// <summary>The Quick Controls overlay's shared display options (the same instance for every card),
+    /// stamped by <c>HomeViewModel</c>. Not used by the card itself; the QC <c>DeviceCardView</c> binds
+    /// its <c>Options</c> to this so the overlay renders the card with the QC settings while the main
+    /// window uses the card's own (global) <see cref="MeterOptions"/>.</summary>
+    public PeakMeterOptions? QuickMeterOptions { get; set; }
+
     /// <summary>Folds the global options plus this device's overrides into <see cref="MeterOptions"/>.
     /// Style-only fields (colour / channels / card height / dividers / always-show-pinned) mirror the
     /// global verbatim; the six overridable display flags resolve as <c>override ?? global</c>.</summary>
@@ -166,11 +175,13 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         MeterOptions.SingleColour = g.SingleColour;
         MeterOptions.CardHeight = g.CardHeight;
         MeterOptions.ShowCardDividers = g.ShowCardDividers;
+        MeterOptions.CompactCards = g.CompactCards;
         MeterOptions.AlwaysShowPinnedApps = g.AlwaysShowPinnedApps;
         MeterOptions.ShowHold = _showPeakIndicatorOverride ?? g.ShowHold;
         MeterOptions.ShowAppIndicators = _showAppIndicatorsOverride ?? g.ShowAppIndicators;
         MeterOptions.ShowAppMeters = _showAppMetersOverride ?? g.ShowAppMeters;
         MeterOptions.ShowRules = _showRulesOverride ?? g.ShowRules;
+        MeterOptions.ShowDeviceBadges = _showDeviceBadgesOverride ?? g.ShowDeviceBadges;
         MeterOptions.ShowNowPlaying = _showNowPlayingOverride ?? g.ShowNowPlaying;
         MeterOptions.NowPlayingCardBackground = _nowPlayingFillOverride ?? g.NowPlayingCardBackground;
     }
@@ -198,6 +209,9 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     /// <summary>The rules-section override (null = follow global).</summary>
     public bool? ShowRulesOverride => _showRulesOverride;
 
+    /// <summary>The header-badge-row override (null = follow global).</summary>
+    public bool? ShowDeviceBadgesOverride => _showDeviceBadgesOverride;
+
     // Current global defaults for the six overridable flags, so the Customise dialog can label its
     // "Use global (On/Off)" option with what following the global would currently do.
     public bool GlobalShowNowPlaying => _globalOptions.ShowNowPlaying;
@@ -207,6 +221,7 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     public bool GlobalMeterEnabled => _globalOptions.ShowMeter;
     public bool GlobalShowPeakIndicator => _globalOptions.ShowHold;
     public bool GlobalShowRules => _globalOptions.ShowRules;
+    public bool GlobalShowDeviceBadges => _globalOptions.ShowDeviceBadges;
 
     /// <summary>Sets the per-device display overrides without persisting (used by the in-place
     /// rebuild and the Settings "Clear overrides" path, which re-reads from the saved config).
@@ -214,7 +229,8 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     /// override actually changed, so the caller can decide whether to re-run the apps reconcile.</summary>
     public bool ApplyFeatureOverrides(
         bool? showNowPlaying, bool? nowPlayingFill, bool? showAppIndicators,
-        bool? showAppMeters, bool? meterEnabled, bool? showPeakIndicator, bool? showRules)
+        bool? showAppMeters, bool? meterEnabled, bool? showPeakIndicator, bool? showRules,
+        bool? showDeviceBadges)
     {
         var changed =
             _showNowPlayingOverride != showNowPlaying
@@ -223,7 +239,8 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
             || _showAppMetersOverride != showAppMeters
             || _meterEnabledOverride != meterEnabled
             || _showPeakIndicatorOverride != showPeakIndicator
-            || _showRulesOverride != showRules;
+            || _showRulesOverride != showRules
+            || _showDeviceBadgesOverride != showDeviceBadges;
         if (!changed) return false;
 
         _showNowPlayingOverride = showNowPlaying;
@@ -233,6 +250,7 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         _meterEnabledOverride = meterEnabled;
         _showPeakIndicatorOverride = showPeakIndicator;
         _showRulesOverride = showRules;
+        _showDeviceBadgesOverride = showDeviceBadges;
         NotifyMeterStyleChanged();
         return true;
     }
@@ -879,6 +897,7 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         RuleVolumeSource = summary.RuleVolumeSource;
 
         Rules = summary.Rules;
+        StampRuleOptions();
         AdditionalRules.Clear();
         for (var i = 1; i < Rules.Count; i++) AdditionalRules.Add(Rules[i]);
 
@@ -890,6 +909,14 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         OnPropertyChanged(nameof(ShowRulesDivider));
         OnPropertyChanged(nameof(FirstRule));
         OnPropertyChanged(nameof(AdditionalRulesLabel));
+    }
+
+    /// <summary>Stamps this card's effective <see cref="MeterOptions"/> onto each rule summary so the
+    /// RuleSummary-scoped chip template can bind the (live) compact rule-chip geometry. The first-rule
+    /// chip binds the card's own properties; the expanded chips rely on this.</summary>
+    private void StampRuleOptions()
+    {
+        foreach (var rule in Rules) rule.Options = MeterOptions;
     }
 
     /// <summary>
@@ -923,6 +950,7 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         RuleVolumeSource = snapshot.RuleVolumeSource;
 
         Rules = snapshot.Rules;
+        StampRuleOptions();
         AdditionalRules.Clear();
         for (var i = 1; i < Rules.Count; i++) AdditionalRules.Add(Rules[i]);
 
@@ -941,7 +969,8 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         ApplyFeatureOverrides(
             snapshot.ShowNowPlayingOverride, snapshot.NowPlayingFillOverride,
             snapshot.ShowAppIndicatorsOverride, snapshot.ShowAppMetersOverride,
-            snapshot.MeterEnabledOverride, snapshot.ShowPeakIndicatorOverride, snapshot.ShowRulesOverride);
+            snapshot.MeterEnabledOverride, snapshot.ShowPeakIndicatorOverride, snapshot.ShowRulesOverride,
+            snapshot.ShowDeviceBadgesOverride);
 
         // Endpoint-derived bindings (defaults can shift, the id can change on reinstall). The
         // observable setters above already raised their own dependents; these are the non-observable

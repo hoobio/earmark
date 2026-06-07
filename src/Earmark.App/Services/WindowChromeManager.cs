@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 
 using Earmark.App.Settings;
+using Earmark.App.ViewModels;
 
 using H.NotifyIcon;
 
@@ -25,7 +26,13 @@ internal sealed class WindowChromeManager : IWindowChromeManager, IDisposable
     private const uint WM_SYSCOMMAND = 0x0112;
     private const uint SC_MINIMIZE = 0xF020;
     private const uint WM_GETMINMAXINFO = 0x0024;
-    private const int MinWindowWidthDip = 440;
+    // One device-card column at its min width plus the Devices page side padding (DevicesScrollPadding,
+    // 16+16). At this width the NavigationView is in its minimal mode, so the content region spans the
+    // full window and a single card fits without clipping. Compact cards use a ~20%-narrower column
+    // (PeakMeterOptions.ColumnMinWidth), so the floor follows the live Compact setting.
+    private const int DevicesSidePaddingDip = 32;
+    private static int MinWindowWidthDip(bool compact) =>
+        (int)(compact ? PeakMeterOptions.CompactColumnMinWidth : PeakMeterOptions.DefaultColumnMinWidth) + DevicesSidePaddingDip;
     private const int MinWindowHeightDip = 340;
 
     private readonly ISettingsService _settings;
@@ -234,7 +241,7 @@ internal sealed class WindowChromeManager : IWindowChromeManager, IDisposable
             var dpi = GetDpiForWindow(hWnd);
             var scale = dpi == 0 ? 1.0 : dpi / 96.0;
             var mmi = Marshal.PtrToStructure<MINMAXINFO>(lParam);
-            mmi.ptMinTrackSize.x = (int)Math.Round(MinWindowWidthDip * scale);
+            mmi.ptMinTrackSize.x = (int)Math.Round(MinWindowWidthDip(_settings.Current.CompactCards) * scale);
             mmi.ptMinTrackSize.y = (int)Math.Round(MinWindowHeightDip * scale);
             Marshal.StructureToPtr(mmi, lParam, fDeleteOld: false);
             return 0;

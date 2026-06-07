@@ -74,6 +74,22 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     public partial int QuickControlsDisplayIndex { get; set; }
 
+    // Quick Controls display overrides (win over the Devices page for the overlay).
+    [ObservableProperty]
+    public partial bool QuickControlsShowRules { get; set; }
+
+    [ObservableProperty]
+    public partial bool QuickControlsShowNowPlaying { get; set; }
+
+    [ObservableProperty]
+    public partial bool QuickControlsShowDeviceBadges { get; set; }
+
+    [ObservableProperty]
+    public partial bool QuickControlsShowDividers { get; set; }
+
+    [ObservableProperty]
+    public partial bool QuickControlsCompact { get; set; }
+
     public string QuickControlsHotkeyStatus => _hotkey.IsRegistered
         ? $"Global shortcut: {QuickControlsHotkey}"
         : _hotkey.RegistrationError ?? $"Global shortcut: {QuickControlsHotkey}";
@@ -111,9 +127,22 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     public partial int CardHeightModeIndex { get; set; }
 
+    /// <summary>Whether the title bar shows the app title and subtitle. Default on.</summary>
+    [ObservableProperty]
+    public partial bool ShowTitleBarText { get; set; }
+
     /// <summary>Whether device cards draw hairline separators between their sections. Default on.</summary>
     [ObservableProperty]
     public partial bool ShowCardDividers { get; set; }
+
+    /// <summary>Whether device cards render in the denser compact layout. Default off.</summary>
+    [ObservableProperty]
+    public partial bool CompactCards { get; set; }
+
+    /// <summary>Whether device cards show the header badge row (flow label + Default / Communications /
+    /// Disconnected pills). Default on.</summary>
+    [ObservableProperty]
+    public partial bool ShowDeviceBadges { get; set; }
 
     /// <summary>Whether each device card shows its rules section and no-rules text. Default on.</summary>
     [ObservableProperty]
@@ -316,6 +345,11 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
             QuickControlsHotkey = _settings.Current.QuickControlsHotkey;
             QuickControlsBackdropIndex = (int)_settings.Current.QuickControlsBackdrop;
             QuickControlsDisplayIndex = (int)_settings.Current.QuickControlsDisplay;
+            QuickControlsShowRules = _settings.Current.QuickControlsShowRules;
+            QuickControlsShowNowPlaying = _settings.Current.QuickControlsShowNowPlaying;
+            QuickControlsShowDeviceBadges = _settings.Current.QuickControlsShowDeviceBadges;
+            QuickControlsShowDividers = _settings.Current.QuickControlsShowDividers;
+            QuickControlsCompact = _settings.Current.QuickControlsCompact;
             VerboseLogging = _settings.Current.VerboseLogging;
             ShowAppIndicators = _settings.Current.ShowAppIndicators;
             ShowAppPeakMeters = _settings.Current.ShowAppPeakMeters;
@@ -323,7 +357,10 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
             AlwaysShowPinnedApps = _settings.Current.AlwaysShowPinnedApps;
             AppChipLingerSeconds = _settings.Current.AppChipLingerSeconds;
             CardHeightModeIndex = (int)_settings.Current.CardHeight;
+            ShowTitleBarText = _settings.Current.ShowTitleBarText;
             ShowCardDividers = _settings.Current.ShowCardDividers;
+            CompactCards = _settings.Current.CompactCards;
+            ShowDeviceBadges = _settings.Current.ShowDeviceBadges;
             ShowRules = _settings.Current.ShowRules;
             ShowNowPlaying = _settings.Current.ShowNowPlaying;
             NowPlayingCardBackground = _settings.Current.NowPlayingCardBackground;
@@ -363,6 +400,11 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     partial void OnVerboseLoggingChanged(bool value) => Persist(s => s.VerboseLogging = value);
     partial void OnQuickControlsBackdropIndexChanged(int value) => Persist(s => s.QuickControlsBackdrop = (QuickControlsBackdropMode)value);
     partial void OnQuickControlsDisplayIndexChanged(int value) => Persist(s => s.QuickControlsDisplay = (QuickControlsDisplayMode)value);
+    partial void OnQuickControlsShowRulesChanged(bool value) => Persist(s => s.QuickControlsShowRules = value);
+    partial void OnQuickControlsShowNowPlayingChanged(bool value) => Persist(s => s.QuickControlsShowNowPlaying = value);
+    partial void OnQuickControlsShowDeviceBadgesChanged(bool value) => Persist(s => s.QuickControlsShowDeviceBadges = value);
+    partial void OnQuickControlsShowDividersChanged(bool value) => Persist(s => s.QuickControlsShowDividers = value);
+    partial void OnQuickControlsCompactChanged(bool value) => Persist(s => s.QuickControlsCompact = value);
 
     public bool TrySetQuickControlsHotkey(string hotkey)
     {
@@ -477,7 +519,10 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         Persist(s => s.AppChipLingerSeconds = seconds);
     }
     partial void OnCardHeightModeIndexChanged(int value) => Persist(s => s.CardHeight = (CardHeightMode)value);
+    partial void OnShowTitleBarTextChanged(bool value) => Persist(s => s.ShowTitleBarText = value);
     partial void OnShowCardDividersChanged(bool value) => Persist(s => s.ShowCardDividers = value);
+    partial void OnCompactCardsChanged(bool value) => Persist(s => s.CompactCards = value);
+    partial void OnShowDeviceBadgesChanged(bool value) => Persist(s => s.ShowDeviceBadges = value);
     partial void OnShowRulesChanged(bool value) => Persist(s => s.ShowRules = value);
     partial void OnShowNowPlayingChanged(bool value)
     {

@@ -2,7 +2,11 @@
 
 An audio companion for Windows, built around a regex-driven rules engine. Routing rules pin each app to the device you want (a browser to your media DAC, Discord onto your headset mic, the system default to a specific endpoint) and keep it there across reboots, app updates, and driver reinstalls. Around that sits a live per-device mixer, now-playing with media controls, and quick access from the tray or a global shortcut. Like Volume Mixer's per-app device picker, but pattern-driven and persistent. A full control centre.
 
-[![Download from GitHub Releases](https://img.shields.io/github/v/release/hoobio/earmark?label=Download&logo=github&style=for-the-badge&color=181717)](https://github.com/hoobio/earmark/releases/latest)
+[![Get it from Microsoft Store](https://img.shields.io/badge/Microsoft%20Store-Install-0078D4?style=for-the-badge&logo=data:image/png;base64,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)](https://apps.microsoft.com/detail/9N27KG5M9W9B)
+&nbsp;&nbsp;&nbsp;&nbsp;
+[![Download from GitHub Releases](https://img.shields.io/github/v/release/hoobio/earmark?label=Download%20from%20GitHub&logo=github&style=for-the-badge&color=181717)](https://github.com/hoobio/earmark/releases/latest)
+&nbsp;&nbsp;&nbsp;&nbsp;
+[![Donate with PayPal](https://img.shields.io/badge/Donate-PayPal-003087?style=for-the-badge&logo=paypal)](https://www.paypal.com/donate/?hosted_button_id=SWG4G7VH3ZFQN)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![GitHub Stars](https://img.shields.io/github/stars/hoobio/earmark?style=social)](https://github.com/hoobio/earmark/stargazers)
@@ -50,6 +54,12 @@ An audio companion for Windows, built around a regex-driven rules engine. Routin
 No external CLIs, no service install, no admin rights.
 
 ## Installation
+
+### Microsoft Store
+
+**[Get it from the Microsoft Store](https://apps.microsoft.com/detail/9N27KG5M9W9B)** for automatic updates.
+
+> The Store version may lag behind GitHub Releases due to Microsoft's certification process. Install from GitHub if you need the latest version immediately.
 
 ### GitHub Releases
 

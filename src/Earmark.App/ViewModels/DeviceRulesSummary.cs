@@ -17,6 +17,12 @@ public sealed record RuleSummary(
 {
     public bool HasMatchSummary => !string.IsNullOrEmpty(MatchSummary);
 
+    /// <summary>Shared display options, stamped by the owning <see cref="DeviceCard"/> so the
+    /// RuleSummary-scoped chip template can bind the compact rule-chip geometry
+    /// (<see cref="PeakMeterOptions.RuleChipPadding"/> / <see cref="PeakMeterOptions.RuleChipSpacing"/>)
+    /// and update live with the compact toggle. Not set by the pure summary builder; null until stamped.</summary>
+    public PeakMeterOptions? Options { get; set; }
+
     /// <summary>Same dim-out logic the Rules page uses for non-active rules.</summary>
     public double Opacity => Status switch
     {

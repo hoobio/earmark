@@ -120,6 +120,18 @@ public sealed partial class ChannelPeakMeter : UserControl
         set => SetValue(BarHeightOverrideProperty, value);
     }
 
+    /// <summary>When &gt; 0, overrides the total stacked-meter height (default 20) that the channel bars
+    /// divide between them - used by compact cards to slim the meter. Ignored if
+    /// <see cref="BarHeightOverride"/> is set (the app-chip underbar path).</summary>
+    public static readonly DependencyProperty TotalHeightOverrideProperty = DependencyProperty.Register(
+        nameof(TotalHeightOverride), typeof(double), typeof(ChannelPeakMeter), new PropertyMetadata(0.0, OnShapeChanged));
+
+    public double TotalHeightOverride
+    {
+        get => (double)GetValue(TotalHeightOverrideProperty);
+        set => SetValue(TotalHeightOverrideProperty, value);
+    }
+
     public static readonly DependencyProperty ShowHoldProperty = DependencyProperty.Register(
         nameof(ShowHold), typeof(bool), typeof(ChannelPeakMeter), new PropertyMetadata(true, OnShapeChanged));
 
@@ -187,9 +199,10 @@ public sealed partial class ChannelPeakMeter : UserControl
             }
         }
 
+        var totalHeight = TotalHeightOverride > 0 ? TotalHeightOverride : TotalMeterHeight;
         var barHeight = BarHeightOverride > 0
             ? BarHeightOverride
-            : TotalMeterHeight / count;
+            : totalHeight / count;
 
         // Rounded ends on the outer corners only so the stack reads as one block; radius =
         // half the stack height for pill ends matching the old single bar.
