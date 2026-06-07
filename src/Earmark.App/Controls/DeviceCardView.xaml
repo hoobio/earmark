@@ -557,11 +557,14 @@
                                             </Button>
                                         </StackPanel>
 
-                                        <!-- Seek bar: a real Slider (draggable thumb). Value is the
-                                             position in seconds (Maximum = duration) so the thumb tooltip
-                                             shows a timestamp; a drag seeks on release (Esc cancels).
-                                             Pointer handlers are wired in code-behind with handledEventsToo
-                                             so grabbing the thumb still freezes the bar. -->
+                                        <!-- Seek bar (custom; no Slider). The track/fill/thumb ARE the control:
+                                             the fill (ScaleX) and thumb (TranslateX) are positioned by
+                                             RenderTransforms, which are sub-pixel and render-thread, so they glide
+                                             as the 20 Hz position advances. A WinUI Slider can't do this - it
+                                             recomputes its thumb offset via layout and rounds to a whole pixel each
+                                             frame (~1px/second on a narrow card = the visible "jump"). Code-behind
+                                             drives the transforms from the strip position and handles pointer/keyboard
+                                             seeking (drag to scrub, commit on release, Esc cancels). -->
                                         <!-- Seek host: a fixed-height row in compact (16) that the slider
                                              overflows centred (the host doesn't clip), so the row is slim
                                              without the template's 32px body padding out the bottom and
@@ -570,22 +573,50 @@
                                               Height="{x:Bind Options.NowPlayingSeekHostHeight, Mode=OneWay}"
                                               Margin="{x:Bind Options.NowPlayingSeekHostMargin, Mode=OneWay}"
                                               Visibility="{x:Bind Strip.HasProgress, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
-                                            <Slider Minimum="0"
-                                                    Maximum="{x:Bind Strip.DurationSeconds, Mode=OneWay}"
-                                                    StepFrequency="1"
-                                                    Value="{x:Bind Strip.PositionSeconds, Mode=OneWay}"
-                                                    ThumbToolTipValueConverter="{StaticResource SecondsToTimestampConverter}"
-                                                    Margin="{x:Bind Options.NowPlayingSeekMargin, Mode=OneWay}"
-                                                    VerticalAlignment="{x:Bind Options.NowPlayingSeekVAlign, Mode=OneWay}"
-                                                    Tag="{x:Bind Strip}"
-                                                    Loaded="OnSeekSliderLoaded">
-                                                <!-- Default (theme-aware, accessible) slider chrome; thumb
-                                                     sized to match the volume slider for visual consistency. -->
-                                                <Slider.Resources>
-                                                    <x:Double x:Key="SliderHorizontalThumbWidth">14</x:Double>
-                                                    <x:Double x:Key="SliderHorizontalThumbHeight">14</x:Double>
-                                                </Slider.Resources>
-                                            </Slider>
+                                            <Grid Tag="{x:Bind Strip}"
+                                                  Background="Transparent"
+                                                  IsTabStop="True"
+                                                  UseSystemFocusVisuals="True"
+                                                  Margin="{x:Bind Options.NowPlayingSeekMargin, Mode=OneWay}"
+                                                  AutomationProperties.Name="Seek position"
+                                                  Loaded="OnSeekBarLoaded"
+                                                  Unloaded="OnSeekBarUnloaded"
+                                                  SizeChanged="OnSeekBarSizeChanged"
+                                                  PointerPressed="OnSeekBarPointerPressed"
+                                                  PointerMoved="OnSeekBarPointerMoved"
+                                                  PointerReleased="OnSeekBarPointerReleased"
+                                                  PointerCaptureLost="OnSeekBarPointerReleased"
+                                                  KeyDown="OnSeekBarKeyDown"
+                                                  KeyUp="OnSeekBarKeyUp">
+                                                <Border Height="3" CornerRadius="1.5" VerticalAlignment="Center"
+                                                        Background="{ThemeResource ControlStrongFillColorDefaultBrush}" />
+                                                <Border Tag="SeekFill" Height="3" CornerRadius="1.5"
+                                                        HorizontalAlignment="Stretch" VerticalAlignment="Center"
+                                                        RenderTransformOrigin="0,0.5"
+                                                        Background="{ThemeResource AccentFillColorDefaultBrush}">
+                                                    <Border.RenderTransform>
+                                                        <ScaleTransform ScaleX="0" />
+                                                    </Border.RenderTransform>
+                                                </Border>
+                                                <Ellipse Tag="SeekThumb" Width="14" Height="14"
+                                                         HorizontalAlignment="Left" VerticalAlignment="Center"
+                                                         Fill="{ThemeResource AccentFillColorDefaultBrush}">
+                                                    <Ellipse.RenderTransform>
+                                                        <TranslateTransform />
+                                                    </Ellipse.RenderTransform>
+                                                </Ellipse>
+                                                <!-- Drag/keyboard-seek timestamp; a Popup so it floats above
+                                                     the bar without being clipped. Positioned in code to follow
+                                                     the thumb. -->
+                                                <Popup Tag="SeekTip">
+                                                    <Border Background="{ThemeResource SolidBackgroundFillColorSecondaryBrush}"
+                                                            BorderBrush="{ThemeResource SurfaceStrokeColorFlyoutBrush}"
+                                                            BorderThickness="1" CornerRadius="4" Padding="6,1">
+                                                        <TextBlock Tag="SeekTipText" FontSize="12"
+                                                                   Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
+                                                    </Border>
+                                                </Popup>
+                                            </Grid>
                                         </Grid>
 
                                         <!-- LIVE indicator: shown instead of the seek bar for a live /

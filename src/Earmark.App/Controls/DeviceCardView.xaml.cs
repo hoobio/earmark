@@ -1,3 +1,5 @@
+using System.ComponentModel;
+
 using Earmark.App.ViewModels;
 using Earmark.App.Views;
 
@@ -6,6 +8,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.UI.Input;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Hosting;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
@@ -465,49 +468,211 @@ public sealed partial class DeviceCardView : UserControl
         }
     }
 
-    // ---- Now-playing seek slider (freeze position while dragging, seek on release) ----
+    // ---- Now-playing seek bar (custom; track/fill/thumb are RenderTransform-positioned so they glide) ----
 
-    // Grabbing the Slider's Thumb marks the pointer events handled, so plain XAML handlers never fire.
-    // Wiring them with handledEventsToo:true (and on the Thumb's drag, via PointerCaptureLost for the
-    // end) makes the freeze engage whether the user grabs the thumb or clicks the track.
-    private void OnSeekSliderLoaded(object sender, RoutedEventArgs e)
+    // The seek bar is a plain Grid, not a Slider: a Slider positions its thumb via layout and rounds the
+    // offset to a whole pixel each frame, which on a narrow card steps ~once a second. Here the fill (ScaleX)
+    // and thumb (TranslateX) are moved by RenderTransforms - sub-pixel, render-thread - driven from the strip
+    // position at 20 Hz, so they glide. Code-behind also owns the interaction: drag to scrub (freezes the
+    // strip), commit on release, Esc cancels, arrow/page/Home/End nudge.
+    private const double SeekNudgeSeconds = 5;
+    private const double SeekPageSeconds = 15;
+
+    private sealed class SeekBar
     {
-        if (sender is not Slider slider) return;
-        slider.AddHandler(PointerPressedEvent, new PointerEventHandler(OnSeekSliderPressed), handledEventsToo: true);
-        slider.AddHandler(PointerReleasedEvent, new PointerEventHandler(OnSeekSliderReleased), handledEventsToo: true);
-        slider.AddHandler(PointerCaptureLostEvent, new PointerEventHandler(OnSeekSliderReleased), handledEventsToo: true);
-        slider.AddHandler(KeyDownEvent, new KeyEventHandler(OnSeekSliderKeyDown), handledEventsToo: true);
-        slider.AddHandler(KeyUpEvent, new KeyEventHandler(OnSeekSliderKeyUp), handledEventsToo: true);
+        public required Grid Root;
+        public required NowPlayingStrip Strip;
+        public required ScaleTransform Fill;
+        public required TranslateTransform Thumb;
+        public required FrameworkElement ThumbElement;
+        public Popup? Tip;
+        public TextBlock? TipText;
+        public PropertyChangedEventHandler PositionHandler = null!;
+        public bool Seeking;          // pointer drag or keyboard nudge in progress
+        public double PendingSeconds; // position the in-progress seek will commit to
     }
 
-    private void OnSeekSliderPressed(object sender, PointerRoutedEventArgs e)
+    private readonly Dictionary<Grid, SeekBar> _seekBars = new();
+
+    private void OnSeekBarLoaded(object sender, RoutedEventArgs e)
     {
-        if (sender is not Slider { Tag: NowPlayingStrip strip } slider) return;
-        strip.BeginSeek();
-        // Focus the slider so Escape (to cancel the drag) reaches its KeyDown while the pointer is held.
-        slider.Focus(FocusState.Pointer);
+        if (sender is not Grid { Tag: NowPlayingStrip strip } root || _seekBars.ContainsKey(root)) return;
+
+        ScaleTransform? fill = null;
+        TranslateTransform? thumb = null;
+        FrameworkElement? thumbElement = null;
+        Popup? tip = null;
+        foreach (var child in root.Children.OfType<FrameworkElement>())
+        {
+            switch (child.Tag as string)
+            {
+                case "SeekFill": fill = child.RenderTransform as ScaleTransform; break;
+                case "SeekThumb": thumb = child.RenderTransform as TranslateTransform; thumbElement = child; break;
+                case "SeekTip": tip = child as Popup; break;
+            }
+        }
+        if (fill is null || thumb is null || thumbElement is null) return;
+
+        var bar = new SeekBar
+        {
+            Root = root, Strip = strip, Fill = fill, Thumb = thumb, ThumbElement = thumbElement,
+            Tip = tip, TipText = (tip?.Child as Border)?.Child as TextBlock,
+        };
+        bar.PositionHandler = (_, args) =>
+        {
+            if (args.PropertyName is nameof(NowPlayingStrip.PositionSeconds) or nameof(NowPlayingStrip.DurationSeconds))
+                RenderSeekBar(bar);
+        };
+        strip.PropertyChanged += bar.PositionHandler;
+        _seekBars[root] = bar;
+        RenderSeekBar(bar);
     }
 
-    private void OnSeekSliderReleased(object sender, PointerRoutedEventArgs e)
+    private void OnSeekBarUnloaded(object sender, RoutedEventArgs e)
     {
-        if (sender is Slider { Tag: NowPlayingStrip strip } slider) _ = strip.EndSeekAsync(slider.Value);
+        if (sender is Grid root && _seekBars.Remove(root, out var bar))
+            bar.Strip.PropertyChanged -= bar.PositionHandler;
     }
 
-    private void OnSeekSliderKeyDown(object sender, KeyRoutedEventArgs e)
+    private void OnSeekBarSizeChanged(object sender, SizeChangedEventArgs e)
     {
-        if (sender is not Slider { Tag: NowPlayingStrip strip }) return;
+        if (sender is Grid root && _seekBars.TryGetValue(root, out var bar)) RenderSeekBar(bar);
+    }
+
+    // Follows PendingSeconds while a seek is in progress (drag/nudge target), else the strip's live position.
+    private void RenderSeekBar(SeekBar bar)
+    {
+        var duration = bar.Strip.DurationSeconds;
+        var seconds = bar.Seeking ? bar.PendingSeconds : bar.Strip.PositionSeconds;
+        ApplySeekRatio(bar, duration > 0 ? Math.Clamp(seconds / duration, 0, 1) : 0);
+    }
+
+    private static void ApplySeekRatio(SeekBar bar, double ratio)
+    {
+        var width = bar.Root.ActualWidth;
+        if (width <= 0) return;
+        bar.Fill.ScaleX = ratio;
+        var thumbWidth = bar.ThumbElement.ActualWidth;
+        bar.Thumb.X = Math.Clamp(ratio * width - thumbWidth / 2, 0, Math.Max(0, width - thumbWidth));
+    }
+
+    private void OnSeekBarPointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        if (sender is not Grid root || !_seekBars.TryGetValue(root, out var bar)) return;
+        root.CapturePointer(e.Pointer);
+        root.Focus(FocusState.Pointer);
+        bar.Seeking = true;
+        bar.Strip.BeginSeek();
+        SeekToPointer(bar, e);
+        ShowTip(bar);
+        e.Handled = true;
+    }
+
+    private void OnSeekBarPointerMoved(object sender, PointerRoutedEventArgs e)
+    {
+        if (sender is not Grid root || !_seekBars.TryGetValue(root, out var bar) || !bar.Seeking) return;
+        SeekToPointer(bar, e);
+        PositionTip(bar);
+    }
+
+    private void OnSeekBarPointerReleased(object sender, PointerRoutedEventArgs e)
+    {
+        if (sender is not Grid root || !_seekBars.TryGetValue(root, out var bar) || !bar.Seeking) return;
+        bar.Seeking = false;
+        HideTip(bar);
+        root.ReleasePointerCapture(e.Pointer);
+        _ = bar.Strip.EndSeekAsync(bar.PendingSeconds);
+    }
+
+    private static void SeekToPointer(SeekBar bar, PointerRoutedEventArgs e)
+    {
+        var width = bar.Root.ActualWidth;
+        if (width <= 0) return;
+        var ratio = Math.Clamp(e.GetCurrentPoint(bar.Root).Position.X / width, 0, 1);
+        bar.PendingSeconds = ratio * bar.Strip.DurationSeconds;
+        ApplySeekRatio(bar, ratio);
+    }
+
+    private void OnSeekBarKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (sender is not Grid root || !_seekBars.TryGetValue(root, out var bar)) return;
         if (e.Key == VirtualKey.Escape)
         {
-            strip.CancelSeek();
+            if (!bar.Seeking) return;
+            bar.Seeking = false;
+            HideTip(bar);
+            bar.Strip.CancelSeek();
+            RenderSeekBar(bar);
             e.Handled = true;
             return;
         }
-        if (IsSliderNudgeKey(e.Key)) strip.BeginSeek();
+        if (!IsSliderNudgeKey(e.Key)) return;
+        var duration = bar.Strip.DurationSeconds;
+        if (duration <= 0) return;
+        if (!bar.Seeking)
+        {
+            bar.Seeking = true;
+            bar.Strip.BeginSeek();
+            bar.PendingSeconds = Math.Clamp(bar.Strip.PositionSeconds, 0, duration);
+        }
+        bar.PendingSeconds = e.Key switch
+        {
+            VirtualKey.Left or VirtualKey.Down => Math.Clamp(bar.PendingSeconds - SeekNudgeSeconds, 0, duration),
+            VirtualKey.Right or VirtualKey.Up => Math.Clamp(bar.PendingSeconds + SeekNudgeSeconds, 0, duration),
+            VirtualKey.PageDown => Math.Clamp(bar.PendingSeconds - SeekPageSeconds, 0, duration),
+            VirtualKey.PageUp => Math.Clamp(bar.PendingSeconds + SeekPageSeconds, 0, duration),
+            VirtualKey.Home => 0,
+            VirtualKey.End => duration,
+            _ => bar.PendingSeconds,
+        };
+        ApplySeekRatio(bar, bar.PendingSeconds / duration);
+        ShowTip(bar);
+        e.Handled = true;
     }
 
-    private void OnSeekSliderKeyUp(object sender, KeyRoutedEventArgs e)
+    private void OnSeekBarKeyUp(object sender, KeyRoutedEventArgs e)
     {
-        if (IsSliderNudgeKey(e.Key) && sender is Slider { Tag: NowPlayingStrip strip } slider) _ = strip.EndSeekAsync(slider.Value);
+        if (sender is not Grid root || !_seekBars.TryGetValue(root, out var bar)) return;
+        if (bar.Seeking && IsSliderNudgeKey(e.Key))
+        {
+            bar.Seeking = false;
+            HideTip(bar);
+            _ = bar.Strip.EndSeekAsync(bar.PendingSeconds);
+            e.Handled = true;
+        }
+    }
+
+    // The drag/keyboard-seek timestamp bubble (a Popup), positioned to sit centred above the thumb.
+    private void ShowTip(SeekBar bar)
+    {
+        if (bar.Tip is null) return;
+        PositionTip(bar);
+        bar.Tip.IsOpen = true;
+    }
+
+    private static void HideTip(SeekBar bar)
+    {
+        if (bar.Tip is not null) bar.Tip.IsOpen = false;
+    }
+
+    private static void PositionTip(SeekBar bar)
+    {
+        if (bar.Tip?.Child is not FrameworkElement bubble || bar.TipText is null) return;
+        bar.TipText.Text = FormatSeekTime(bar.PendingSeconds);
+        bubble.Measure(new Windows.Foundation.Size(double.PositiveInfinity, double.PositiveInfinity));
+        var width = bubble.DesiredSize.Width;
+        var thumbCentre = bar.Thumb.X + bar.ThumbElement.ActualWidth / 2;
+        bar.Tip.HorizontalOffset = Math.Clamp(thumbCentre - width / 2, 0, Math.Max(0, bar.Root.ActualWidth - width));
+        bar.Tip.VerticalOffset = -(bubble.DesiredSize.Height + 4);
+    }
+
+    private static string FormatSeekTime(double seconds)
+    {
+        if (double.IsNaN(seconds) || seconds < 0) seconds = 0;
+        var t = TimeSpan.FromSeconds(seconds);
+        return t.TotalHours >= 1
+            ? $"{(int)t.TotalHours}:{t.Minutes:00}:{t.Seconds:00}"
+            : $"{t.Minutes}:{t.Seconds:00}";
     }
 
     // ---- Context-menu construction (the device + app-chip menus share one item list) ----
