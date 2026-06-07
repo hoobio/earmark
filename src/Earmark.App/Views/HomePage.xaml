@@ -123,7 +123,7 @@
                                        ElementPrepared="OnBlockElementPrepared"
                                        ItemTemplate="{StaticResource DeviceCardTemplate}">
                             <ItemsRepeater.Layout>
-                                <controls:WrapByRowLayout MinItemWidth="320"
+                                <controls:WrapByRowLayout MinItemWidth="{x:Bind MeterOptions.ColumnMinWidth, Mode=OneWay}"
                                                           ColumnSpacing="{StaticResource SpacingMedium}"
                                                           RowSpacing="{StaticResource SpacingMedium}" />
                             </ItemsRepeater.Layout>
@@ -153,12 +153,20 @@
          the window edge (matching Windows Settings). The header and the scroll *content* carry the
          28px side inset instead, so cards line up under the header while the scrollbar hugs the edge. -->
     <Grid x:Name="DevicesRootGrid" Background="Transparent">
-        <!-- Right-click the page background (not a card) for page options; the floating "..." (top
-             right, auto-hides) holds the same items. Card right-clicks show the card's own menu. -->
+        <!-- One menu, two openers: right-click the page background shows it as the context flyout; the
+             floating "..." (top right, auto-hides) calls ShowAt on this same instance, so the items live
+             in one place. Card right-clicks show the card's own menu. Grouped into the per-card display
+             options and the whole-page options. -->
         <Grid.ContextFlyout>
-            <MenuFlyout>
-                <ToggleMenuFlyoutItem Text="Show title bar" IsChecked="{x:Bind ViewModel.ShowDevicesHeader, Mode=TwoWay}" />
+            <MenuFlyout x:Name="DevicesOptionsMenu" Closed="OnOptionsMenuClosed">
+                <MenuFlyoutItem Text="Device card" IsEnabled="False" />
                 <ToggleMenuFlyoutItem Text="Show rules" IsChecked="{x:Bind ViewModel.ShowRules, Mode=TwoWay}" />
+                <ToggleMenuFlyoutItem Text="Card dividers" IsChecked="{x:Bind ViewModel.ShowCardDividers, Mode=TwoWay}" />
+                <ToggleMenuFlyoutItem Text="Device badges" IsChecked="{x:Bind ViewModel.ShowDeviceBadges, Mode=TwoWay}" />
+                <ToggleMenuFlyoutItem Text="Compact cards" IsChecked="{x:Bind ViewModel.CompactCards, Mode=TwoWay}" />
+                <MenuFlyoutSeparator />
+                <MenuFlyoutItem Text="Device page" IsEnabled="False" />
+                <ToggleMenuFlyoutItem Text="Show title bar" IsChecked="{x:Bind ViewModel.ShowDevicesHeader, Mode=TwoWay}" />
                 <ToggleMenuFlyoutItem Text="Show hidden devices" IsChecked="{x:Bind ViewModel.ShowHiddenDevices, Mode=TwoWay}" />
                 <ToggleMenuFlyoutItem Text="Show disconnected devices" IsChecked="{x:Bind ViewModel.ShowDisconnectedDevices, Mode=TwoWay}" />
                 <ToggleMenuFlyoutItem Text="Lock layout" IsChecked="{x:Bind ViewModel.LockLayout, Mode=TwoWay}" />
@@ -261,7 +269,7 @@
                                        Margin="{StaticResource DevicesListBottomMargin}"
                                        VerticalAlignment="Top">
                             <ItemsRepeater.Layout>
-                                <controls:BlockWrapLayout MinItemWidth="320"
+                                <controls:BlockWrapLayout MinItemWidth="{x:Bind ViewModel.MeterOptions.ColumnMinWidth, Mode=OneWay}"
                                                           ColumnSpacing="{StaticResource SpacingMedium}"
                                                           RowSpacing="{StaticResource SpacingMedium}" />
                             </ItemsRepeater.Layout>
@@ -289,18 +297,10 @@
                 CornerRadius="{ThemeResource ControlCornerRadius}"
                 Background="{ThemeResource SubtleFillColorSecondaryBrush}"
                 ToolTipService.ToolTip="Page options"
+                Click="OnOverflowClick"
                 GotFocus="OnOverflowFocusChanged"
                 LostFocus="OnOverflowFocusChanged">
             <FontIcon Glyph="&#xE712;" FontSize="16" />
-            <Button.Flyout>
-                <MenuFlyout Opening="OnOverflowFlyoutOpening" Closed="OnOverflowFlyoutClosed">
-                    <ToggleMenuFlyoutItem Text="Show title bar" IsChecked="{x:Bind ViewModel.ShowDevicesHeader, Mode=TwoWay}" />
-                    <ToggleMenuFlyoutItem Text="Show rules" IsChecked="{x:Bind ViewModel.ShowRules, Mode=TwoWay}" />
-                    <ToggleMenuFlyoutItem Text="Show hidden devices" IsChecked="{x:Bind ViewModel.ShowHiddenDevices, Mode=TwoWay}" />
-                    <ToggleMenuFlyoutItem Text="Show disconnected devices" IsChecked="{x:Bind ViewModel.ShowDisconnectedDevices, Mode=TwoWay}" />
-                    <ToggleMenuFlyoutItem Text="Lock layout" IsChecked="{x:Bind ViewModel.LockLayout, Mode=TwoWay}" />
-                </MenuFlyout>
-            </Button.Flyout>
         </Button>
     </Grid>
 </Page>

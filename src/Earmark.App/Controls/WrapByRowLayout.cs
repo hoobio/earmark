@@ -233,7 +233,9 @@ public sealed class WrapByRowLayout : VirtualizingLayout
         for (var slot = 0; slot < display.Length; slot++)
         {
             if (display[slot] < 0) continue;   // phantom slot - nothing to arrange
-            context.GetOrCreateElementAt(display[slot]).Arrange(slotRects[slot]);
+            var element = context.GetOrCreateElementAt(display[slot]);
+            element.Arrange(slotRects[slot]);
+            ReorderElevation.TrackAndElevate(element, slotRects[slot]);
         }
 
         return new Size(finalSize.Width, totalHeight);

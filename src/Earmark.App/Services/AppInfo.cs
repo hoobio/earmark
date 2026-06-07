@@ -83,6 +83,9 @@ internal static class AppInfo
     public static string NewBugUrl => $"{RepoUrl}/issues/new?template=bug_report.yml";
     public static string NewFeatureUrl => $"{RepoUrl}/issues/new?template=feature_request.yml";
 
+    /// <summary>PayPal donation link, surfaced from the About section.</summary>
+    public static string DonateUrl => "https://www.paypal.com/donate/?hosted_button_id=SWG4G7VH3ZFQN";
+
     /// <summary>
     /// Releases list (newest first). We read the list rather than <c>releases/latest</c> so a
     /// pre-release build can find the newest pre-release; stable builds just filter prereleases out.

@@ -68,13 +68,18 @@ public sealed partial class HomePage : Page
         UpdateOverflowVisibility();
     }
 
-    private void OnOverflowFlyoutOpening(object? sender, object e)
+    // The overflow button shares the page's context-flyout menu (one source of truth) by showing that
+    // same instance at itself. Keep the button pinned visible while its menu is open.
+    private void OnOverflowClick(object sender, RoutedEventArgs e)
     {
         _overflowFlyoutOpen = true;
         UpdateOverflowVisibility();
+        DevicesOptionsMenu.ShowAt(OverflowButton);
     }
 
-    private void OnOverflowFlyoutClosed(object? sender, object e)
+    // Fires for both openers (right-click and the "..." button). Right-click never sets the pinned
+    // flag, so this just clears the button-open case.
+    private void OnOptionsMenuClosed(object? sender, object e)
     {
         _overflowFlyoutOpen = false;
         UpdateOverflowVisibility();
@@ -286,6 +291,7 @@ public sealed partial class HomePage : Page
         var origMeterEnabled = card.MeterEnabledOverride;
         var origPeak = card.ShowPeakIndicatorOverride;
         var origShowRules = card.ShowRulesOverride;
+        var origShowBadges = card.ShowDeviceBadgesOverride;
 
         var pendingNowPlaying = origNowPlaying;
         var pendingFill = origFill;
@@ -294,6 +300,7 @@ public sealed partial class HomePage : Page
         var pendingMeterEnabled = origMeterEnabled;
         var pendingPeak = origPeak;
         var pendingShowRules = origShowRules;
+        var pendingShowBadges = origShowBadges;
 
         var accentBrushRes = (Brush)Application.Current.Resources["AccentFillColorDefaultBrush"];
         var strokeBrushRes = (Brush)Application.Current.Resources["ControlStrokeColorDefaultBrush"];
@@ -357,7 +364,7 @@ public sealed partial class HomePage : Page
         var suppressColour = false;
         // The six override combos, kept for the dependency enable/disable and the reset path.
         ComboBox nowPlayingCombo = null!, fillCombo = null!, appChipsCombo = null!,
-            appMetersCombo = null!, meterCombo = null!, peakCombo = null!, rulesCombo = null!;
+            appMetersCombo = null!, meterCombo = null!, peakCombo = null!, rulesCombo = null!, badgesCombo = null!;
 
         bool IsDirty() =>
             pendingGlyph != origGlyph
@@ -370,13 +377,15 @@ public sealed partial class HomePage : Page
             || pendingAppMeters != origAppMeters
             || pendingMeterEnabled != origMeterEnabled
             || pendingPeak != origPeak
-            || pendingShowRules != origShowRules;
+            || pendingShowRules != origShowRules
+            || pendingShowBadges != origShowBadges;
 
         // "Reset to default" only does something when the pending state isn't already fully default.
         bool PendingIsDefault() =>
             pendingGlyph is null && pendingAccent is null && !pendingNone && !pendingVolumeHidden
             && pendingNowPlaying is null && pendingFill is null && pendingAppChips is null
-            && pendingAppMeters is null && pendingMeterEnabled is null && pendingPeak is null && pendingShowRules is null;
+            && pendingAppMeters is null && pendingMeterEnabled is null && pendingPeak is null && pendingShowRules is null
+            && pendingShowBadges is null;
 
         void RefreshAll()
         {
@@ -533,6 +542,7 @@ public sealed partial class HomePage : Page
         meterCombo = MakeOverrideCombo(card.GlobalMeterEnabled, pendingMeterEnabled, v => pendingMeterEnabled = v);
         peakCombo = MakeOverrideCombo(card.GlobalShowPeakIndicator, pendingPeak, v => pendingPeak = v);
         rulesCombo = MakeOverrideCombo(card.GlobalShowRules, pendingShowRules, v => pendingShowRules = v);
+        badgesCombo = MakeOverrideCombo(card.GlobalShowDeviceBadges, pendingShowBadges, v => pendingShowBadges = v);
 
         // Sub-grouped to mirror the Settings page (and make the child relationships - fill under
         // now-playing, metering under chips - read at a glance). Captions are cheap; the whole
@@ -556,12 +566,14 @@ public sealed partial class HomePage : Page
         AddOverrideRow("Peak indicator", peakCombo, isChild: true);
         AddOverrideCaption("Rules");
         AddOverrideRow("Show rules section", rulesCombo);
+        AddOverrideCaption("Header");
+        AddOverrideRow("Device badges", badgesCombo);
 
         // Auto-expand when the device already deviates from defaults on any axis in this section
         // (including the volume-slider toggle), so an existing customisation is immediately visible.
         var hasAnyOverride = origNowPlaying is not null || origFill is not null || origAppChips is not null
             || origAppMeters is not null || origMeterEnabled is not null || origPeak is not null
-            || origShowRules is not null || origVolumeHidden;
+            || origShowRules is not null || origShowBadges is not null || origVolumeHidden;
         root.Children.Add(new Border
         {
             Height = 1,
@@ -633,7 +645,7 @@ public sealed partial class HomePage : Page
             // Apply the overrides persist-free; SetUserCustomisation's callback then persists every
             // axis (UpdateDeviceConfig reads them all off the card) and reconciles the apps rows.
             card.ApplyFeatureOverrides(pendingNowPlaying, pendingFill, pendingAppChips,
-                pendingAppMeters, pendingMeterEnabled, pendingPeak, pendingShowRules);
+                pendingAppMeters, pendingMeterEnabled, pendingPeak, pendingShowRules, pendingShowBadges);
             card.SetUserCustomisation(pendingGlyph, pendingAccent, pendingNone);
             dialog.Hide();
         };
@@ -646,7 +658,7 @@ public sealed partial class HomePage : Page
             pendingVolumeHidden = false;
             volumeCombo.SelectedIndex = 0; // Show
             // Back to "follow global" on every override (index 0 fires each combo's change handler).
-            pendingNowPlaying = pendingFill = pendingAppChips = pendingAppMeters = pendingMeterEnabled = pendingPeak = pendingShowRules = null;
+            pendingNowPlaying = pendingFill = pendingAppChips = pendingAppMeters = pendingMeterEnabled = pendingPeak = pendingShowRules = pendingShowBadges = null;
             nowPlayingCombo.SelectedIndex = 0;
             fillCombo.SelectedIndex = 0;
             appChipsCombo.SelectedIndex = 0;
@@ -654,6 +666,7 @@ public sealed partial class HomePage : Page
             meterCombo.SelectedIndex = 0;
             peakCombo.SelectedIndex = 0;
             rulesCombo.SelectedIndex = 0;
+            badgesCombo.SelectedIndex = 0;
             SeedColour();
             RefreshAll();
         };

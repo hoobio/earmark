@@ -22,10 +22,11 @@ public partial class DeviceGroupCard : ObservableObject, IBlockLayoutInfo
     private readonly bool _hideEmptyTitleBand;
     private bool _suppressChanged;
 
-    public DeviceGroupCard(string id, string title, Action<DeviceGroupCard>? onChanged, bool hideEmptyTitleBand = false)
+    public DeviceGroupCard(string id, string title, Action<DeviceGroupCard>? onChanged, PeakMeterOptions meterOptions, bool hideEmptyTitleBand = false)
     {
         Id = id;
         _hideEmptyTitleBand = hideEmptyTitleBand;
+        MeterOptions = meterOptions;
         _suppressChanged = true;
         Title = title;
         _suppressChanged = false;
@@ -34,6 +35,11 @@ public partial class DeviceGroupCard : ObservableObject, IBlockLayoutInfo
 
     /// <summary>Stable group id (matches <c>DeviceGroup.Id</c> and the group's slot in the block order).</summary>
     public string Id { get; }
+
+    /// <summary>The shared meter/display options. Bound by the nested members <see cref="WrapByRowLayout"/>
+    /// for its <c>MinItemWidth</c> (<see cref="PeakMeterOptions.ColumnMinWidth"/>), so the group's members
+    /// use the same compact-aware column width as lone cards and stay aligned to them.</summary>
+    public PeakMeterOptions MeterOptions { get; }
 
     /// <summary>The member cards, in left-to-right member order. Mutated in place (Remove/Insert,
     /// never Move - <see cref="WrapByRowLayout"/> ignores Move) so instances are preserved.</summary>

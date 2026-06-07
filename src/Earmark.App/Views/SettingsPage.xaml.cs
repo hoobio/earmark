@@ -83,6 +83,8 @@ public sealed partial class SettingsPage : Page
 
     private void OnOpenGitHub(object sender, RoutedEventArgs e) => About.OpenGitHub();
 
+    private void OnDonate(object sender, RoutedEventArgs e) => About.Donate();
+
     private void OnOpenLogsFolder(object sender, RoutedEventArgs e) => About.OpenLogsFolder();
 
     private async void OnManageHiddenApps(object sender, RoutedEventArgs e)

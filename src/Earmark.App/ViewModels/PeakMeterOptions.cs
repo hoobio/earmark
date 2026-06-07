@@ -55,9 +55,53 @@ public partial class PeakMeterOptions : ObservableObject
     [ObservableProperty]
     public partial bool ShowCardDividers { get; set; } = true;
 
+    /// <summary>Whether device cards render in the denser compact layout. Default off.
+    /// Shared/observable so toggling the setting re-tightens every card's padding/spacing live
+    /// (each card's layout properties re-raise via <see cref="DeviceCard.NotifyMeterStyleChanged"/>).</summary>
+    [ObservableProperty]
+    public partial bool CompactCards { get; set; }
+
+    /// <summary>Inner padding of each now-playing strip in the current density. The strip band bleeds to
+    /// the card edge, so the horizontal inset re-aligns its content to the card padding (16 roomy / 10
+    /// compact). Bound from the strip template's own scope; re-raised when <see cref="CompactCards"/>
+    /// flips, since the shared options instance (not the per-card properties) backs the strip template.</summary>
+    public Thickness NowPlayingStripPadding => CompactCards ? new Thickness(10, 8, 10, 4) : new Thickness(16, 12, 16, 6);
+
+    /// <summary>Padding inside a rule summary chip. 12,10 roomy / 8,6 compact. Lives here (not just on
+    /// the card) so the expanded additional-rules chips - whose template is RuleSummary-scoped - can
+    /// bind it via the stamped <see cref="RuleSummary.Options"/> and update live with the toggle.</summary>
+    public Thickness RuleChipPadding => CompactCards ? new Thickness(8, 6, 8, 6) : new Thickness(12, 10, 12, 10);
+
+    /// <summary>Spacing between a rule chip's name and status lines. 2 roomy / 1 compact.</summary>
+    public double RuleChipSpacing => CompactCards ? 1 : 2;
+
+    /// <summary>Minimum width of a device-card column in the wrap layouts (the <c>MinItemWidth</c> both
+    /// <see cref="Controls.BlockWrapLayout"/> and the group-members <see cref="Controls.WrapByRowLayout"/>
+    /// consume). Compact packs ~20% tighter (256 vs 320) so more cards fit per row and the window can
+    /// shrink further. Shared/observable so the toggle re-flows the grid live.</summary>
+    public double ColumnMinWidth => CompactCards ? CompactColumnMinWidth : DefaultColumnMinWidth;
+
+    /// <summary>Roomy / compact card-column minimum widths. The window's minimum width is derived from
+    /// the active one (+ the Devices page side padding) in <c>WindowChromeManager</c>.</summary>
+    public const double DefaultColumnMinWidth = 320;
+    public const double CompactColumnMinWidth = 256;
+
+    partial void OnCompactCardsChanged(bool value)
+    {
+        OnPropertyChanged(nameof(NowPlayingStripPadding));
+        OnPropertyChanged(nameof(RuleChipPadding));
+        OnPropertyChanged(nameof(RuleChipSpacing));
+        OnPropertyChanged(nameof(ColumnMinWidth));
+    }
+
     /// <summary>Whether device cards show their rules section at all. Default on.</summary>
     [ObservableProperty]
     public partial bool ShowRules { get; set; } = true;
+
+    /// <summary>Whether device cards show the header badge row (flow label + Default / Communications /
+    /// Disconnected pills). Default on; off frees that line.</summary>
+    [ObservableProperty]
+    public partial bool ShowDeviceBadges { get; set; } = true;
 
     /// <summary>Whether device cards show the now-playing strip when an app exposes SMTC media info.
     /// Default on. Shared/observable so toggling the setting shows or hides every card's strip live.</summary>

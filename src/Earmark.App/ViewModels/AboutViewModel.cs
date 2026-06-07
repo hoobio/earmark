@@ -115,6 +115,8 @@ public partial class AboutViewModel : ObservableObject, IDisposable
 
     public void OpenGitHub() => OpenUrl(AppInfo.RepoUrl);
 
+    public void Donate() => OpenUrl(AppInfo.DonateUrl);
+
     public void OpenLogsFolder()
     {
         try

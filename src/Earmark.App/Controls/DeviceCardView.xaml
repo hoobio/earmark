@@ -12,10 +12,11 @@
         <DataTemplate x:Key="RuleChipTemplate" x:DataType="vm:RuleSummary">
             <Button Style="{StaticResource SubtleRuleChipButtonStyle}"
                     Margin="0,2,0,0"
+                    Padding="{x:Bind Options.RuleChipPadding, Mode=OneWay}"
                     Opacity="{x:Bind Opacity}"
                     Click="OnRuleChipClicked"
                     ToolTipService.ToolTip="Open in Rules">
-                <StackPanel Spacing="{StaticResource SpacingXXSmall}">
+                <StackPanel Spacing="{x:Bind Options.RuleChipSpacing, Mode=OneWay}">
                     <TextBlock Text="{x:Bind Name}"
                                Style="{StaticResource BodyStrongTextBlockStyle}"
                                TextTrimming="CharacterEllipsis"
@@ -75,8 +76,10 @@
         <Border Background="{ThemeResource SystemFillColorCriticalBackgroundBrush}"
                 CornerRadius="{StaticResource CardCornerRadius}"
                 Visibility="{x:Bind Card.IsMuted, Mode=OneWay}" />
-        <StackPanel Spacing="{StaticResource SpacingMedium}" Margin="{StaticResource SectionPadding}">
-            <!-- Header: mute toggle (icon) + name + chips + (Bluetooth) connect/disconnect -->
+        <StackPanel x:Name="SectionStack" Spacing="{x:Bind Card.CardSectionSpacing, Mode=OneWay}" Margin="{x:Bind Card.CardContentPadding, Mode=OneWay}">
+            <!-- Header: mute toggle (icon) + name + chips + (Bluetooth) connect/disconnect. Wrapped so
+                 compact can hoist the pills to a full-width row below the icon/name (see end of stack). -->
+            <StackPanel Spacing="4">
             <Grid ColumnSpacing="{StaticResource SpacingSmall}">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
@@ -87,14 +90,14 @@
                 <Border Grid.Column="0"
                         Background="Transparent"
                         ToolTipService.ToolTip="{x:Bind Card.MuteTooltip, Mode=OneWay}">
-                    <Grid Width="56" Height="56">
+                    <Grid Width="{x:Bind Card.IconTileSize, Mode=OneWay}" Height="{x:Bind Card.IconTileSize, Mode=OneWay}">
                         <Border CornerRadius="{StaticResource CardCornerRadius}"
                                 Background="{ThemeResource SubtleFillColorSecondaryBrush}"
                                 Visibility="{x:Bind Card.ShowDefaultTile, Mode=OneWay}" />
                         <Border CornerRadius="{StaticResource CardCornerRadius}"
                                 Background="{x:Bind Card.WaveLinkTileBrush, Mode=OneWay}"
                                 Visibility="{x:Bind Card.ShowAccentTile, Mode=OneWay}" />
-                        <Button Width="56" Height="56"
+                        <Button Width="{x:Bind Card.IconTileSize, Mode=OneWay}" Height="{x:Bind Card.IconTileSize, Mode=OneWay}"
                                 Padding="0"
                                 Background="Transparent"
                                 BorderBrush="Transparent"
@@ -114,19 +117,19 @@
                             </Button.Resources>
                             <Grid>
                                 <FontIcon Glyph="{x:Bind Card.Glyph, Mode=OneWay}"
-                                          FontSize="28"
+                                          FontSize="{x:Bind Card.IconGlyphSize, Mode=OneWay}"
                                           Visibility="{x:Bind Card.GlyphOnAccent, Mode=OneWay}"
                                           Foreground="{x:Bind Card.GlyphContrastBrush, Mode=OneWay}" />
                                 <FontIcon Glyph="{x:Bind Card.Glyph, Mode=OneWay}"
-                                          FontSize="28"
+                                          FontSize="{x:Bind Card.IconGlyphSize, Mode=OneWay}"
                                           Visibility="{x:Bind Card.GlyphNormalThemed, Mode=OneWay}"
                                           Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
                                 <FontIcon Glyph="{x:Bind Card.Glyph, Mode=OneWay}"
-                                          FontSize="28"
+                                          FontSize="{x:Bind Card.IconGlyphSize, Mode=OneWay}"
                                           Visibility="{x:Bind Card.GlyphMutedThemed, Mode=OneWay}"
                                           Foreground="{ThemeResource SystemFillColorCriticalBrush}" />
                                 <Image Source="{x:Bind Card.WaveLinkIconSource, Mode=OneWay}"
-                                       Width="40" Height="40"
+                                       Width="{x:Bind Card.WaveLinkIconSize, Mode=OneWay}" Height="{x:Bind Card.WaveLinkIconSize, Mode=OneWay}"
                                        Visibility="{x:Bind Card.ShowWaveLinkIcon, Mode=OneWay}" />
                             </Grid>
                         </Button>
@@ -176,9 +179,13 @@
                                TextWrapping="NoWrap"
                                TextTrimming="CharacterEllipsis"
                                Visibility="{x:Bind Card.HasDeviceIdSubtext, Mode=OneWay}" />
+                    <!-- Pills inline under the name (normal layout). In compact they're hoisted to a
+                         full-width row below the header so the icon tile sizes to the name+id height
+                         instead of centring against a three-line block; kept in sync with that copy. -->
                     <StackPanel Orientation="Horizontal"
                                 Spacing="6"
-                                Margin="-8,4,0,0">
+                                Margin="-8,4,0,0"
+                                Visibility="{x:Bind Card.ShowNormalBadges, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
                         <Border Padding="8,2"
                                 VerticalAlignment="Center"
                                 Visibility="{x:Bind Card.ShowFlowLabel, Mode=OneWay}">
@@ -226,6 +233,40 @@
                 </StackPanel>
             </Grid>
 
+            <!-- Compact-only pills row: hoisted out from under the name to a full-width row whose left
+                 edge sits flush with the icon tile (content padding). The flow label drops its left
+                 inset so its text lines up with the icon too. Mirrors the inline pills above - keep in
+                 sync. -->
+            <StackPanel Orientation="Horizontal"
+                        Spacing="6"
+                        Visibility="{x:Bind Card.ShowCompactBadges, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
+                <Border Padding="0,2,8,2"
+                        VerticalAlignment="Center"
+                        Visibility="{x:Bind Card.ShowFlowLabel, Mode=OneWay}">
+                    <TextBlock Text="{x:Bind Card.FlowLabel, Mode=OneWay}"
+                               Style="{StaticResource CaptionTextBlockStyle}"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                </Border>
+                <Border Style="{StaticResource ChipBorderStyle}"
+                        Visibility="{x:Bind Card.IsDefault, Mode=OneWay}">
+                    <TextBlock Text="{x:Bind Card.DefaultPillText, Mode=OneWay}"
+                               Style="{StaticResource CaptionTextBlockStyle}" />
+                </Border>
+                <Border Style="{StaticResource ChipBorderStyle}"
+                        Visibility="{x:Bind Card.IsDefaultCommunications, Mode=OneWay}">
+                    <TextBlock Text="{x:Bind Card.CommunicationsPillText, Mode=OneWay}"
+                               Style="{StaticResource CaptionTextBlockStyle}" />
+                </Border>
+                <Border Style="{StaticResource ChipBorderStyle}"
+                        Visibility="{x:Bind Card.ShowDisconnectedBadge, Mode=OneWay}"
+                        ToolTipService.ToolTip="This device isn't connected right now. Its settings are remembered and it reactivates when it reconnects.">
+                    <TextBlock Text="Disconnected"
+                               Style="{StaticResource CaptionTextBlockStyle}"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                </Border>
+            </StackPanel>
+            </StackPanel>
+
             <!-- Volume row: peak meter behind a transparent-track slider, or a plain slider when the
                  meter is Off. Collapses entirely only when both slider and meter are hidden. -->
             <Grid ColumnSpacing="{StaticResource SpacingSmall}"
@@ -236,13 +277,14 @@
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
 
-                <Grid Grid.Column="0" Height="28"
+                <Grid Grid.Column="0" Height="{x:Bind Card.VolumeRowHeight, Mode=OneWay}"
                       Grid.ColumnSpan="{x:Bind Card.VolumeMeterColumnSpan, Mode=OneWay}"
                       Opacity="{x:Bind Card.VolumeAreaOpacity, Mode=OneWay}">
 
                     <Grid Visibility="{x:Bind Card.MeterOptions.ShowMeter, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
                         <controls:ChannelPeakMeter Margin="{x:Bind Card.MeterMargin, Mode=OneWay}"
                                                    VerticalAlignment="Center"
+                                                   TotalHeightOverride="{x:Bind Card.MeterTotalHeight, Mode=OneWay}"
                                                    ChannelCount="{x:Bind Card.ChannelCount, Mode=OneWay}"
                                                    ColourMode="{x:Bind Card.MeterOptions.ColourMode, Mode=OneWay}"
                                                    SingleColour="{x:Bind Card.MeterOptions.SingleColour, Mode=OneWay}"
@@ -261,7 +303,7 @@
                                 StepFrequency="1"
                                 SmallChange="1"
                                 LargeChange="5"
-                                Margin="0,0,2,0"
+                                Margin="{x:Bind Card.VolumeSliderMargin, Mode=OneWay}"
                                 Padding="8,0,8,0"
                                 Value="{x:Bind Card.VolumePercent, Mode=TwoWay}"
                                 IsEnabled="{x:Bind Card.IsVolumeEditable, Mode=OneWay}"
@@ -345,7 +387,7 @@
                  in strip mode the band is a filled block whose own edges separate it (no bracketing
                  hairlines - it also suppresses the divider directly below it; see DeviceCard). Lives on the
                  Devices page and in Quick Controls alike (independent of ShowRules). -->
-            <Border Height="1" Margin="-16,0,-16,-6"
+            <Border Height="1" Margin="{x:Bind Card.SectionDividerMargin, Mode=OneWay}"
                     Background="{ThemeResource DividerStrokeColorDefaultBrush}"
                     Visibility="{x:Bind Card.ShowNowPlayingDivider, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
             <!-- Bleed to the card edges (-16) but keep the natural section spacing top/bottom: with no
@@ -355,7 +397,7 @@
             <ItemsControl ItemsSource="{x:Bind Card.NowPlayingStrips, Mode=OneWay}"
                           HorizontalAlignment="Stretch"
                           HorizontalContentAlignment="Stretch"
-                          Margin="-16,0,-16,0"
+                          Margin="{x:Bind Card.EdgeBleedMargin, Mode=OneWay}"
                           Visibility="{x:Bind Card.ShowNowPlaying, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}">
                 <ItemsControl.ItemsPanel>
                     <ItemsPanelTemplate>
@@ -396,7 +438,7 @@
                                          rest of the card. Top inset is 12 (matches the row spacing); the
                                          bottom is trimmed to 6 because the seek slider already carries its
                                          own height below the track, which otherwise reads as too much gap. -->
-                                    <Grid Padding="16,12,16,6" ColumnSpacing="10">
+                                    <Grid Padding="{x:Bind MeterOptions.NowPlayingStripPadding, Mode=OneWay}" ColumnSpacing="10">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="Auto" />
@@ -532,10 +574,10 @@
             </ItemsControl>
 
             <!-- Apps row carries the hairline above itself (section dividers on + a row present). -->
-            <Border Height="1" Margin="-16,0,-16,-6"
+            <Border Height="1" Margin="{x:Bind Card.SectionDividerMargin, Mode=OneWay}"
                     Background="{ThemeResource DividerStrokeColorDefaultBrush}"
                     Visibility="{x:Bind DividerOverArt(Card.ShowAppsDivider, Card.ShowCardBackground), Mode=OneWay}" />
-            <Border Height="1" Margin="-16,0,-16,-6"
+            <Border Height="1" Margin="{x:Bind Card.SectionDividerMargin, Mode=OneWay}"
                     Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
                     Visibility="{x:Bind DividerPlain(Card.ShowAppsDivider, Card.ShowCardBackground), Mode=OneWay}" />
 
@@ -648,10 +690,10 @@
 
             <!-- Rules block carries the hairline above itself (host ShowRules + section dividers on
                  + the block has content - a rules list or the "no rules" message). -->
-            <Border Height="1" Margin="-16,0,-16,-6"
+            <Border Height="1" Margin="{x:Bind Card.SectionDividerMargin, Mode=OneWay}"
                     Background="{ThemeResource DividerStrokeColorDefaultBrush}"
                     Visibility="{x:Bind RuleDividerOverArt(ShowRules, Card.ShowRulesDivider, Card.ShowCardBackground), Mode=OneWay}" />
-            <Border Height="1" Margin="-16,0,-16,-6"
+            <Border Height="1" Margin="{x:Bind Card.SectionDividerMargin, Mode=OneWay}"
                     Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
                     Visibility="{x:Bind RuleDividerPlain(ShowRules, Card.ShowRulesDivider, Card.ShowCardBackground), Mode=OneWay}" />
 
@@ -660,7 +702,8 @@
                         Visibility="{x:Bind RuleVis(ShowRules, Card.ShowRulesSection), Mode=OneWay}">
                 <TextBlock Text="Rules"
                            Style="{StaticResource CaptionTextBlockStyle}"
-                           Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                           Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                           Visibility="{x:Bind Card.ShowRulesCaption, Mode=OneWay, Converter={StaticResource BooleanToVisibilityConverter}}" />
 
                 <controls:ExpanderPill Margin="0,2,0,0"
                                        IsExpanded="{x:Bind Card.IsRulesExpanded, Mode=TwoWay}"
@@ -670,11 +713,12 @@
                     <controls:ExpanderPill.PillContent>
                         <Button Style="{StaticResource SubtleRuleChipButtonStyle}"
                                 Background="Transparent"
+                                Padding="{x:Bind Card.RuleChipPadding, Mode=OneWay}"
                                 Opacity="{x:Bind Card.FirstRule.Opacity, FallbackValue=1.0, Mode=OneWay}"
                                 DataContext="{x:Bind Card.FirstRule, Mode=OneWay}"
                                 Click="OnRuleChipClicked"
                                 ToolTipService.ToolTip="Open in Rules">
-                            <StackPanel Spacing="{StaticResource SpacingXXSmall}">
+                            <StackPanel Spacing="{x:Bind Card.RuleChipSpacing, Mode=OneWay}">
                                 <TextBlock Text="{x:Bind Card.FirstRule.Name, Mode=OneWay, FallbackValue=''}"
                                            Style="{StaticResource BodyStrongTextBlockStyle}"
                                            TextTrimming="CharacterEllipsis"
@@ -700,10 +744,14 @@
                 <!-- Reveal is animated in code-behind (SetRulesPanelState): MaxHeight drives the real
                      reflow so siblings glide, opacity fades the content, an InsetClip hides the overflow
                      while it grows. Starts Collapsed; code-behind owns Visibility from the first card bind. -->
+                <!-- -4 top cancels the section StackPanel's 4px spacing for this pair, so the gap from the
+                     first-rule chip to the first dropped-down chip equals the gap between the dropped-down
+                     chips themselves (each chip carries its own 2px top margin). -->
                 <ItemsControl x:Name="AdditionalRulesPanel"
                               ItemsSource="{x:Bind Card.AdditionalRules}"
                               HorizontalAlignment="Stretch"
                               HorizontalContentAlignment="Stretch"
+                              Margin="0,-4,0,0"
                               Visibility="Collapsed">
                     <ItemsControl.ItemContainerStyle>
                         <Style TargetType="ContentPresenter">

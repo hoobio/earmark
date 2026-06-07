@@ -111,9 +111,22 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     public partial int CardHeightModeIndex { get; set; }
 
+    /// <summary>Whether the title bar shows the app title and subtitle. Default on.</summary>
+    [ObservableProperty]
+    public partial bool ShowTitleBarText { get; set; }
+
     /// <summary>Whether device cards draw hairline separators between their sections. Default on.</summary>
     [ObservableProperty]
     public partial bool ShowCardDividers { get; set; }
+
+    /// <summary>Whether device cards render in the denser compact layout. Default off.</summary>
+    [ObservableProperty]
+    public partial bool CompactCards { get; set; }
+
+    /// <summary>Whether device cards show the header badge row (flow label + Default / Communications /
+    /// Disconnected pills). Default on.</summary>
+    [ObservableProperty]
+    public partial bool ShowDeviceBadges { get; set; }
 
     /// <summary>Whether each device card shows its rules section and no-rules text. Default on.</summary>
     [ObservableProperty]
@@ -323,7 +336,10 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
             AlwaysShowPinnedApps = _settings.Current.AlwaysShowPinnedApps;
             AppChipLingerSeconds = _settings.Current.AppChipLingerSeconds;
             CardHeightModeIndex = (int)_settings.Current.CardHeight;
+            ShowTitleBarText = _settings.Current.ShowTitleBarText;
             ShowCardDividers = _settings.Current.ShowCardDividers;
+            CompactCards = _settings.Current.CompactCards;
+            ShowDeviceBadges = _settings.Current.ShowDeviceBadges;
             ShowRules = _settings.Current.ShowRules;
             ShowNowPlaying = _settings.Current.ShowNowPlaying;
             NowPlayingCardBackground = _settings.Current.NowPlayingCardBackground;
@@ -477,7 +493,10 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         Persist(s => s.AppChipLingerSeconds = seconds);
     }
     partial void OnCardHeightModeIndexChanged(int value) => Persist(s => s.CardHeight = (CardHeightMode)value);
+    partial void OnShowTitleBarTextChanged(bool value) => Persist(s => s.ShowTitleBarText = value);
     partial void OnShowCardDividersChanged(bool value) => Persist(s => s.ShowCardDividers = value);
+    partial void OnCompactCardsChanged(bool value) => Persist(s => s.CompactCards = value);
+    partial void OnShowDeviceBadgesChanged(bool value) => Persist(s => s.ShowDeviceBadges = value);
     partial void OnShowRulesChanged(bool value) => Persist(s => s.ShowRules = value);
     partial void OnShowNowPlayingChanged(bool value)
     {

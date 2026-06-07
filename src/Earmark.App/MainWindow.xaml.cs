@@ -29,6 +29,9 @@ public sealed partial class MainWindow : Window, IDisposable
     private BackdropMode? _appliedBackdrop;
     private bool _initialNavComplete;
     private DispatcherTimer? _toastTimer;
+    private string _defaultTitleBarTitle = "";
+    private string _defaultTitleBarSubtitle = "";
+    private TextBlock? _titleBarSubtitleTextBlock;
 
     public MainWindow(INavigationService navigation, IDispatcherQueueProvider dispatcher, ISettingsService settings, IUpdateService update, IInAppNotificationService inAppNotifications)
     {
@@ -42,6 +45,13 @@ public sealed partial class MainWindow : Window, IDisposable
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(AppTitleBar);
         AppWindow.TitleBar.PreferredHeightOption = Microsoft.UI.Windowing.TitleBarHeightOption.Tall;
+
+        // Snapshot the XAML-declared title/subtitle so the visibility toggle can restore them, then
+        // keep the subtitle clear of the caption buttons as the window resizes.
+        _defaultTitleBarTitle = AppTitleBar.Title;
+        _defaultTitleBarSubtitle = AppTitleBar.Subtitle;
+        AppTitleBar.SizeChanged += (_, _) => UpdateSubtitleOverlap();
+        ApplyTitleBarText();
         // Absolute path: a packaged (MSIX) launch sets the working directory to System32, not the
         // install dir, so a relative "Assets/AppIcon.ico" resolves to nothing and the window/taskbar
         // icon goes blank. AppContext.BaseDirectory is the install dir in both packaged and unpackaged.
@@ -241,6 +251,7 @@ public sealed partial class MainWindow : Window, IDisposable
         {
             ApplyBackdrop();
             ApplyTheme();
+            ApplyTitleBarText();
         }
 
         if (DispatcherQueue.HasThreadAccess)
@@ -291,6 +302,53 @@ public sealed partial class MainWindow : Window, IDisposable
                 ? Color.FromArgb(255, 0x88, 0x88, 0x88)
                 : Color.FromArgb(255, 0x99, 0x99, 0x99);
         }
+    }
+
+    // ---- Title-bar text: a manual show/hide toggle, plus an automatic hide of the subtitle when the
+    // window is too narrow to fit it clear of the caption buttons. ----
+
+    private void ApplyTitleBarText()
+    {
+        var show = _settings.Current.ShowTitleBarText;
+        AppTitleBar.Title = show ? _defaultTitleBarTitle : string.Empty;
+        AppTitleBar.Subtitle = show ? _defaultTitleBarSubtitle : string.Empty;
+
+        // The subtitle's ActualWidth only settles after the next layout pass, so recompute overlap once
+        // it has.
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, UpdateSubtitleOverlap);
+    }
+
+    // The WinUI TitleBar reserves room for the caption buttons but doesn't drop the subtitle when the
+    // window gets too narrow - it just slides under them. Hide it via opacity (so its layout stays
+    // measurable for the re-show check) the moment it would cross into the caption-button inset, with a
+    // small margin so not even a single character pokes through.
+    private void UpdateSubtitleOverlap()
+    {
+        if (!_settings.Current.ShowTitleBarText || string.IsNullOrEmpty(_defaultTitleBarSubtitle)) return;
+
+        _titleBarSubtitleTextBlock ??= FindDescendantTextBlock(AppTitleBar, _defaultTitleBarSubtitle);
+        if (_titleBarSubtitleTextBlock is null || AppTitleBar.ActualWidth <= 0) return;
+
+        var scale = AppTitleBar.XamlRoot?.RasterizationScale ?? 1.0;
+        var rightInset = (AppWindow?.TitleBar?.RightInset ?? 0) / scale;
+        const double safetyMargin = 8;
+        var available = AppTitleBar.ActualWidth - rightInset - safetyMargin;
+
+        var origin = _titleBarSubtitleTextBlock.TransformToVisual(AppTitleBar).TransformPoint(new Windows.Foundation.Point(0, 0));
+        var subtitleRight = origin.X + _titleBarSubtitleTextBlock.ActualWidth;
+        _titleBarSubtitleTextBlock.Opacity = subtitleRight > available ? 0 : 1;
+    }
+
+    private static TextBlock? FindDescendantTextBlock(DependencyObject root, string text)
+    {
+        var count = VisualTreeHelper.GetChildrenCount(root);
+        for (var i = 0; i < count; i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is TextBlock { } tb && tb.Text == text) return tb;
+            if (FindDescendantTextBlock(child, text) is { } found) return found;
+        }
+        return null;
     }
 
     // Applies the backdrop material from settings via a controller (not <Window.SystemBackdrop>) so

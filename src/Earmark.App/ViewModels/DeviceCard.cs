@@ -53,6 +53,7 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     private bool? _meterEnabledOverride;
     private bool? _showPeakIndicatorOverride;
     private bool? _showRulesOverride;
+    private bool? _showDeviceBadgesOverride;
 
     private bool _suppressVolumeWrite;
     private float _leftHold;
@@ -95,6 +96,7 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         _meterEnabledOverride = snapshot.MeterEnabledOverride;
         _showPeakIndicatorOverride = snapshot.ShowPeakIndicatorOverride;
         _showRulesOverride = snapshot.ShowRulesOverride;
+        _showDeviceBadgesOverride = snapshot.ShowDeviceBadgesOverride;
         SyncEffectiveOptions();
         DeviceKey = snapshot.DeviceKey;
         Endpoint = snapshot.Endpoint;
@@ -122,6 +124,7 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         RuleMutedSource = snapshot.RuleMutedSource;
         RuleVolumeSource = snapshot.RuleVolumeSource;
         Rules = snapshot.Rules;
+        StampRuleOptions();
         for (var i = 1; i < Rules.Count; i++)
         {
             AdditionalRules.Add(Rules[i]);
@@ -166,11 +169,13 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         MeterOptions.SingleColour = g.SingleColour;
         MeterOptions.CardHeight = g.CardHeight;
         MeterOptions.ShowCardDividers = g.ShowCardDividers;
+        MeterOptions.CompactCards = g.CompactCards;
         MeterOptions.AlwaysShowPinnedApps = g.AlwaysShowPinnedApps;
         MeterOptions.ShowHold = _showPeakIndicatorOverride ?? g.ShowHold;
         MeterOptions.ShowAppIndicators = _showAppIndicatorsOverride ?? g.ShowAppIndicators;
         MeterOptions.ShowAppMeters = _showAppMetersOverride ?? g.ShowAppMeters;
         MeterOptions.ShowRules = _showRulesOverride ?? g.ShowRules;
+        MeterOptions.ShowDeviceBadges = _showDeviceBadgesOverride ?? g.ShowDeviceBadges;
         MeterOptions.ShowNowPlaying = _showNowPlayingOverride ?? g.ShowNowPlaying;
         MeterOptions.NowPlayingCardBackground = _nowPlayingFillOverride ?? g.NowPlayingCardBackground;
     }
@@ -198,6 +203,9 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     /// <summary>The rules-section override (null = follow global).</summary>
     public bool? ShowRulesOverride => _showRulesOverride;
 
+    /// <summary>The header-badge-row override (null = follow global).</summary>
+    public bool? ShowDeviceBadgesOverride => _showDeviceBadgesOverride;
+
     // Current global defaults for the six overridable flags, so the Customise dialog can label its
     // "Use global (On/Off)" option with what following the global would currently do.
     public bool GlobalShowNowPlaying => _globalOptions.ShowNowPlaying;
@@ -207,6 +215,7 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     public bool GlobalMeterEnabled => _globalOptions.ShowMeter;
     public bool GlobalShowPeakIndicator => _globalOptions.ShowHold;
     public bool GlobalShowRules => _globalOptions.ShowRules;
+    public bool GlobalShowDeviceBadges => _globalOptions.ShowDeviceBadges;
 
     /// <summary>Sets the per-device display overrides without persisting (used by the in-place
     /// rebuild and the Settings "Clear overrides" path, which re-reads from the saved config).
@@ -214,7 +223,8 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     /// override actually changed, so the caller can decide whether to re-run the apps reconcile.</summary>
     public bool ApplyFeatureOverrides(
         bool? showNowPlaying, bool? nowPlayingFill, bool? showAppIndicators,
-        bool? showAppMeters, bool? meterEnabled, bool? showPeakIndicator, bool? showRules)
+        bool? showAppMeters, bool? meterEnabled, bool? showPeakIndicator, bool? showRules,
+        bool? showDeviceBadges)
     {
         var changed =
             _showNowPlayingOverride != showNowPlaying
@@ -223,7 +233,8 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
             || _showAppMetersOverride != showAppMeters
             || _meterEnabledOverride != meterEnabled
             || _showPeakIndicatorOverride != showPeakIndicator
-            || _showRulesOverride != showRules;
+            || _showRulesOverride != showRules
+            || _showDeviceBadgesOverride != showDeviceBadges;
         if (!changed) return false;
 
         _showNowPlayingOverride = showNowPlaying;
@@ -233,6 +244,7 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         _meterEnabledOverride = meterEnabled;
         _showPeakIndicatorOverride = showPeakIndicator;
         _showRulesOverride = showRules;
+        _showDeviceBadgesOverride = showDeviceBadges;
         NotifyMeterStyleChanged();
         return true;
     }
@@ -258,6 +270,8 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         OnPropertyChanged(nameof(ShowCardBackground));
         // Section-divider toggle (and the rows they bracket) may have changed.
         NotifyDividersChanged();
+        // Compact toggle re-tightens padding / spacing / icon tile / strip geometry.
+        NotifyCompactLayoutChanged();
     }
 
     /// <summary>
@@ -438,6 +452,106 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     public bool HasMultipleRules => Rules.Count > 1;
     public bool ShowRulesSection => MeterOptions.ShowRules && HasRules;
     public bool ShowNoRulesMessage => MeterOptions.ShowRules && HasNoRules;
+
+    /// <summary>Whether the header badge row (flow label + Default / Communications / Disconnected
+    /// pills) shows in the <b>normal</b> layout: the badges feature is on and the card isn't compact
+    /// (compact moves the badges to their own full-width row below the header). Off frees that line.</summary>
+    public bool ShowNormalBadges => MeterOptions.ShowDeviceBadges && !Compact;
+
+    /// <summary>Whether the header badge row shows in the <b>compact</b> layout: the badges feature is
+    /// on and the card is compact. Off frees that row.</summary>
+    public bool ShowCompactBadges => MeterOptions.ShowDeviceBadges && Compact;
+
+    // ---- Compact-layout geometry (driven by MeterOptions.CompactCards) ----
+    //
+    // Compact tightens the card: less inner padding and section spacing, a smaller icon tile/glyph,
+    // and trimmed now-playing strips. The values are exposed as bindable card properties (rather than
+    // XAML resources) so the toggle re-flows every live card without a rebuild - NotifyMeterStyleChanged
+    // re-raises them. The edge-bleed margins keep the section dividers and now-playing band flush with
+    // whichever padding is in effect.
+
+    private bool Compact => MeterOptions.CompactCards;
+
+    /// <summary>True while the compact layout is active. Drives the compact-only header restructure in
+    /// the card view (pills hoisted to a full-width row below the icon/name); normal layout is unchanged.</summary>
+    public bool IsCompactLayout => Compact;
+
+    /// <summary>Inner padding of the card content stack (the card's "padding"). 16 roomy / 10 compact.</summary>
+    public Thickness CardContentPadding => Compact ? new Thickness(10) : new Thickness(16);
+
+    /// <summary>Vertical spacing between the card's sections (header / volume / now-playing / apps /
+    /// rules). 12 roomy / 8 compact.</summary>
+    public double CardSectionSpacing => Compact ? 8 : 12;
+
+    /// <summary>Square size of the device icon tile in the header. 56 roomy / 40 compact (compact sizes
+    /// the tile to the name + device-id two-line height so the glyph sits level with them).</summary>
+    public double IconTileSize => Compact ? 40 : 56;
+
+    /// <summary>Font size of the icon-tile glyph. 28 roomy / 22 compact.</summary>
+    public double IconGlyphSize => Compact ? 22 : 28;
+
+    /// <summary>Size of the Wave Link channel bitmap inside the icon tile. 40 roomy / 28 compact.</summary>
+    public double WaveLinkIconSize => Compact ? 28 : 40;
+
+    /// <summary>Margin for the section-divider hairlines: bleeds horizontally to the card edge (negating
+    /// the content padding) and pulls the following section up a touch. -16/-6 roomy / -10/-4 compact.</summary>
+    public Thickness SectionDividerMargin => Compact ? new Thickness(-10, 0, -10, -4) : new Thickness(-16, 0, -16, -6);
+
+    /// <summary>Horizontal-bleed margin for the full-bleed now-playing strip band (no vertical pull, so
+    /// the StackPanel spacing sits it apart). -16 roomy / -10 compact, matching the content padding.
+    /// (The strip's own inner padding lives on <see cref="PeakMeterOptions.NowPlayingStripPadding"/>,
+    /// bound from the strip template's own scope.)</summary>
+    public Thickness EdgeBleedMargin => Compact ? new Thickness(-10, 0, -10, 0) : new Thickness(-16, 0, -16, 0);
+
+    /// <summary>Height of the volume row (slider + meter band). 28 roomy / 24 compact - 24 leaves room
+    /// for the 14px thumb once it's lifted onto the slim meter (a shorter row clips the lifted thumb's
+    /// top); the meter itself still reads slim via the smaller <see cref="MeterTotalHeight"/>.</summary>
+    public double VolumeRowHeight => Compact ? 24 : 28;
+
+    /// <summary>Total stacked peak-meter height the channel bars divide between them (the
+    /// <see cref="Controls.ChannelPeakMeter.TotalHeightOverride"/>). 20 roomy / 14 compact - slim but
+    /// still a clear bar rather than a hairline.</summary>
+    public double MeterTotalHeight => Compact ? 14 : 20;
+
+    /// <summary>Margin of the meter-overlay volume slider. The slider keeps its fixed -2 RenderTransform
+    /// (which centres the thumb in the roomy layout); compact lifts it a little further via the top margin
+    /// to centre on the slimmer compact meter. With the taller 24px compact row the lift needed is small
+    /// (-2 top); the right inset (2) reserves the thumb's travel at 100%. Margin binds reliably and
+    /// updates live, unlike a RenderTransform.</summary>
+    public Thickness VolumeSliderMargin => Compact ? new Thickness(0, -2, 2, 0) : new Thickness(0, 0, 2, 0);
+
+
+    /// <summary>Padding inside the inline first-rule chip (shared with the expanded chips via
+    /// <see cref="PeakMeterOptions.RuleChipPadding"/>). 12,10 roomy / 8,6 compact.</summary>
+    public Thickness RuleChipPadding => MeterOptions.RuleChipPadding;
+
+    /// <summary>Spacing between the first-rule chip's name and status lines. 2 roomy / 1 compact.</summary>
+    public double RuleChipSpacing => MeterOptions.RuleChipSpacing;
+
+    /// <summary>Whether the "Rules" caption above the rule chips shows. Hidden in compact (the chip
+    /// names the rule) to save a line; always shown in the normal layout.</summary>
+    public bool ShowRulesCaption => !Compact;
+
+    /// <summary>Re-raises the compact-layout geometry after the compact setting changes.</summary>
+    private void NotifyCompactLayoutChanged()
+    {
+        OnPropertyChanged(nameof(IsCompactLayout));
+        OnPropertyChanged(nameof(CardContentPadding));
+        OnPropertyChanged(nameof(CardSectionSpacing));
+        OnPropertyChanged(nameof(IconTileSize));
+        OnPropertyChanged(nameof(IconGlyphSize));
+        OnPropertyChanged(nameof(WaveLinkIconSize));
+        OnPropertyChanged(nameof(SectionDividerMargin));
+        OnPropertyChanged(nameof(EdgeBleedMargin));
+        OnPropertyChanged(nameof(VolumeRowHeight));
+        OnPropertyChanged(nameof(MeterTotalHeight));
+        OnPropertyChanged(nameof(VolumeSliderMargin));
+        OnPropertyChanged(nameof(RuleChipPadding));
+        OnPropertyChanged(nameof(RuleChipSpacing));
+        OnPropertyChanged(nameof(ShowRulesCaption));
+        OnPropertyChanged(nameof(ShowNormalBadges));
+        OnPropertyChanged(nameof(ShowCompactBadges));
+    }
 
     // The slider is editable unless:
     //   - a volume rule pins the level, or
@@ -879,6 +993,7 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         RuleVolumeSource = summary.RuleVolumeSource;
 
         Rules = summary.Rules;
+        StampRuleOptions();
         AdditionalRules.Clear();
         for (var i = 1; i < Rules.Count; i++) AdditionalRules.Add(Rules[i]);
 
@@ -890,6 +1005,14 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         OnPropertyChanged(nameof(ShowRulesDivider));
         OnPropertyChanged(nameof(FirstRule));
         OnPropertyChanged(nameof(AdditionalRulesLabel));
+    }
+
+    /// <summary>Stamps this card's effective <see cref="MeterOptions"/> onto each rule summary so the
+    /// RuleSummary-scoped chip template can bind the (live) compact rule-chip geometry. The first-rule
+    /// chip binds the card's own properties; the expanded chips rely on this.</summary>
+    private void StampRuleOptions()
+    {
+        foreach (var rule in Rules) rule.Options = MeterOptions;
     }
 
     /// <summary>
@@ -923,6 +1046,7 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         RuleVolumeSource = snapshot.RuleVolumeSource;
 
         Rules = snapshot.Rules;
+        StampRuleOptions();
         AdditionalRules.Clear();
         for (var i = 1; i < Rules.Count; i++) AdditionalRules.Add(Rules[i]);
 
@@ -941,7 +1065,8 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
         ApplyFeatureOverrides(
             snapshot.ShowNowPlayingOverride, snapshot.NowPlayingFillOverride,
             snapshot.ShowAppIndicatorsOverride, snapshot.ShowAppMetersOverride,
-            snapshot.MeterEnabledOverride, snapshot.ShowPeakIndicatorOverride, snapshot.ShowRulesOverride);
+            snapshot.MeterEnabledOverride, snapshot.ShowPeakIndicatorOverride, snapshot.ShowRulesOverride,
+            snapshot.ShowDeviceBadgesOverride);
 
         // Endpoint-derived bindings (defaults can shift, the id can change on reinstall). The
         // observable setters above already raised their own dependents; these are the non-observable

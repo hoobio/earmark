@@ -90,6 +90,10 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     private readonly PeakMeterOptions _meterOptions = new();
     private readonly DeviceUndoStack _undoStack = new();
 
+    /// <summary>The shared meter/display options. Exposed so the page's <see cref="Controls.BlockWrapLayout"/>
+    /// can bind its compact-aware <c>MinItemWidth</c> (<see cref="PeakMeterOptions.ColumnMinWidth"/>).</summary>
+    public PeakMeterOptions MeterOptions => _meterOptions;
+
     // Effective-flag fans across cards: true when the feature is on globally OR forced on for any
     // device. Each card's MeterOptions already resolves override-or-global, so these just OR them.
     // Used to decide whether the (global) build/tick passes need to run at all.
@@ -212,6 +216,9 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         ShowDisconnectedDevices = _settings.Current.ShowDisconnectedDevices;
         ShowDevicesHeader = _settings.Current.ShowDevicesPageHeader;
         ShowRules = _settings.Current.ShowRules;
+        ShowCardDividers = _settings.Current.ShowCardDividers;
+        ShowDeviceBadges = _settings.Current.ShowDeviceBadges;
+        CompactCards = _settings.Current.CompactCards;
         LockLayout = _settings.Current.LockDeviceLayout;
 
         IsInitializing = true;
@@ -316,6 +323,46 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     {
         if (_settings.Current.ShowRules == value) return;
         _settings.Current.ShowRules = value;
+        SyncMeterOptions();
+        QueueSettingsSave();
+    }
+
+    /// <summary>Whether device cards draw hairline section dividers. Persisted; toggled from the Devices
+    /// page background menu and the "..." menu (and the Settings page).</summary>
+    [ObservableProperty]
+    public partial bool ShowCardDividers { get; set; }
+
+    partial void OnShowCardDividersChanged(bool value)
+    {
+        if (_settings.Current.ShowCardDividers == value) return;
+        _settings.Current.ShowCardDividers = value;
+        SyncMeterOptions();
+        QueueSettingsSave();
+    }
+
+    /// <summary>Whether device cards show the header badge row (flow label + Default / Communications /
+    /// Disconnected pills). Persisted; toggled from the Devices page background menu and the "..." menu
+    /// (and the Settings page).</summary>
+    [ObservableProperty]
+    public partial bool ShowDeviceBadges { get; set; }
+
+    partial void OnShowDeviceBadgesChanged(bool value)
+    {
+        if (_settings.Current.ShowDeviceBadges == value) return;
+        _settings.Current.ShowDeviceBadges = value;
+        SyncMeterOptions();
+        QueueSettingsSave();
+    }
+
+    /// <summary>Whether device cards use the denser compact layout. Persisted; toggled from the Devices
+    /// page background menu and the "..." menu (and the Settings page).</summary>
+    [ObservableProperty]
+    public partial bool CompactCards { get; set; }
+
+    partial void OnCompactCardsChanged(bool value)
+    {
+        if (_settings.Current.CompactCards == value) return;
+        _settings.Current.CompactCards = value;
         SyncMeterOptions();
         QueueSettingsSave();
     }
@@ -958,6 +1005,18 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             {
                 ShowRules = _settings.Current.ShowRules;
             }
+            if (CompactCards != _settings.Current.CompactCards)
+            {
+                CompactCards = _settings.Current.CompactCards;
+            }
+            if (ShowCardDividers != _settings.Current.ShowCardDividers)
+            {
+                ShowCardDividers = _settings.Current.ShowCardDividers;
+            }
+            if (ShowDeviceBadges != _settings.Current.ShowDeviceBadges)
+            {
+                ShowDeviceBadges = _settings.Current.ShowDeviceBadges;
+            }
             SyncMeterOptions();
             // Re-read each card's per-device display overrides from the (possibly just-rewritten)
             // config. This is the path by which a Settings "Clear overrides" reset reaches the live
@@ -1010,7 +1069,9 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         _meterOptions.AlwaysShowPinnedApps = s.AlwaysShowPinnedApps;
         _meterOptions.CardHeight = s.CardHeight;
         _meterOptions.ShowCardDividers = s.ShowCardDividers;
+        _meterOptions.CompactCards = s.CompactCards;
         _meterOptions.ShowRules = s.ShowRules;
+        _meterOptions.ShowDeviceBadges = s.ShowDeviceBadges;
         _meterOptions.ShowNowPlaying = s.ShowNowPlaying;
         _meterOptions.NowPlayingCardBackground = s.NowPlayingCardBackground;
         foreach (var card in _allCards) card.NotifyMeterStyleChanged();
@@ -1352,7 +1413,8 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             ShowAppMetersOverride: cfg?.ShowAppMeters,
             MeterEnabledOverride: cfg?.MeterEnabled,
             ShowPeakIndicatorOverride: cfg?.ShowPeakIndicator,
-            ShowRulesOverride: cfg?.ShowRules);
+            ShowRulesOverride: cfg?.ShowRules,
+            ShowDeviceBadgesOverride: cfg?.ShowDeviceBadges);
 
     /// <summary>
     /// Seeds / refreshes the known-devices table from the live endpoints, then prunes it (age-out
@@ -1583,7 +1645,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
 
             if (!_groupCards.TryGetValue(group.Id, out var gc))
             {
-                gc = new DeviceGroupCard(group.Id, group.Title, OnGroupCardChanged);
+                gc = new DeviceGroupCard(group.Id, group.Title, OnGroupCardChanged, _meterOptions);
                 _groupCards[group.Id] = gc;
             }
             else
@@ -1752,7 +1814,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     {
         if (!_quickGroupCards.TryGetValue(key, out var group))
         {
-            group = new DeviceGroupCard($"quick-{key}", title, null, hideEmptyTitleBand);
+            group = new DeviceGroupCard($"quick-{key}", title, null, _meterOptions, hideEmptyTitleBand);
             _quickGroupCards[key] = group;
         }
 
@@ -2197,7 +2259,8 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             var cfg = LookupConfig(configs, card.DeviceKey, card.Endpoint.Id);
             if (card.ApplyFeatureOverrides(
                 cfg?.ShowNowPlaying, cfg?.NowPlayingFill, cfg?.ShowAppIndicators,
-                cfg?.ShowAppMeters, cfg?.MeterEnabled, cfg?.ShowPeakIndicator, cfg?.ShowRules))
+                cfg?.ShowAppMeters, cfg?.MeterEnabled, cfg?.ShowPeakIndicator, cfg?.ShowRules,
+                cfg?.ShowDeviceBadges))
             {
                 anyChanged = true;
             }
@@ -2342,6 +2405,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             MeterEnabled = card.MeterEnabledOverride,
             ShowPeakIndicator = card.ShowPeakIndicatorOverride,
             ShowRules = card.ShowRulesOverride,
+            ShowDeviceBadges = card.ShowDeviceBadgesOverride,
         };
         if (cfg.IsDefault) map.Remove(card.DeviceKey);
         else map[card.DeviceKey] = cfg;

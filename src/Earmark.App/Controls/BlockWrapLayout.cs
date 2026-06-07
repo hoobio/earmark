@@ -195,7 +195,9 @@ public sealed class BlockWrapLayout : VirtualizingLayout
 
         for (var slot = 0; slot < display.Length; slot++)
         {
-            context.GetOrCreateElementAt(display[slot]).Arrange(slotRects[slot]);
+            var element = context.GetOrCreateElementAt(display[slot]);
+            element.Arrange(slotRects[slot]);
+            ReorderElevation.TrackAndElevate(element, slotRects[slot]);
         }
 
         return new Size(finalSize.Width, totalHeight);

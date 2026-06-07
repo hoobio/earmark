@@ -83,9 +83,21 @@ public sealed partial class DeviceCardView : UserControl
 
     private void OnCardPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(DeviceCard.IsRulesExpanded))
+        switch (e.PropertyName)
         {
-            SetRulesPanelState(sender as DeviceCard, animate: true);
+            case nameof(DeviceCard.IsRulesExpanded):
+                SetRulesPanelState(sender as DeviceCard, animate: true);
+                break;
+
+            // StackPanel.Spacing isn't recalculated when a child's Visibility toggles (a WinUI quirk):
+            // a divider hairline re-renders but the panel keeps the no-divider gap count, so the dividers
+            // come back cramped until something else forces a re-measure (a density change, a new chip).
+            // Force the section stack to re-measure so their spacing returns immediately on the toggle.
+            case nameof(DeviceCard.ShowNowPlayingDivider):
+            case nameof(DeviceCard.ShowAppsDivider):
+            case nameof(DeviceCard.ShowRulesDivider):
+                SectionStack.InvalidateMeasure();
+                break;
         }
     }
 

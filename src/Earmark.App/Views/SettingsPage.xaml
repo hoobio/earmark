@@ -100,6 +100,13 @@
                         <ComboBoxItem Content="Solid" />
                     </ComboBox>
                 </ctrl:SettingsCard>
+                <ctrl:SettingsCard Header="Title bar text"
+                                   Description="Show the &quot;Earmark&quot; title and &quot;Audio rules engine&quot; subtitle in the title bar. Off leaves just the app icon and window buttons. The subtitle hides on its own when the window is too narrow to fit it.">
+                    <ctrl:SettingsCard.HeaderIcon>
+                        <FontIcon Glyph="&#xE7C4;" />
+                    </ctrl:SettingsCard.HeaderIcon>
+                    <ToggleSwitch IsOn="{x:Bind ViewModel.ShowTitleBarText, Mode=TwoWay}" />
+                </ctrl:SettingsCard>
 
                 <TextBlock Text="Devices" Style="{StaticResource BodyStrongTextBlockStyle}" Margin="0,16,0,0" />
                 <ctrl:SettingsCard Header="Card height"
@@ -113,12 +120,26 @@
                         <ComboBoxItem Content="Dynamic" />
                     </ComboBox>
                 </ctrl:SettingsCard>
+                <ctrl:SettingsCard Header="Compact cards"
+                                   Description="Denser device cards: tighter padding and spacing, a smaller icon tile, and trimmed now-playing strips. Applies to the Devices page and Quick Controls.">
+                    <ctrl:SettingsCard.HeaderIcon>
+                        <FontIcon Glyph="&#xE71F;" />
+                    </ctrl:SettingsCard.HeaderIcon>
+                    <ToggleSwitch IsOn="{x:Bind ViewModel.CompactCards, Mode=TwoWay}" />
+                </ctrl:SettingsCard>
                 <ctrl:SettingsCard Header="Card dividers"
                                    Description="Draw a thin separator line between each card's sections (volume, rules, apps), stacking them like a Windows Settings card. Off keeps the sections separated by spacing alone.">
                     <ctrl:SettingsCard.HeaderIcon>
                         <FontIcon Glyph="&#xE8A1;" />
                     </ctrl:SettingsCard.HeaderIcon>
                     <ToggleSwitch IsOn="{x:Bind ViewModel.ShowCardDividers, Mode=TwoWay}" />
+                </ctrl:SettingsCard>
+                <ctrl:SettingsCard Header="Device badges"
+                                   Description="Show the Input / Output flow label and the Default / Communications / Disconnected pills on each card. Off hides that row and frees the space. Override per device in Customise.">
+                    <ctrl:SettingsCard.HeaderIcon>
+                        <FontIcon Glyph="&#xE8EC;" />
+                    </ctrl:SettingsCard.HeaderIcon>
+                    <ToggleSwitch IsOn="{x:Bind ViewModel.ShowDeviceBadges, Mode=TwoWay}" />
                 </ctrl:SettingsCard>
                 <ctrl:SettingsCard Header="Show rules"
                                    Description="Show each device card's rules section. Off hides the entire rules section on every card.">
@@ -400,6 +421,13 @@
                     <ctrl:SettingsCard.HeaderIcon>
                         <FontIcon Glyph="&#xE946;" />
                     </ctrl:SettingsCard.HeaderIcon>
+                </ctrl:SettingsCard>
+                <ctrl:SettingsCard Header="Support Earmark"
+                                   Description="Earmark is free and open source. If it's useful to you, a donation helps keep it maintained.">
+                    <ctrl:SettingsCard.HeaderIcon>
+                        <FontIcon Glyph="&#xEB51;" />
+                    </ctrl:SettingsCard.HeaderIcon>
+                    <HyperlinkButton Content="Donate" Click="OnDonate" />
                 </ctrl:SettingsCard>
                 <ctrl:SettingsCard Header="Check for updates"
                                    Description="{x:Bind About.UpdateStatusText, Mode=OneWay}"

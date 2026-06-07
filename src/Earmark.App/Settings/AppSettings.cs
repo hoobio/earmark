@@ -119,6 +119,21 @@ public sealed class AppSettings
     /// sections by spacing alone.</summary>
     public bool ShowCardDividers { get; set; } = true;
 
+    /// <summary>Whether device cards render in a denser layout: tighter padding and section spacing,
+    /// a smaller icon tile, and trimmed now-playing strips. Default false (the roomy layout). Applies
+    /// to both the Devices page and the Quick Controls overlay.</summary>
+    public bool CompactCards { get; set; }
+
+    /// <summary>Whether device cards show the header badges (the Input / Output flow label and the
+    /// Default / Communications / Disconnected pills). Default true; off hides the whole badge row and
+    /// frees that line of vertical space.</summary>
+    public bool ShowDeviceBadges { get; set; } = true;
+
+    /// <summary>Whether the title bar shows the app title and subtitle ("Earmark" / "Audio rules
+    /// engine"). Default true; off leaves only the icon and caption buttons. The subtitle also
+    /// auto-hides on its own when the window is too narrow to fit it clear of the caption buttons.</summary>
+    public bool ShowTitleBarText { get; set; } = true;
+
     /// <summary>Whether each device card shows its rules section. Default true; off hides the
     /// rules chips and no-rules text on every card.</summary>
     public bool ShowRules { get; set; } = true;
@@ -317,13 +332,17 @@ public sealed class DeviceConfig
     /// <summary>Override for the rules section (global <see cref="AppSettings.ShowRules"/>).</summary>
     public bool? ShowRules { get; set; }
 
+    /// <summary>Override for the header badge row (global <see cref="AppSettings.ShowDeviceBadges"/>).</summary>
+    public bool? ShowDeviceBadges { get; set; }
+
     /// <summary>True when every flag is unset/false, so the entry carries no information and can be
     /// pruned from the map on save. Not serialised (it's a derived helper, not stored state).</summary>
     [JsonIgnore]
     public bool IsDefault => Hidden is not true && Pinned is not true && VolumeControlsHidden is not true
         && PinnedToQuickControls is not true && Glyph is null && AccentColour is null
         && ShowNowPlaying is null && NowPlayingFill is null && ShowAppIndicators is null
-        && ShowAppMeters is null && MeterEnabled is null && ShowPeakIndicator is null && ShowRules is null;
+        && ShowAppMeters is null && MeterEnabled is null && ShowPeakIndicator is null && ShowRules is null
+        && ShowDeviceBadges is null;
 }
 
 /// <summary>
