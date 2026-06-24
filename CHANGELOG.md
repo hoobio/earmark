@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.1.1](https://github.com/hoobio/earmark/compare/v1.1.0...v1.1.1) (2026-06-24)
+
+
+### Build System
+
+* **deps:** Bump actions/checkout from 6 to 7 ([#67](https://github.com/hoobio/earmark/issues/67)) ([1b94a07](https://github.com/hoobio/earmark/commit/1b94a0748bb4fd70ecd7a6136c049828da19fa87))
+* **deps:** Bump softprops/action-gh-release from 3.0.0 to 3.0.1 ([#66](https://github.com/hoobio/earmark/issues/66)) ([53041ab](https://github.com/hoobio/earmark/commit/53041ab2d3d8fc4a8913cf1cbb29f06966cbbc9a))
+
 ## [1.1.0](https://github.com/hoobio/earmark/compare/v1.0.0...v1.1.0) (2026-06-07)
 
 
