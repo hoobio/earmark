@@ -49,7 +49,7 @@ jobs:
     name: Lint & Test
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-dotnet@v5
         with:
@@ -94,7 +94,7 @@ jobs:
     env:
       HAS_SIGNING_CERT: ${{ secrets.SIGNING_CERTIFICATE != '' && vars.SIGNING_CERT_THUMBPRINT != '' }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-dotnet@v5
         with:
@@ -251,7 +251,7 @@ jobs:
     env:
       HAS_SIGNING_CERT: ${{ secrets.SIGNING_CERTIFICATE != '' && vars.SIGNING_CERT_THUMBPRINT != '' }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-dotnet@v5
         with:
@@ -357,7 +357,7 @@ jobs:
       matrix:
         platform: [x64, ARM64]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           sparse-checkout: .github/wack-exclusions.json
           sparse-checkout-cone-mode: false
@@ -395,7 +395,7 @@ jobs:
       DT_SYSTEM: earmark
       DT_COMPONENT: earmark-app
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-dotnet@v5
         with:
@@ -602,7 +602,7 @@ jobs:
       contents: write
       pull-requests: read
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           fetch-tags: true
