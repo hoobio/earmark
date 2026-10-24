@@ -245,42 +245,6 @@ public sealed class AudioEndpointService : IAudioEndpointService, IMMNotificatio
         _ = Task.Run(() => PingPlayer.Play(id, _enumerator, _logger));
     }
 
-    public bool SetFriendlyName(string id, string friendlyName)
-    {
-        ArgumentException.ThrowIfNullOrEmpty(id);
-        ArgumentNullException.ThrowIfNull(friendlyName);
-
-        try
-        {
-            using var device = _enumerator.GetDevice(id);
-            var current = device.FriendlyName;
-            if (string.Equals(current, friendlyName, StringComparison.Ordinal))
-            {
-                _logger.LogDebug("SetFriendlyName({Id}) skipped: already '{Name}'", id, friendlyName);
-                return false;
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "SetFriendlyName({Id}) read failed", id);
-            // Fall through: still attempt the write, in case the read path is the only broken bit.
-        }
-
-        if (!DeviceFriendlyNameWriter.TrySetFriendlyName(id, friendlyName, out var error))
-        {
-            _logger.LogWarning("SetFriendlyName({Id}, '{Name}') failed: {Error}", id, friendlyName, error);
-            return false;
-        }
-
-        _logger.LogInformation("SetFriendlyName({Id}) -> '{Name}'", id, friendlyName);
-        // Property writes don't fire IMMNotificationClient.OnPropertyValueChanged for
-        // FriendlyName through some drivers, so kick a rebuild so the cached snapshot reflects
-        // the new name without waiting on the safety timer. Raise EndpointsChanged so the UI
-        // picks up the new name.
-        QueueRebuild(raiseEndpoints: true, raiseDefaults: false);
-        return true;
-    }
-
     public float? GetPeakLevel(string id)
     {
         ArgumentException.ThrowIfNullOrEmpty(id);

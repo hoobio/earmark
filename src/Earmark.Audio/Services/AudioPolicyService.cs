@@ -109,37 +109,6 @@ public sealed class AudioPolicyService : IAudioPolicyService, IDisposable
         });
     }
 
-    public void ClearDefaultEndpointForApp(string sessionIdentifier, RoleScope role, EndpointFlow flow)
-    {
-        ArgumentException.ThrowIfNullOrEmpty(sessionIdentifier);
-
-        var processId = ResolveProcessId(sessionIdentifier);
-        var dataFlow = ToDataFlow(flow);
-
-        ApplyToRoles(role, eRole =>
-        {
-            Invoke((win11, win10) =>
-            {
-                var empty = HString.Create(string.Empty);
-                try
-                {
-                    var hr = win11 is not null
-                        ? win11.SetPersistedDefaultAudioEndpoint(processId, dataFlow, eRole, empty)
-                        : win10!.SetPersistedDefaultAudioEndpoint(processId, dataFlow, eRole, empty);
-
-                    if (hr < 0)
-                    {
-                        Marshal.ThrowExceptionForHR(hr);
-                    }
-                }
-                finally
-                {
-                    HString.Delete(empty);
-                }
-            });
-        });
-    }
-
     public bool SetSystemDefaultEndpoint(string endpointId, EndpointFlow flow, RoleScope role)
     {
         ArgumentException.ThrowIfNullOrEmpty(endpointId);

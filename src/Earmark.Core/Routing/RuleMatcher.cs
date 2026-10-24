@@ -243,33 +243,6 @@ public sealed class RuleMatcher : IRuleMatcher
 /// </summary>
 public static class PatternMatcher
 {
-    public static bool Matches(string pattern, Regex? regex, string candidate)
-    {
-        if (string.IsNullOrEmpty(candidate))
-        {
-            return false;
-        }
-
-        if (string.Equals(pattern, candidate, StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        if (regex is null)
-        {
-            return false;
-        }
-
-        try
-        {
-            return regex.IsMatch(candidate);
-        }
-        catch (RegexMatchTimeoutException)
-        {
-            return false;
-        }
-    }
-
     /// <summary>
     /// Mode-aware match. The case-insensitive exact-string check is a fast path for all modes and
     /// the entire behaviour for <see cref="PatternMatchMode.Exact"/>. Wildcard and Regex fall back

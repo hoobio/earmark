@@ -359,7 +359,6 @@ public sealed class AudioSessionService : IAudioSessionService, IDisposable
     {
         private readonly MMDevice _device;
         private readonly AudioSessionService _owner;
-        private readonly NotificationClient _notify;
         private readonly System.Collections.Concurrent.ConcurrentBag<AudioSessionControl> _registeredControls = new();
 
         private readonly string _deviceId;
@@ -372,7 +371,6 @@ public sealed class AudioSessionService : IAudioSessionService, IDisposable
             _deviceId = device.ID;
             var manager = device.AudioSessionManager;
             manager.RefreshSessions();
-            _notify = new NotificationClient(this);
 
             // Subscribe to state events for sessions that already exist on this endpoint at
             // attach time. OnSessionCreated only fires for sessions created AFTER the
@@ -472,12 +470,6 @@ public sealed class AudioSessionService : IAudioSessionService, IDisposable
             }
 
             _device.Dispose();
-            _ = _notify;
-        }
-
-        private sealed class NotificationClient
-        {
-            public NotificationClient(SessionWatcher _) { }
         }
     }
 }

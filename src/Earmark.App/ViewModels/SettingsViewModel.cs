@@ -173,9 +173,6 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     public partial bool EnableWaveLink { get; set; }
 
-    [ObservableProperty]
-    public partial bool ReconcileWaveLinkNames { get; set; }
-
     /// <summary>Bound to the channel-style ComboBox SelectedIndex. Maps 1:1 to
     /// <see cref="WaveLinkChannelStyle"/> (Off=0, Colours=1, Icons=2). Index binding sidesteps
     /// the value-type SelectedItem NRE during ComboBox item recycling.</summary>
@@ -367,7 +364,6 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
             AppThemeIndex = (int)_settings.Current.Theme;
             BackdropIndex = (int)_settings.Current.Backdrop;
             EnableWaveLink = _settings.Current.EnableWaveLink;
-            ReconcileWaveLinkNames = _settings.Current.ReconcileWaveLinkNames;
             WaveLinkChannelStyleIndex = (int)_settings.Current.WaveLinkChannelStyle;
             PeakMeterColourModeIndex = (int)_settings.Current.PeakMeterColourMode;
             PeakMeterChannelModeIndex = (int)_settings.Current.PeakMeterChannelMode;
@@ -533,7 +529,6 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     partial void OnAppThemeIndexChanged(int value) => Persist(s => s.Theme = (AppTheme)value);
     partial void OnBackdropIndexChanged(int value) => Persist(s => s.Backdrop = (BackdropMode)value);
     partial void OnEnableWaveLinkChanged(bool value) => Persist(s => s.EnableWaveLink = value);
-    partial void OnReconcileWaveLinkNamesChanged(bool value) => Persist(s => s.ReconcileWaveLinkNames = value);
     partial void OnWaveLinkChannelStyleIndexChanged(int value) => Persist(s => s.WaveLinkChannelStyle = (WaveLinkChannelStyle)value);
 
     partial void OnPeakMeterColourModeIndexChanged(int value)

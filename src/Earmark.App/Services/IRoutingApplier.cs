@@ -47,8 +47,6 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
     private readonly IAudioPolicyService _policy;
     private readonly IRuleMatcher _matcher;
     private readonly IWaveLinkService _waveLink;
-    private readonly IWaveLinkNameReconciler _reconciler;
-    private readonly ISettingsService _settings;
     private readonly ILogger<RoutingApplier> _logger;
     private readonly HashSet<string> _appliedSessionKeys = new(StringComparer.OrdinalIgnoreCase);
     private readonly Lock _appliedGate = new();
@@ -75,8 +73,6 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
         IAudioPolicyService policy,
         IRuleMatcher matcher,
         IWaveLinkService waveLink,
-        IWaveLinkNameReconciler reconciler,
-        ISettingsService settings,
         ILogger<RoutingApplier> logger)
     {
         _rules = rules;
@@ -86,8 +82,6 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
         _policy = policy;
         _matcher = matcher;
         _waveLink = waveLink;
-        _reconciler = reconciler;
-        _settings = settings;
         _logger = logger;
     }
 
@@ -184,12 +178,6 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
 
             var ct = _cts?.Token ?? CancellationToken.None;
             await ApplyWaveLinkRulesAsync(edges, ct).ConfigureAwait(false);
-
-            // Wave Link name reconcile is disabled: it renames the Windows endpoint via
-            // IPropertyStore, which Windows blocks for clients (E_ACCESSDENIED even elevated), so
-            // it could only no-op or fail. The setting is hidden; the reconciler + settings stay
-            // wired but uncalled, revivable once an elevated registry-write path exists.
-            _ = (_reconciler, _settings);
         }
         finally
         {
