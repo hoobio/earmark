@@ -44,7 +44,7 @@ public sealed class SessionsViewModel : NotifyBase
 
     public void Refresh()
     {
-        var endpoints = _endpoints.GetEndpoints()
+        var endpoints = _endpoints.GetEndpoints(EndpointFlow.Render).Concat(_endpoints.GetEndpoints(EndpointFlow.Capture))
             .GroupBy(endpoint => endpoint.Id, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.First().DisplayName, StringComparer.OrdinalIgnoreCase);
         var output = _sessions.GetSessions().Where(session => !session.IsSystemSounds).ToList();

@@ -6,6 +6,7 @@ internal static class StartupRegistration
     public const string NoActivateArgument = "--no-activate";
 
     public const string OpenArgumentPrefix = "--open=";
+    public const string MonitorArgumentPrefix = "--monitor=";
 
     public static bool HasArgument(IEnumerable<string> args, string argument) =>
         args.Any(arg => string.Equals(arg, argument, StringComparison.OrdinalIgnoreCase));
