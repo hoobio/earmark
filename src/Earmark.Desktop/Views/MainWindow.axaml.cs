@@ -283,13 +283,19 @@ public sealed partial class MainWindow : Window
 
     private void PositionTitleBarSlot()
     {
-        var width = TitleBarSlot.Bounds.Width;
-        if (width <= 0 || TitleBarSlotHost.Bounds.Width <= 0)
+        var host = TitleBarSlotHost.Bounds.Width;
+        if (host <= 0 || TitleBarSlot.Content is not Control content)
         {
             return;
         }
 
-        var room = TitleBarSlotHost.Bounds.Width - width;
+        var width = Math.Min(content.MaxWidth, Math.Max(0, host - 2 * TitleBarSlotGap));
+        if (TitleBarSlot.Width != width)
+        {
+            TitleBarSlot.Width = width;
+        }
+
+        var room = host - width;
         var centred = (AppTitleBar.Bounds.Width - width) / 2 - TitleBarSlotHost.Bounds.X;
         var x = room >= 2 * TitleBarSlotGap ? Math.Clamp(centred, TitleBarSlotGap, room - TitleBarSlotGap) : Math.Max(0, room);
         var offset = (TranslateTransform)TitleBarSlot.RenderTransform!;

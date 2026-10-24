@@ -36,7 +36,9 @@
         </ui:FAContentDialog>
         <TextBox
             x:Key="SearchBox"
-            Width="280"
+            MinWidth="160"
+            MaxWidth="280"
+            HorizontalAlignment="Stretch"
             PlaceholderText="Search settings"
             ToolTip.Tip="Search settings (Ctrl+F)"
             AutomationProperties.Name="Search settings"
