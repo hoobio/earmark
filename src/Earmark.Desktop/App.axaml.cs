@@ -156,14 +156,22 @@ public sealed partial class App : Application
 
         var args = desktop.Args ?? [];
         var openPage = StartupArgs.GetValue(args, StartupArgs.OpenArgumentPrefix);
-        if (openPage is not null)
+        var rightmost = string.Equals(StartupArgs.GetValue(args, StartupArgs.MonitorArgumentPrefix), "rightmost", StringComparison.OrdinalIgnoreCase)
+            ? window.Screens.All.MaxBy(screen => screen.Bounds.X)
+            : null;
+        if (string.Equals(openPage, StartupArgs.QuickControlsPage, StringComparison.OrdinalIgnoreCase))
+        {
+            // Devices load asynchronously, so an immediate open would show only the placeholder panel.
+            DispatcherTimer.RunOnce(() => services.GetRequiredService<QuickControlsWindow>().OpenWithoutFocus(rightmost), TimeSpan.FromSeconds(3));
+            logger.LogInformation("Opening Quick Controls from the command line");
+        }
+        else if (openPage is not null)
         {
             window.Navigate(openPage);
             logger.LogInformation("Opened page {Page} from the command line", openPage);
         }
 
-        if (string.Equals(StartupArgs.GetValue(args, StartupArgs.MonitorArgumentPrefix), "rightmost", StringComparison.OrdinalIgnoreCase)
-            && window.Screens.All.MaxBy(screen => screen.Bounds.X) is { } screen)
+        if (rightmost is { } screen)
         {
             var area = screen.WorkingArea;
             var size = PixelSize.FromSize(new Size(window.Width, window.Height), screen.Scaling);

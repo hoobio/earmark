@@ -43,7 +43,7 @@ dotnet build src/Earmark.Desktop/Earmark.Desktop.csproj -c Debug -p:Platform=x64
 
 - `set -o pipefail` keeps the build's exit code through `| tail`, so launch fires only on a green build.
 - Always pass `-p:Platform=x64` (or `ARM64`). No `AnyCPU` config exists for the head.
-- Launch flags: `--no-activate` starts without taking focus, `--monitor=rightmost` places the window on the rightmost screen, `--open=<Page>` opens `Devices`, `Rules`, `Sessions` or `Settings`, `--tray` starts hidden in the tray. Agents always pass `--no-activate --monitor=rightmost`.
+- Launch flags: `--no-activate` starts without taking focus, `--monitor=rightmost` places the window on the rightmost screen, `--open=<Page>` opens `Devices`, `Rules`, `Sessions` or `Settings` (`--open=QuickControls` shows the overlay without focus after 3 s, on the rightmost screen with `--monitor=rightmost`), `--tray` starts hidden in the tray. Agents always pass `--no-activate --monitor=rightmost`.
 - Launch via `nohup ... & disown` so the app outlives the shell.
 - Logs: `%LocalAppData%\Earmark\<channel>\logs\earmark-{yyyyMMdd-HHmmss}.log`, one per launch. `<channel>` is `Dev` for local builds, `Prerelease` for pre-release builds, and absent for Release (`%LocalAppData%\Earmark\logs`). Read the newest with `Get-ChildItem "$env:LocalAppData\Earmark\Dev\logs\*.log" | Sort-Object LastWriteTime -Descending | Select-Object -First 1 | Get-Content`.
 - Editing only `Earmark.Core` or `Earmark.Audio` can build individually without killing; a final `Earmark.Desktop` build still needs the kill.

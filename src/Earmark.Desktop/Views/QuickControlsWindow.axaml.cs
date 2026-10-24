@@ -112,6 +112,8 @@ public sealed partial class QuickControlsWindow : Window
 
     public void Open() => Open(Stopwatch.GetTimestamp());
 
+    public void OpenWithoutFocus(Screen? screen) => Open(Stopwatch.GetTimestamp(), screen, activate: false);
+
     public void Toggle() => Toggle(Stopwatch.GetTimestamp());
 
     public bool RegisterHotkey(string text, bool toastOnFailure)
@@ -209,7 +211,7 @@ public sealed partial class QuickControlsWindow : Window
         }
     }
 
-    private void Open(long started)
+    private void Open(long started, Screen? target = null, bool activate = true)
     {
         if (_visibility.IsVisible)
         {
@@ -221,7 +223,7 @@ public sealed partial class QuickControlsWindow : Window
         _visibility.IsVisible = true;
         var generation = ++_generation;
         bool Current() => generation == _generation && _visibility.IsVisible;
-        var screen = ResolveScreen();
+        var screen = target ?? ResolveScreen();
         _workArea = screen.WorkingArea;
         Native.Cloak(_handle, cloaked: true);
         var backdropChanged = ApplyBackdrop();
@@ -229,7 +231,7 @@ public sealed partial class QuickControlsWindow : Window
         Width = Math.Min(PanelWidth, (_workArea.Width / screen.Scaling) - (EdgeMargin * 2));
         var blocks = Build(_workArea.Height / screen.Scaling);
         Place(screen.Scaling);
-        ShowActivated = true;
+        ShowActivated = activate;
         Show();
         RequestAnimationFrame(_ =>
         {
@@ -249,8 +251,12 @@ public sealed partial class QuickControlsWindow : Window
                 }
 
                 Native.Cloak(_handle, cloaked: false);
-                Activate();
-                Native.ForceForeground(_handle);
+                if (activate)
+                {
+                    Activate();
+                    Native.ForceForeground(_handle);
+                }
+
                 _logger.LogInformation(
                     "Quick Controls shown with {Blocks} blocks in {Ms:F0} ms (acrylic {Acrylic}, transparency {Level}, region kind {Region})",
                     blocks,
