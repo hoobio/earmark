@@ -17,7 +17,7 @@
     <PackageVersion Include="FluentAvaloniaUI" Version="3.1.0" />
 
     <!-- Audio -->
-    <PackageVersion Include="NAudio.Wasapi" Version="2.4.0" />
+    <PackageVersion Include="NAudio.Wasapi" Version="3.3.0" />
     <!-- Source-generated Win32/COM interop (Bluetooth KS one-shot connect/disconnect), so the
          IDeviceTopology / IConnector / IKsControl vtables come from the Windows metadata rather
          than hand-maintained COM declarations. Analyzer-only (PrivateAssets=all). -->
