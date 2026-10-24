@@ -163,6 +163,8 @@ public static class Acrylic
         {
             _presenter.LayoutUpdated -= OnLayoutUpdated;
             _activation?.Dispose();
+            _bitmap?.Dispose();
+            _bitmap = null;
         }
 
         private void OnLayoutUpdated(object? sender, EventArgs e) => Apply(force: false);
@@ -182,7 +184,8 @@ public static class Acrylic
             var fallback = Resource(_presenter, "FlyoutAcrylicFallbackColor");
             var mode = active ? AcrylicMode.Blur : AcrylicMode.Fallback;
             _presenter.SetValue(ModeProperty, mode);
-            _presenter.SetValue(Border.BackgroundProperty, mode == AcrylicMode.Blur && Snapshot(rect, scale, tint, fallback) is { } snapshot
+            // A tooltip opens on every hover, too often to render and blur the window behind it each time.
+            _presenter.SetValue(Border.BackgroundProperty, mode == AcrylicMode.Blur && _presenter is not ToolTip && Snapshot(rect, scale, tint, fallback) is { } snapshot
                 ? new ImageBrush(snapshot) { Stretch = Stretch.Fill }
                 : new SolidColorBrush(mode == AcrylicMode.Blur ? Composite(tint, fallback) : fallback));
         }
