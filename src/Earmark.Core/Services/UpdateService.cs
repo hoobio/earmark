@@ -9,14 +9,11 @@ namespace Earmark.Core.Services;
 
 public enum UpdateStatus
 {
-    /// <summary>No check has run yet.</summary>
     Unknown,
     Checking,
     UpToDate,
     UpdateAvailable,
-    /// <summary>The last check errored (offline, rate-limited, parse failure).</summary>
     Failed,
-    /// <summary>Packaged (MSIX/Store) build: updates are managed by the Store, so we never check.</summary>
     NotSupported,
 }
 
@@ -34,8 +31,7 @@ public sealed class UpdateService : IDisposable
         IsSupported = !isPackaged;
 
         _http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
-        // GitHub's API rejects requests without a User-Agent; the Accept header opts into the
-        // stable v3 media type.
+        // GitHub's API rejects requests without a User-Agent.
         _http.DefaultRequestHeaders.UserAgent.ParseAdd($"Earmark/{AppInfo.Version}");
         _http.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
 
@@ -44,21 +40,15 @@ public sealed class UpdateService : IDisposable
 
     public UpdateStatus Status { get; private set; }
 
-    /// <summary>Display name of the latest release once a check has found one (e.g. "v0.1.9").</summary>
     public string? LatestVersion { get; private set; }
 
     public string? LatestReleaseUrl { get; private set; }
 
-    /// <summary>False for packaged builds, which update through the Microsoft Store.</summary>
     public bool IsSupported { get; }
 
-    /// <summary>Raised on a thread-pool thread; UI subscribers marshal to their own thread.</summary>
+    // Raised on a thread-pool thread; UI subscribers must marshal to their own thread.
     public event EventHandler? StatusChanged;
 
-    /// <summary>
-    /// <paramref name="manual"/> checks run even when the auto-check setting is off; auto checks
-    /// respect it. No-op on packaged builds. Never throws: failures land as <see cref="UpdateStatus.Failed"/>.
-    /// </summary>
     public async Task CheckForUpdatesAsync(bool manual, CancellationToken ct = default)
     {
         if (!IsSupported)
@@ -66,15 +56,12 @@ public sealed class UpdateService : IDisposable
             return;
         }
 
-        // Auto-checks are skipped for local (Dev) builds and when the setting is off. We never read
-        // or write the persisted setting for a Dev build: it shares settings.json with any
-        // side-by-side live install, so it must not influence that toggle. Manual checks always run.
+        // Dev builds share settings.json with a side-by-side live install, so they never touch the auto-check toggle.
         if (!manual && (AppInfo.IsDevBuild || !_settings.Current.CheckForUpdates))
         {
             return;
         }
 
-        // Drop overlapping checks rather than queueing them.
         if (!await _gate.WaitAsync(0, ct).ConfigureAwait(false))
         {
             return;
@@ -99,9 +86,7 @@ public sealed class UpdateService : IDisposable
                 return;
             }
 
-            // A pre-release build tracks the newest release of any kind (it sees the next -pre.N,
-            // but a newer stable still wins by semver precedence). Every other channel only
-            // considers stable releases, so a pre-release never surfaces as an update there.
+            // Only a pre-release build considers pre-releases; every other channel sees stable releases only.
             GitHubRelease? best = null;
             var bestSem = default(SemVer);
             foreach (var release in releases ?? [])
@@ -188,13 +173,8 @@ internal sealed class GitHubRelease
     public bool Draft { get; set; }
 }
 
-/// <summary>
-/// Minimal semver for the tags this repo produces: "vX.Y.Z" and "vX.Y.Z-pre.N". A stable release
-/// sorts above any pre-release of the same X.Y.Z; pre-releases order by their trailing number.
-/// </summary>
 internal readonly record struct SemVer(int Major, int Minor, int Patch, int Pre)
 {
-    // Stable releases have no pre-release component; sort them above every pre-release.
     private const int StablePre = int.MaxValue;
 
     public static bool TryParse(string? tag, out SemVer value)
@@ -227,7 +207,6 @@ internal readonly record struct SemVer(int Major, int Minor, int Patch, int Pre)
         var preNumber = StablePre;
         if (pre is not null)
         {
-            // "pre.42" -> 42; anything non-numeric sorts as the lowest pre-release.
             var lastDot = pre.LastIndexOf('.');
             var trailing = lastDot >= 0 ? pre[(lastDot + 1)..] : pre;
             preNumber = int.TryParse(trailing, out var n) ? n : 0;

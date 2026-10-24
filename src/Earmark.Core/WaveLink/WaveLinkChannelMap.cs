@@ -2,12 +2,6 @@ using Earmark.Core.Models;
 
 namespace Earmark.Core.WaveLink;
 
-/// <summary>
-/// Correlates Wave Link channels (which carry the coloured artwork) to the Windows endpoints
-/// the device grid renders. Hardware mic strips carry the MMDevice id verbatim in
-/// <see cref="WaveLinkChannelInfo.Id"/>; software channels (Game, Comms, Media, ...) surface
-/// as "Elgato Virtual Audio" render endpoints whose name is the bare channel name.
-/// </summary>
 public static class WaveLinkChannelMap
 {
     private const string ElgatoVirtual = "Elgato Virtual Audio";
@@ -23,9 +17,7 @@ public static class WaveLinkChannelMap
         {
             if (string.IsNullOrEmpty(channel.ImageData)) continue;
 
-            // A channel can surface as more than one endpoint: a hardware strip (SM7B) is both
-            // the raw capture device (matched by MMDevice id) AND its "SM7B (Elgato Virtual
-            // Audio)" virtual card (matched by name). Tint every one of them, not just the first.
+            // A hardware strip (SM7B) is both the raw capture device (by MMDevice id) and an "SM7B (Elgato Virtual Audio)" card (by name): map every match.
             foreach (var e in endpoints)
             {
                 if (Matches(channel, e))
@@ -38,8 +30,7 @@ public static class WaveLinkChannelMap
         return map;
     }
 
-    /// <summary>Maps each mix to the matching "&lt;Mix Name&gt; (Elgato Virtual Audio)" endpoint.
-    /// Mixes carry only a named monochrome icon, so they're keyed by name (no id correlation).</summary>
+    // Mixes carry no id that correlates to an endpoint, so they match by name only.
     public static Dictionary<string, WaveLinkMixInfo> BuildMixMap(
         WaveLinkSnapshot? snapshot,
         IReadOnlyList<AudioEndpoint> endpoints)
@@ -63,7 +54,6 @@ public static class WaveLinkChannelMap
 
     private static bool Matches(WaveLinkChannelInfo channel, AudioEndpoint e)
     {
-        // Hardware strips carry the Windows MMDevice id directly.
         if (string.Equals(e.Id, channel.Id, StringComparison.OrdinalIgnoreCase))
         {
             return true;
@@ -72,8 +62,7 @@ public static class WaveLinkChannelMap
         return NameMatchesVirtual(e, channel.Name);
     }
 
-    // The virtual "<name> (Elgato Virtual Audio)" endpoint, guarded on the description so a
-    // user's similarly-named real device can't match.
+    // Guarded on the description so a user's similarly-named real device cannot match.
     private static bool NameMatchesVirtual(AudioEndpoint e, string name)
     {
         if (!e.DeviceDescription.Contains(ElgatoVirtual, StringComparison.OrdinalIgnoreCase))

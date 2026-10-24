@@ -18,9 +18,7 @@ public sealed class FileLoggerProvider : ILoggerProvider
         _path = path;
         Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
 
-        // One held handle, flushed per write (crash-safe) but never reopened: startup at Debug
-        // emits hundreds of lines and File.AppendAllText would open/close the file on each one.
-        // FileShare.ReadWrite so the log can still be tailed while the app runs.
+        // One held handle, not File.AppendAllText: startup at Debug emits hundreds of lines. FileShare.ReadWrite keeps the log tailable.
         try
         {
             var stream = new FileStream(_path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
@@ -28,7 +26,7 @@ public sealed class FileLoggerProvider : ILoggerProvider
         }
         catch
         {
-            // Couldn't open the log file; logging degrades to a no-op rather than crashing the app.
+            // Logging degrades to a no-op rather than crashing the app.
         }
     }
 

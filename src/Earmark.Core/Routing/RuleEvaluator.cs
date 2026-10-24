@@ -16,13 +16,6 @@ public sealed record RuleEvaluation(RuleStatus Status, string Message);
 
 public sealed record RuleReport(RuleStatus Status, string Message, IReadOnlySet<int> ShadowedActions);
 
-/// <summary>
-/// One pass over the rules in list order with an incremental claim set: per rule, its status and
-/// which live-branch actions are shadowed because an earlier enabled rule (or an earlier action in
-/// the same rule) already claims every target they compete for. The appliers are first-match-wins
-/// per (app, flow), per (default flow, role) and per device for volume and mute, so a shadowed
-/// action never runs. Wave Link mix and rename claim nothing here.
-/// </summary>
 public static class RuleEvaluator
 {
     private static readonly IReadOnlySet<int> None = new HashSet<int>();

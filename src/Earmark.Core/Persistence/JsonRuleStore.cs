@@ -98,7 +98,6 @@ public sealed class JsonRuleStore : IRuleStore, IDisposable
 
     public void UnblockSaves() => _saveBlocked = false;
 
-    /// <summary>Serialized form of one rule, for change detection.</summary>
     public static string Fingerprint(RoutingRule rule) =>
         JsonSerializer.Serialize(rule, RuleJsonContext.Default.RoutingRule);
 }

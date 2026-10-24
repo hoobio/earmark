@@ -1,10 +1,5 @@
 namespace Earmark.Core.Routing;
 
-/// <summary>
-/// Index maths for a live drag reorder. Indices handed back are in the list with the dragged row
-/// removed, so a drop inserts there directly. <c>from</c> is the dragged row's index when the list
-/// is its source, otherwise -1; rows after it close up by <c>slot</c>.
-/// </summary>
 public static class ListReorder
 {
     public static int InsertionIndex(IReadOnlyList<double> tops, IReadOnlyList<double> heights, int from, double slot, double y)

@@ -2,11 +2,6 @@ using System.Reflection;
 
 namespace Earmark.Core;
 
-/// <summary>
-/// Static facts about the running build: the release-please-managed version (baked into the
-/// assembly via <c>version.txt</c> -&gt; <c>&lt;Version&gt;</c>), the build channel and the source
-/// commit. Drives the About section, the data paths and the update check.
-/// </summary>
 public static class AppInfo
 {
     private const string Owner = "hoobio";
@@ -20,14 +15,11 @@ public static class AppInfo
         var informational = assembly
             .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
 
-        // InformationalVersion is "<semver>[+<commit-sha>]". Split off the commit, then strip any
-        // semver pre-release suffix ("-pre") so the numeric part parses cleanly.
         var plusIndex = informational?.IndexOf('+') ?? -1;
         var versionPart = plusIndex >= 0 ? informational![..plusIndex] : informational;
         CommitHash = plusIndex >= 0 ? informational![(plusIndex + 1)..] : null;
 
-        // Keeps any "-pre.N" suffix: a pre-release build's identity is its full semver, which the
-        // update check needs to compare against newer pre-release tags.
+        // Keeps the "-pre.N" suffix: the update check compares the full semver against newer pre-release tags.
         Version = string.IsNullOrWhiteSpace(versionPart)
             ? assembly.GetName().Version?.ToString(3) ?? "0.0.0"
             : versionPart;
@@ -38,16 +30,12 @@ public static class AppInfo
         Copyright = assembly.GetCustomAttribute<AssemblyCopyrightAttribute>()?.Copyright ?? "Copyright (c) Hoobi";
     }
 
-    /// <summary>The release-please version, e.g. "0.1.8". No commit suffix.</summary>
     public static string Version { get; }
 
-    /// <summary>Short-ish source commit the build was produced from, or null when unavailable.</summary>
     public static string? CommitHash { get; }
 
-    /// <summary>"Dev" (local), "Prerelease" (release-please PR build), or "Release" (CI).</summary>
     public static string BuildChannel { get; }
 
-    /// <summary>Copyright string from the assembly (set via Directory.Build.props).</summary>
     public static string Copyright { get; }
 
     public static bool IsDevBuild => string.Equals(BuildChannel, "Dev", StringComparison.OrdinalIgnoreCase);
@@ -56,9 +44,6 @@ public static class AppInfo
 
     public static bool IsRelease => string.Equals(BuildChannel, "Release", StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>Per-channel storage subfolder so Dev / Prerelease / Release builds keep separate
-    /// data (rules, settings, logs) and never clobber each other: "Dev" / "Prerelease" for the
-    /// non-stable channels, empty for a stable Release build (which sits at the base folder).</summary>
     public static string ChannelFolder => BuildChannel switch
     {
         "Dev" => "Dev",
@@ -66,7 +51,6 @@ public static class AppInfo
         _ => string.Empty,
     };
 
-    /// <summary>Version with a channel tag for non-stable builds, e.g. "0.1.8 (Dev)".</summary>
     public static string DisplayVersion => BuildChannel switch
     {
         "Dev" => $"{Version} (Dev)",
@@ -74,7 +58,6 @@ public static class AppInfo
         _ => Version,
     };
 
-    /// <summary>Short commit for display (first 7 chars), or null.</summary>
     public static string? ShortCommit =>
         string.IsNullOrEmpty(CommitHash) ? null : CommitHash[..Math.Min(7, CommitHash.Length)];
 
@@ -84,12 +67,8 @@ public static class AppInfo
     public static string NewBugUrl => $"{RepoUrl}/issues/new?template=bug_report.yml";
     public static string NewFeatureUrl => $"{RepoUrl}/issues/new?template=feature_request.yml";
 
-    /// <summary>PayPal donation link, surfaced from the About section.</summary>
     public static string DonateUrl => "https://www.paypal.com/donate/?hosted_button_id=SWG4G7VH3ZFQN";
 
-    /// <summary>
-    /// Releases list (newest first). We read the list rather than <c>releases/latest</c> so a
-    /// pre-release build can find the newest pre-release; stable builds just filter prereleases out.
-    /// </summary>
+    // The list, not releases/latest: a pre-release build needs the newest pre-release; stable builds filter them out.
     public static string ReleasesApiUrl => $"https://api.github.com/repos/{Owner}/{Repo}/releases?per_page=30";
 }

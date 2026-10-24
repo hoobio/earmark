@@ -16,12 +16,7 @@ public sealed record DefaultDeviceMatch(RoutingRule Rule, RuleAction Action, Aud
 
 public static class RuleMatcher
 {
-    /// <summary>
-    /// Per-rule <see cref="ConditionsMet"/> for one snapshot. Conditions do not depend on the
-    /// session or device being matched, so callers build this once and share it.
-    /// <paramref name="endpoints"/> must hold BOTH flows: a condition on a capture device is
-    /// evaluated against the capture endpoints even when the action routes output.
-    /// </summary>
+    // endpoints must hold both flows: a capture-device condition is evaluated against capture endpoints even when the action routes output.
     public static IReadOnlyDictionary<Guid, bool> EvaluateConditions(
         IReadOnlyList<RoutingRule> rules,
         IReadOnlyList<AudioEndpoint> endpoints,

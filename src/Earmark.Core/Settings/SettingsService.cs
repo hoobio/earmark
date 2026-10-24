@@ -98,11 +98,6 @@ public sealed class SettingsService : IDisposable
         SettingsChanged?.Invoke(this, EventArgs.Empty);
     }
 
-    /// <summary>
-    /// Writes a one-off copy of the current settings to a sibling file <c>settings.{label}.json</c>
-    /// (best-effort; failures are ignored, not thrown). Used to snapshot the pre-migration state
-    /// before the one-time device-key re-key, so it stays recoverable.
-    /// </summary>
     public async Task SaveBackupAsync(string label, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(label);

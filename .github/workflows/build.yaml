@@ -24,9 +24,7 @@ env:
   WIX_SOURCE_PATH: installer/Earmark.wxs
   BOM_FILE: sbom.cdx.json
   AVALONIA_TELEMETRY_OPTOUT: "1"
-  # GitHub Actions does not allow expressions in `uses:` refs, so the pipeline-tools pin is
-  # repeated in each `uses:` line below. Bump in lockstep.
-  # Current pin: hoobio/pipeline-tools @ v2.2.1
+  # Actions allows no expressions in `uses:` refs, so the hoobio/pipeline-tools pin (v2.2.1) repeats in each `uses:` line: bump in lockstep.
 
 jobs:
   release-please:
@@ -427,10 +425,6 @@ jobs:
         with:
           dotnet-version: ${{ env.DOTNET_SDK_VERSION }}
 
-      # pipeline-tools v2 takes channel + sub-channel as separate inputs:
-      #   release event           -> channel=release,        sub-channel='',         mark-latest=true,  no prune
-      #   push to default branch  -> channel=main,           sub-channel='',         mark-latest=false, prune
-      #   push to feature / PR    -> channel=ci,             sub-channel=<branch>,   mark-latest=false, prune
       - name: Resolve DT channel
         id: dt
         shell: pwsh
@@ -620,9 +614,7 @@ jobs:
 
   pre-release:
     name: Pre-Release
-    # Runs on the release-please PR (already carrying the bumped version.txt and changelog) so the bumped
-    # build can be smoke-tested before it merges. Shipped clients ignore these: the in-app update check
-    # only considers pre-releases on the Prerelease channel.
+    # Shipped clients ignore these: the in-app update check only considers pre-releases on the Prerelease channel.
     needs: [build-msix, build-msi, build-portable, lint-and-test]
     if: >-
       always()

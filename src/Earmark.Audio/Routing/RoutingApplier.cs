@@ -9,25 +9,15 @@ using Microsoft.Extensions.Logging;
 
 namespace Earmark.Audio.Routing;
 
-/// <summary>
-/// The rule engine. Event-driven passes (sessions, rules, defaults, endpoints, Wave Link) plus a slow
-/// drift timer; each pass reads one snapshot of endpoints, sessions and per-rule condition state and
-/// enforces pinned actions every pass and one-shot actions on their rule's activation edge only.
-/// </summary>
 public sealed class RoutingApplier : IDisposable
 {
-    // Drift-guard only. The real triggers are SessionAdded / SessionRemoved /
-    // RulesChanged / DefaultsChanged. Keep this slow enough to not show up on idle CPU.
+    // Drift guard only (events are the real triggers); slow enough to stay off idle CPU.
     private static readonly TimeSpan PeriodicInterval = TimeSpan.FromMinutes(5);
 
-    // External volume / mute changes (Windows flyout, hardware keys, another app) re-assert a
-    // locked device event-driven. Debounced so a slider drag settles before we snap it back -
-    // mirrors the Devices page's 600ms user-grace window.
+    // Debounced so a slider drag settles before we snap it back (mirrors the Devices page's 600ms user-grace window).
     private static readonly TimeSpan VolumeReconcileDebounce = TimeSpan.FromMilliseconds(500);
 
-    // One Bluetooth connect raises a burst of endpoint events (and can briefly flicker
-    // present/absent); re-arming on each change re-applies once the topology settles instead of
-    // oscillating a presence-gated rule between its branches.
+    // One Bluetooth connect raises a burst of endpoint events and can flicker present/absent; re-arming per change applies once the topology settles instead of oscillating a presence-gated rule.
     private static readonly TimeSpan EndpointsChangeDebounce = TimeSpan.FromMilliseconds(750);
 
     private static readonly IReadOnlySet<Guid> NoEdges = new HashSet<Guid>();
@@ -46,8 +36,6 @@ public sealed class RoutingApplier : IDisposable
     private readonly HashSet<uint> _newSessionPids = new();
     private readonly Lock _newSessionGate = new();
 
-    // Guarded by _applyGate. A rule whose met-ness changed since the previous pass (or that is new
-    // or edited) has an activation edge this pass: its live branch's one-shot actions fire once.
     private readonly Dictionary<Guid, bool> _lastConditionsMet = new();
     private readonly Dictionary<Guid, string> _ruleFingerprints = new();
     private IReadOnlyList<RoutingRule>? _lastRules;
@@ -77,7 +65,6 @@ public sealed class RoutingApplier : IDisposable
         _logger = logger;
     }
 
-    /// <summary>Raised after a per-app route is written, on the applying thread.</summary>
     public event EventHandler<AppliedRoute>? RouteApplied;
 
     public void Start()
@@ -117,10 +104,6 @@ public sealed class RoutingApplier : IDisposable
         _logger.LogInformation("Routing applier started; periodic interval = {Interval}", PeriodicInterval);
     }
 
-    /// <summary>
-    /// Runs one pass and waits for it, Wave Link included. <paramref name="force"/> is the manual
-    /// Reapply: every rule re-arms its one-shot actions and the per-app dedupe is cleared.
-    /// </summary>
     public async Task ApplyAllAsync(bool force = false)
     {
         WaveLinkWork? waveLinkWork;
@@ -139,10 +122,7 @@ public sealed class RoutingApplier : IDisposable
         await DrainPendingAsync().ConfigureAwait(false);
     }
 
-    /// <summary>
-    /// Coalesced, non-blocking pass request. An event that arrives while a pass runs is not dropped:
-    /// the flag is set before the gate is tried, and every gate holder re-checks it after release.
-    /// </summary>
+    // The flag is set before the gate is tried and every gate holder re-checks it after release, so an event arriving mid-pass is not dropped.
     private Task RequestApplyAsync()
     {
         Interlocked.Exchange(ref _rerunPending, 1);
@@ -222,8 +202,7 @@ public sealed class RoutingApplier : IDisposable
 
         RearmChangedRules(rules);
 
-        // Drained before the snapshot: the session service publishes before it raises SessionAdded,
-        // so every pid taken here is in the snapshot read next.
+        // Drained before the snapshot: the session service publishes before raising SessionAdded, so every pid taken here is in the next snapshot.
         HashSet<uint> newPids;
         lock (_newSessionGate)
         {
@@ -241,12 +220,7 @@ public sealed class RoutingApplier : IDisposable
         return HasEnactableWaveLinkAction(rules, edges) ? new WaveLinkWork(rules, snapshot.Met, edges) : null;
     }
 
-    /// <summary>
-    /// Re-arms one-shot actions of rules that are new or whose content changed since the last pass,
-    /// and only those: saving rule B must not re-fire rule A's one-shots. Any change to the rule
-    /// list also clears the per-app dedupe, because a reorder or delete can hand a session back to a
-    /// rule whose earlier key would otherwise suppress the re-pin.
-    /// </summary>
+    // Saving rule B must not re-fire rule A's one-shots; any list change clears the per-app dedupe because a reorder or delete can hand a session back to a rule whose earlier key would suppress the re-pin.
     private void RearmChangedRules(IReadOnlyList<RoutingRule> rules)
     {
         if (ReferenceEquals(rules, _lastRules))
@@ -289,7 +263,7 @@ public sealed class RoutingApplier : IDisposable
         }
     }
 
-    // Must hold _applyGate. Updates the baseline as a side effect.
+    // Must hold _applyGate; updates the baseline as a side effect.
     private HashSet<Guid> ComputeActivationEdges(Snapshot snapshot)
     {
         var edges = new HashSet<Guid>();
@@ -405,8 +379,6 @@ public sealed class RoutingApplier : IDisposable
     {
         var match = RuleMatcher.FindDefaultDevice(flow, roleKind, snapshot.Rules, endpoints, snapshot.Met);
 
-        // A one-shot default-device action sets the default only on its activation edge; afterwards
-        // the user is free to switch the default away without us snapping it back.
         if (match is null || !ShouldEnact(match.Action.Pinned, match.Rule.Id, edges))
         {
             return;
@@ -471,8 +443,7 @@ public sealed class RoutingApplier : IDisposable
         _endpointsChangeTimer?.Change(EndpointsChangeDebounce, Timeout.InfiniteTimeSpan);
     }
 
-    // The Set itself raises DefaultsChanged; the Get-before-Set in ApplyDefaultRole makes that
-    // echo a no-op. A default change can also flip a "Default device is" condition.
+    // The Set itself raises DefaultsChanged; the Get-before-Set in ApplyDefaultRole makes that echo a no-op.
     private void OnDefaultsChanged(object? sender, EventArgs e) => RunRequested("Default-device-changed handler");
 
     private void OnWaveLinkSnapshotChanged(object? sender, EventArgs e) => RunRequested("Wave Link snapshot-changed handler");
@@ -483,8 +454,7 @@ public sealed class RoutingApplier : IDisposable
     private void OnExternalMuteChanged(object? sender, EndpointMuteChangedEventArgs e) =>
         ScheduleVolumeReconcile();
 
-    // Skipped when no rule PINS volume/mute (one-shot rules don't reconcile), so machines without
-    // lock rules don't wake on every system volume keypress.
+    // Skipped when no rule pins volume/mute, so machines without lock rules don't wake on every system volume keypress.
     private void ScheduleVolumeReconcile()
     {
         if (_cts is null || _cts.IsCancellationRequested) return;
@@ -533,8 +503,7 @@ public sealed class RoutingApplier : IDisposable
         }
     }
 
-    // Per-device first-match-wins via the shared DeviceRuleResolver, the same logic the Devices
-    // page uses for its lock indicator, so enforcement and the indicator can't drift.
+    // Shared DeviceRuleResolver is also behind the Devices page's lock indicator, so enforcement and indicator can't drift.
     private void ApplyVolumeAndMuteRules(Snapshot snapshot, IReadOnlySet<Guid> edges)
     {
         foreach (var endpoint in snapshot.All)
@@ -675,8 +644,6 @@ public sealed class RoutingApplier : IDisposable
             foreach (var action in rule.ActiveActions(work.Met[rule.Id]))
             {
                 if (!action.IsValid || !action.IsWaveLinkAction) continue;
-                // A one-shot mix action only contributes a claim on its activation edge; otherwise
-                // the device is left wherever the user / Wave Link last put it.
                 if (!ShouldEnact(action.Pinned, rule.Id, work.Edges)) continue;
 
                 var matchedMix = snapshot.Mixes.FirstOrDefault(mix => PatternMatcher.Matches(action.MixMatchMode, action.MixPattern, mix.Name));
@@ -699,9 +666,7 @@ public sealed class RoutingApplier : IDisposable
                             claims[output.DeviceId] = new WaveLinkClaim(matchedMix.Id, ruleLabel);
                             break;
                         case MixMembership.Exclude:
-                            // Pin the device regardless of current mix: strip it if it's on the
-                            // mix-to-remove, otherwise hold its current mix so a later Include or
-                            // Exclusive rule can't re-add what this Exclude just stripped.
+                            // Hold the device's current mix so a later Include or Exclusive rule can't re-add what this Exclude stripped.
                             var target = string.Equals(output.CurrentMixId, matchedMix.Id, StringComparison.Ordinal)
                                 ? string.Empty
                                 : output.CurrentMixId;
@@ -712,7 +677,6 @@ public sealed class RoutingApplier : IDisposable
             }
         }
 
-        // Exclusive's "remove non-matching" sweep: any Exclusive-owned mix loses unclaimed devices.
         foreach (var output in snapshot.OutputDevices)
         {
             if (claims.ContainsKey(output.DeviceId)) continue;

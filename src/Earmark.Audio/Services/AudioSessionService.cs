@@ -16,18 +16,10 @@ using SessionStateModel = Earmark.Core.Models.SessionState;
 
 namespace Earmark.Audio.Services;
 
-/// <summary>
-/// Owns one long-lived <see cref="AudioSessionControl"/> per audio session on every active render
-/// device, and serves both the session snapshot and per-session peaks from them. All COM
-/// enumeration runs on one coalesced background worker; <see cref="GetSessions"/> and
-/// <see cref="GetPeak"/> only read published snapshots, so they are safe on the UI thread.
-/// Events are raised from the worker after the snapshot that reflects them is published.
-/// </summary>
 [SupportedOSPlatform("windows10.0.19041.0")]
 public sealed class AudioSessionService : IAudioSessionService, IAudioSessionMeterService, IDisposable
 {
-    // NAudio drops some session events (a stale control stops firing OnStateChanged), so the
-    // worker re-enumerates every device's sessions at this interval as a safety net.
+    // NAudio drops some session events (a stale control stops firing OnStateChanged), so the worker re-enumerates at this interval.
     private static readonly TimeSpan ResyncInterval = TimeSpan.FromSeconds(60);
     private static readonly TimeSpan PeakSampleInterval = TimeSpan.FromMilliseconds(50);
     private const long IdleSampleStopMs = 1000;
@@ -90,8 +82,7 @@ public sealed class AudioSessionService : IAudioSessionService, IAudioSessionMet
         return _peakSnapshot.TryGetValue((processId, endpointId.ToLowerInvariant()), out var peak) ? peak : null;
     }
 
-    /// <summary>Re-enumerates every device's sessions on the worker. The routing applier calls this
-    /// after a per-app endpoint write, because NAudio does not always raise a session event then.</summary>
+    // NAudio does not always raise a session event after a per-app endpoint write, so the applier calls this.
     public void Refresh()
     {
         Interlocked.Exchange(ref _resyncPending, 1);
@@ -151,8 +142,7 @@ public sealed class AudioSessionService : IAudioSessionService, IAudioSessionMet
         }
     }
 
-    // Worker only: every control and watcher disposal happens here, so the snapshot build never
-    // reads a control that another thread is tearing down.
+    // Worker only: all control and watcher disposal happens here, so the snapshot build never reads a control another thread is tearing down.
     private void RebuildOnce()
     {
         var reattached = Interlocked.Exchange(ref _reattachPending, 0) == 1;
@@ -275,8 +265,7 @@ public sealed class AudioSessionService : IAudioSessionService, IAudioSessionMet
                     continue;
                 }
 
-                // An Expired session's process is gone; keeping it would hold the pid in
-                // _knownPids and suppress SessionRemoved.
+                // An Expired session's process is gone; keeping it would hold the pid in _knownPids and suppress SessionRemoved.
                 if (mapped.State == SessionStateModel.Expired)
                 {
                     tracked.Dead = true;
@@ -305,8 +294,7 @@ public sealed class AudioSessionService : IAudioSessionService, IAudioSessionMet
 
     private void Publish(List<AudioSession> fresh, bool raiseEvents, bool forceChanged = false)
     {
-        // A device-state transition can briefly enumerate zero devices. Keep serving the previous
-        // snapshot rather than firing SessionRemoved for every pid and wiping the apps row.
+        // A device-state transition can briefly enumerate zero devices; keep the previous snapshot rather than firing SessionRemoved for every pid.
         if (fresh.Count == 0 && _knownPids.Count > 0)
         {
             _logger.LogWarning(
@@ -347,8 +335,6 @@ public sealed class AudioSessionService : IAudioSessionService, IAudioSessionMet
         }
     }
 
-    // Reads MasterPeakValue for every held control off the UI thread and publishes an immutable
-    // snapshot; GetPeak never touches COM. Skipped when nothing has read a peak recently.
     private void SamplePeaks()
     {
         if (_disposed) return;
@@ -482,16 +468,14 @@ public sealed class AudioSessionService : IAudioSessionService, IAudioSessionMet
         public uint ProcessId { get; } = processId;
         public volatile bool Dead;
 
-        // Volume / icon / name churn does not change routing state; ignoring it keeps the
-        // snapshot stable and avoids waking the UI and the applier.
+        // Volume / icon / name churn does not change routing state; ignoring it avoids waking the UI and the applier.
         public void OnVolumeChanged(float volume, bool isMuted) { }
         public void OnDisplayNameChanged(string displayName) { }
         public void OnIconPathChanged(string iconPath) { }
         public void OnChannelVolumeChanged(uint channelCount, IntPtr newVolumes, uint channelIndex) { }
         public void OnGroupingParamChanged(ref Guid groupingId) { }
 
-        // Unregistering from inside a session callback can deadlock, so a dead control is only
-        // flagged here and released by the worker.
+        // Unregistering from inside a session callback can deadlock, so a dead control is only flagged here and released by the worker.
         public void OnStateChanged(AudioSessionState state)
         {
             if (state == AudioSessionState.AudioSessionStateExpired) Dead = true;
@@ -522,9 +506,7 @@ public sealed class AudioSessionService : IAudioSessionService, IAudioSessionMet
             _peakKey = DeviceId.ToLowerInvariant();
             _manager = device.AudioSessionManager;
 
-            // Windows only notifies a client that has already asked for the session enumerator.
-            // Subscribe before enumerating so a session created in between is not missed; the
-            // instance-id dedupe absorbs the overlap.
+            // Windows only notifies a client that has already asked for the session enumerator; subscribe before enumerating so nothing is missed (instance-id dedupe absorbs the overlap).
             _manager.RefreshSessions();
             _manager.OnSessionCreated += OnSessionCreated;
             Resync();

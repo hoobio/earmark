@@ -254,10 +254,10 @@ public sealed partial class NowPlayingViewModel : Observable
         return new string([.. s.Where(char.IsLetterOrDigit)]).ToLowerInvariant();
     }
 
-    [GeneratedRegex(@"^\s*(?<artist>.+?)\s*[-–—]\s*(?<rest>.+)$")]
+    [GeneratedRegex(@"^\s*(?<artist>.+?)\s*\p{Pd}\s*(?<rest>.+)$")]
     private static partial Regex ArtistPrefix();
 
-    [GeneratedRegex(@"\s*[-–—]\s*topic\s*$", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"\s*\p{Pd}\s*topic\s*$", RegexOptions.IgnoreCase)]
     private static partial Regex TopicSuffix();
 
     [GeneratedRegex(@"\s*[\(\[]([^\)\]]*)[\)\]]")]

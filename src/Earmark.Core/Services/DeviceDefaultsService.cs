@@ -9,11 +9,6 @@ using Microsoft.Extensions.Logging;
 
 namespace Earmark.Core.Services;
 
-/// <summary>
-/// Owns the Devices-page "defaults": the starter groups + visibility seeded on a fresh install, and
-/// the user-invoked reset that restores them. Mutates the shared <see cref="AppSettings"/>
-/// in place and raises <see cref="DefaultsApplied"/> so the Devices page rebuilds.
-/// </summary>
 public sealed class DeviceDefaultsService
 {
     private const string DefaultDevicesGroupTitle = "Default Devices";
@@ -22,8 +17,6 @@ public sealed class DeviceDefaultsService
     private const string DefaultVolumesRuleName = "Set default volumes";
     private const string AppOutputRuleName = "Set output device for app";
 
-    // Covers new + classic Teams, Discord stable/Canary/PTB, and Slack. Matched case-insensitively
-    // against both the process name and the full executable path.
     private const string AppOutputAppPattern = @"(ms-teams|Teams|[Dd]iscord(Canary|PTB)?|slack)\.exe";
     private const string AppOutputDevicePattern = "Comm";
 
@@ -51,10 +44,7 @@ public sealed class DeviceDefaultsService
 
     public async Task SeedDefaultsIfEmptyAsync(CancellationToken ct = default)
     {
-        // Seed only a blank-slate install. Any existing rule or Devices-page customisation means the
-        // user (or a prior version) already configured Earmark, so seeding - which clears the
-        // Devices-page state - would silently wipe their layout. Emptiness is the whole signal; no
-        // persisted flag needed, and an existing install can never be mistaken for a fresh one.
+        // Seeding clears the Devices-page state, so only a blank-slate install may be seeded; emptiness is the fresh-install signal.
         if (HasExistingConfig())
         {
             _logger.LogInformation("Existing config present; skipping new-install seeding");
@@ -67,8 +57,6 @@ public sealed class DeviceDefaultsService
         await SaveAndNotifyAsync(ct).ConfigureAwait(false);
     }
 
-    /// <summary>True when the install already carries user state - any rule, or any Devices-page
-    /// customisation (groups, manual order, per-device config, or hidden app chips).</summary>
     private bool HasExistingConfig()
     {
         var s = _settings.Current;
@@ -86,12 +74,6 @@ public sealed class DeviceDefaultsService
         await SaveAndNotifyAsync(ct).ConfigureAwait(false);
     }
 
-    /// <summary>
-    /// Clears the Devices-page state (per-device config, groups, block order, hidden app chips) and
-    /// rebuilds the two starter groups, pinning their members visible and floating them to the top.
-    /// Returns the default-device endpoints (render + capture, default + communications) so the
-    /// first-run seeder can build the example volume rule against them.
-    /// </summary>
     private List<AudioEndpoint> ApplyDefaultDeviceLayout()
     {
         var s = _settings.Current;
@@ -105,7 +87,6 @@ public sealed class DeviceDefaultsService
         var combined = render.Concat(capture).ToList();
         var snapshot = _waveLink.LastSnapshot;
 
-        // ---- Group 0: Default Devices (system default/communications render + capture, + first WL mix) ----
         var defaultDevices = new List<AudioEndpoint>();
         AddIfMissing(defaultDevices, render.FirstOrDefault(e => e.IsDefault));
         AddIfMissing(defaultDevices, render.FirstOrDefault(e => e.IsDefaultCommunications));
@@ -126,7 +107,6 @@ public sealed class DeviceDefaultsService
         PinAll(s, group0Members);
         QuickPinAll(s, group0Members);
 
-        // ---- Group 1: Wave Link channels (render/output-only virtual channels), minus group 0 ----
         var channelMap = WaveLinkChannelMap.Build(snapshot, combined);
         var group0Set = new HashSet<string>(group0Members, StringComparer.OrdinalIgnoreCase);
         var group1Members = render
@@ -136,9 +116,7 @@ public sealed class DeviceDefaultsService
         AddGroup(s, orderHead, WaveLinkChannelsGroupTitle, group1Members);
         PinAll(s, group1Members);
 
-        // Groups lead the block order; every other (lone) card slots into its default-sort position
-        // below via HomeViewModel.ApplyManualBlockOrder. Non-grouped, no-rule, non-default devices
-        // auto-hide on the next rebuild (DeviceCard.IsEffectivelyHidden) - the default-hidden logic.
+        // Only groups lead DeviceOrder; lone cards fall into default-sort position via HomeViewModel.ApplyManualBlockOrder.
         s.DeviceOrder = orderHead;
 
         _logger.LogInformation(
@@ -148,8 +126,6 @@ public sealed class DeviceDefaultsService
         return defaultDevices;
     }
 
-    /// <summary>The render endpoint backing the first Wave Link mix (e.g. "Headphone Mix"), or null
-    /// when Wave Link isn't connected or no mix maps to a present endpoint.</summary>
     private static string? FindFirstMixEndpointId(WaveLinkSnapshot? snapshot, IReadOnlyList<AudioEndpoint> combined)
     {
         if (snapshot is null) return null;
@@ -164,9 +140,6 @@ public sealed class DeviceDefaultsService
         return null;
     }
 
-    /// <summary>Adds a group for <paramref name="memberIds"/> (>=2 members) and pushes its id onto the
-    /// block-order head. Fewer than two members can't render as a group, so it's skipped (members are
-    /// still pinned separately).</summary>
     private static void AddGroup(AppSettings s, List<string> orderHead, string title, List<string> memberIds)
     {
         if (memberIds.Count < 2) return;
@@ -208,8 +181,7 @@ public sealed class DeviceDefaultsService
         list.Add(endpoint);
     }
 
-    /// <summary>Seeds the two disabled example rules on first run. Idempotent by rule name, so a
-    /// re-seed (e.g. after a crash between the rules save and the settings save) never duplicates.</summary>
+    // Idempotent by rule name: a crash between the rules save and the settings save re-seeds on next start.
     private async Task SeedExampleRulesAsync(List<AudioEndpoint> defaultDevices, CancellationToken ct)
     {
         if (defaultDevices.Count > 0 && !RuleNameExists(DefaultVolumesRuleName))
