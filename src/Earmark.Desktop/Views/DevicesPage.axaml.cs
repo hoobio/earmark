@@ -17,14 +17,18 @@ public sealed partial class DevicesPage : UserControl
         DataContext = vm;
         InitializeComponent();
         MeterClock.Track(this);
-        KeyDown += (_, e) =>
+        void OnKey(object? sender, KeyEventArgs e)
         {
-            if (e.Key == Key.Z && e.KeyModifiers.HasFlag(KeyModifiers.Control))
+            if (e.Key == Key.Z && e.KeyModifiers == KeyModifiers.Control && e.Source is not TextBox)
             {
                 vm.Undo();
                 e.Handled = true;
             }
-        };
+        }
+
+        TopLevel? top = null;
+        AttachedToVisualTree += (_, _) => (top = TopLevel.GetTopLevel(this))?.AddHandler(KeyDownEvent, OnKey);
+        DetachedFromVisualTree += (_, _) => top?.RemoveHandler(KeyDownEvent, OnKey);
         AddHandler(ContextRequestedEvent, (_, e) =>
         {
             if (!e.Handled)

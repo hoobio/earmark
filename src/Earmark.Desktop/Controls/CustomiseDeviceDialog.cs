@@ -1,11 +1,11 @@
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
-using Avalonia.Layout;
 using Avalonia.Media;
 
 using Earmark.Core.Settings;
 using Earmark.Desktop.Services;
 using Earmark.Desktop.ViewModels.Devices;
+using Earmark.Desktop.Views;
 
 using FluentAvalonia.UI.Controls;
 
@@ -80,16 +80,12 @@ public static class CustomiseDeviceDialog
 
         SyncSwatches();
 
-        var rows = new StackPanel { Classes = { "SettingsGroup", "OverrideRows" } };
+        var rows = new StackPanel { Classes = { "SettingsGroup" } };
         var apply = new List<Action>();
         ComboBox Choice(string header, string[] options, int selected, Action<int> commit)
         {
             var combo = new ComboBox { ItemsSource = options, SelectedIndex = selected, MinWidth = 160 };
-            var row = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), Classes = { "OverrideRow" } };
-            row.Children.Add(new TextBlock { Text = header, VerticalAlignment = VerticalAlignment.Center });
-            Grid.SetColumn(combo, 1);
-            row.Children.Add(combo);
-            rows.Children.Add(row);
+            rows.Children.Add(new SettingsCard { Header = header, Content = combo, MinHeight = 52 });
             apply.Add(() => commit(combo.SelectedIndex));
             return combo;
         }

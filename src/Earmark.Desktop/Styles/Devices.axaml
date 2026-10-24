@@ -34,10 +34,10 @@
                             <Track.IncreaseButton>
                                 <RepeatButton Name="PART_IncreaseButton" Theme="{StaticResource SliderFillButton}" Background="Transparent" />
                             </Track.IncreaseButton>
-                            <Thumb Name="thumb" Width="14" Height="14">
+                            <Thumb Name="thumb" Width="14" Height="14" Background="#FF73D0FF">
                                 <Thumb.Template>
                                     <ControlTemplate>
-                                        <Border Name="ThumbBody" CornerRadius="4" Background="#FF73D0FF" />
+                                        <Border CornerRadius="4" Background="{TemplateBinding Background}" />
                                     </ControlTemplate>
                                 </Thumb.Template>
                             </Thumb>
@@ -45,13 +45,13 @@
                     </Grid>
                 </ControlTemplate>
             </Setter>
-            <Style Selector="^:disabled /template/ Border#ThumbBody">
+            <Style Selector="^:disabled /template/ Thumb#thumb">
                 <Setter Property="Background" Value="#FF4E5768" />
             </Style>
             <Style Selector="^:disabled /template/ RepeatButton#PART_DecreaseButton">
                 <Setter Property="Background" Value="#FF4E5768" />
             </Style>
-            <Style Selector="^:pointerover /template/ Border#ThumbBody">
+            <Style Selector="^ /template/ Thumb#thumb:pointerover">
                 <Setter Property="Background" Value="#FFA6E1FF" />
             </Style>
         </ControlTheme>
