@@ -126,7 +126,15 @@ public static class Glide
                 new KeyFrame { Cue = new Cue(1), Setters = { new Setter(TranslateTransform.XProperty, 0d), new Setter(TranslateTransform.YProperty, 0d) } },
             },
         };
-        await animation.RunAsync(transform, run.Token);
+        try
+        {
+            await animation.RunAsync(transform, run.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
         if (state.Run == run)
         {
             child.ZIndex = 0;
