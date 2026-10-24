@@ -4,6 +4,7 @@ using Avalonia.Animation.Easings;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Interactivity;
+using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Media.Transformation;
 using Avalonia.Platform;
@@ -116,6 +117,45 @@ public sealed partial class MainWindow : Window
 
         ToastHost.Opacity = message is null ? 0 : 1;
         ToastHost.RenderTransform = TransformOperations.Parse(message is null ? "translateY(16px)" : "translateY(0px)");
+    }
+
+    public Task<bool> ShowNoticeAsync(string message, string? primary, string close)
+    {
+        var done = new TaskCompletionSource<bool>();
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new Thickness(12, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center };
+        var notice = new Border
+        {
+            Classes = { "Notice" },
+            Child = new DockPanel
+            {
+                Children =
+                {
+                    buttons,
+                    new TextBlock { Classes = { "Glyph" }, Text = (string)this.FindResource("Glyph.Warning")! },
+                    new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center },
+                },
+            },
+        };
+        DockPanel.SetDock(buttons, Dock.Right);
+        void Add(string label, bool result, ControlTheme? theme)
+        {
+            var button = new Button { Content = label, Theme = theme };
+            button.Click += (_, _) =>
+            {
+                NoticeHost.Children.Remove(notice);
+                done.TrySetResult(result);
+            };
+            buttons.Children.Add(button);
+        }
+
+        if (primary is not null)
+        {
+            Add(primary, true, (ControlTheme?)this.FindResource("CautionButtonStyle"));
+        }
+
+        Add(close, false, null);
+        NoticeHost.Children.Add(notice);
+        return done.Task;
     }
 
     public void CreateTrayIcon()

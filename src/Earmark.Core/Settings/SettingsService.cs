@@ -3,6 +3,8 @@ using System.Text.Json.Serialization;
 
 using Earmark.Core.Persistence;
 
+using Microsoft.Extensions.Logging;
+
 namespace Earmark.Core.Settings;
 
 [JsonSourceGenerationOptions(
@@ -17,17 +19,21 @@ public sealed class SettingsService : IDisposable
 {
     private readonly string _path;
     private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly BlockedSaveLog _blockedLog;
     private volatile bool _saveBlocked;
 
-    public SettingsService(string path)
+    public SettingsService(string path, ILogger<SettingsService>? logger = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         _path = path;
+        _blockedLog = new BlockedSaveLog(logger);
     }
 
     public AppSettings Current { get; private set; } = new();
 
     public bool IsSaveBlocked => _saveBlocked;
+
+    public bool IsCorrupt { get; private set; }
 
     public string? CorruptCopyPath { get; private set; }
 
@@ -47,24 +53,21 @@ public sealed class SettingsService : IDisposable
 
             try
             {
-                await using var stream = File.OpenRead(_path);
-                var loaded = await JsonSerializer
-                    .DeserializeAsync(stream, SettingsJsonContext.Default.AppSettings, ct)
-                    .ConfigureAwait(false);
-                Current = loaded ?? new AppSettings();
-                _saveBlocked = false;
+                var bytes = await AtomicFile.ReadAsync(_path, ct).ConfigureAwait(false);
+                Current = JsonSerializer.Deserialize(bytes, SettingsJsonContext.Default.AppSettings) ?? new AppSettings();
+                (_saveBlocked, IsCorrupt) = (false, false);
             }
             catch (JsonException)
             {
                 Current = new AppSettings();
-                _saveBlocked = true;
+                (_saveBlocked, IsCorrupt) = (true, true);
                 CorruptCopyPath = CorruptCopy.TryCreate(_path);
                 throw;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 Current = new AppSettings();
-                _saveBlocked = true;
+                (_saveBlocked, IsCorrupt) = (true, false);
                 throw;
             }
         }
@@ -84,7 +87,11 @@ public sealed class SettingsService : IDisposable
         await _gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            if (!_saveBlocked)
+            if (_saveBlocked)
+            {
+                _blockedLog.Warn(_path);
+            }
+            else
             {
                 var bytes = JsonSerializer.SerializeToUtf8Bytes(Current, SettingsJsonContext.Default.AppSettings);
                 await AtomicFile.WriteAsync(_path, bytes, ct).ConfigureAwait(false);

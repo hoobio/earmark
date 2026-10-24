@@ -9,6 +9,8 @@ public interface IRulesService
 
     bool IsSaveBlocked { get; }
 
+    bool IsCorrupt { get; }
+
     string? CorruptCopyPath { get; }
 
     void UnblockSaves();

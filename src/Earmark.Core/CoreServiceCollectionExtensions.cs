@@ -3,6 +3,7 @@ using Earmark.Core.Services;
 using Earmark.Core.Settings;
 
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace Earmark.Core;
 
@@ -12,9 +13,9 @@ public static class CoreServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
 
-        services.AddSingleton<IRuleStore>(_ => new JsonRuleStore(rulesPath));
+        services.AddSingleton<IRuleStore>(sp => new JsonRuleStore(rulesPath, sp.GetService<ILogger<JsonRuleStore>>()));
         services.AddSingleton<IRulesService, RulesService>();
-        services.AddSingleton(_ => new SettingsService(settingsPath));
+        services.AddSingleton(sp => new SettingsService(settingsPath, sp.GetService<ILogger<SettingsService>>()));
         services.AddSingleton<DeviceDefaultsService>();
         return services;
     }

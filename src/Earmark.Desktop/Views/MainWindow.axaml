@@ -68,6 +68,18 @@
             <Setter Property="TextAlignment" Value="Center" />
             <Setter Property="HorizontalAlignment" Value="Left" />
         </Style>
+        <Style Selector="Border.Notice">
+            <Setter Property="Background" Value="{DynamicResource CautionTintBrush}" />
+            <Setter Property="CornerRadius" Value="{DynamicResource ControlCornerRadius}" />
+            <Setter Property="Padding" Value="12,8" />
+            <Setter Property="Margin" Value="26,4,26,4" />
+        </Style>
+        <Style Selector="Border.Notice TextBlock.Glyph">
+            <Setter Property="FontSize" Value="16" />
+            <Setter Property="Margin" Value="0,0,12,0" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Foreground" Value="{DynamicResource SystemFillColorCautionBrush}" />
+        </Style>
     </Window.Styles>
 
     <Grid x:Name="Root" RowDefinitions="48,*">
@@ -142,7 +154,10 @@
             </DockPanel>
 
             <Panel Grid.Column="1">
-                <ContentControl x:Name="PageHost" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
+                <DockPanel>
+                    <StackPanel x:Name="NoticeHost" DockPanel.Dock="Top" />
+                    <ContentControl x:Name="PageHost" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
+                </DockPanel>
                 <Border x:Name="ToastHost" Classes="Toast" Opacity="0" RenderTransform="translateY(16px)">
                     <StackPanel Orientation="Horizontal" Spacing="12">
                         <TextBlock Classes="Glyph" Text="{StaticResource Glyph.Info}" FontSize="16" Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}" />

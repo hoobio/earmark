@@ -3,6 +3,8 @@ using System.Text.Json.Serialization;
 
 using Earmark.Core.Models;
 
+using Microsoft.Extensions.Logging;
+
 namespace Earmark.Core.Persistence;
 
 [JsonSourceGenerationOptions(
@@ -20,15 +22,19 @@ public sealed class JsonRuleStore : IRuleStore, IDisposable
 
     private readonly string _path;
     private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly BlockedSaveLog _blockedLog;
     private volatile bool _saveBlocked;
 
-    public JsonRuleStore(string path)
+    public JsonRuleStore(string path, ILogger<JsonRuleStore>? logger = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         _path = path;
+        _blockedLog = new BlockedSaveLog(logger);
     }
 
     public bool IsSaveBlocked => _saveBlocked;
+
+    public bool IsCorrupt { get; private set; }
 
     public string? CorruptCopyPath { get; private set; }
 
@@ -45,26 +51,20 @@ public sealed class JsonRuleStore : IRuleStore, IDisposable
 
             try
             {
-                List<RoutingRule>? rules;
-                await using (var stream = File.OpenRead(_path))
-                {
-                    rules = await JsonSerializer
-                        .DeserializeAsync(stream, RuleJsonContext.Default.ListRoutingRule, ct)
-                        .ConfigureAwait(false);
-                }
-
-                _saveBlocked = false;
+                var bytes = await AtomicFile.ReadAsync(_path, ct).ConfigureAwait(false);
+                var rules = JsonSerializer.Deserialize(bytes, RuleJsonContext.Default.ListRoutingRule);
+                (_saveBlocked, IsCorrupt) = (false, false);
                 return rules ?? new List<RoutingRule>();
             }
             catch (JsonException)
             {
-                _saveBlocked = true;
+                (_saveBlocked, IsCorrupt) = (true, true);
                 CorruptCopyPath = CorruptCopy.TryCreate(_path);
                 throw;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                _saveBlocked = true;
+                (_saveBlocked, IsCorrupt) = (true, false);
                 throw;
             }
         }
@@ -83,6 +83,7 @@ public sealed class JsonRuleStore : IRuleStore, IDisposable
         {
             if (_saveBlocked)
             {
+                _blockedLog.Warn(_path);
                 throw new InvalidOperationException(
                     $"'{_path}' failed to load, so saving is disabled to keep it intact. Reload it or discard it first.");
             }

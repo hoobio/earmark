@@ -196,36 +196,32 @@ public sealed partial class App : Application
         }
 
         new UiWatchdog(window, services.GetRequiredService<ILogger<UiWatchdog>>()).Start();
-        _ = OfferUnblockIfCorruptAsync(window, services.GetRequiredService<SettingsService>(), services.GetRequiredService<IRulesService>(), logger)
-            .ContinueWith(t => logger.LogError(t.Exception, "Corrupt-file dialog failed"), TaskContinuationOptions.OnlyOnFaulted);
+        _ = OfferUnblockIfBlockedAsync(window, services.GetRequiredService<SettingsService>(), services.GetRequiredService<IRulesService>(), logger)
+            .ContinueWith(t => logger.LogError(t.Exception, "Blocked-save notice failed"), TaskContinuationOptions.OnlyOnFaulted);
         Dispatcher.UIThread.Post(() => WireUpdatePill(window, services.GetRequiredService<UpdateService>(), logger), DispatcherPriority.Background);
     }
 
-    private static async Task OfferUnblockIfCorruptAsync(MainWindow window, SettingsService settings, IRulesService rules, ILogger logger)
+    private static Task OfferUnblockIfBlockedAsync(MainWindow window, SettingsService settings, IRulesService rules, ILogger logger) => Task.WhenAll(
+        OfferUnblockAsync(window, logger, settings.IsSaveBlocked, settings.IsCorrupt, "settings.json", "Settings", settings.CorruptCopyPath, "default settings", settings.UnblockSaves),
+        OfferUnblockAsync(window, logger, rules.IsSaveBlocked, rules.IsCorrupt, "rules.json", "Rules", rules.CorruptCopyPath, "an empty rule list", rules.UnblockSaves));
+
+    private static async Task OfferUnblockAsync(MainWindow window, ILogger logger, bool blocked, bool corrupt, string file, string what, string? copyPath, string fresh, Action unblock)
     {
-        if (settings.IsSaveBlocked && await OfferUnblockAsync(window, logger, "settings.json", "Settings", settings.CorruptCopyPath, "default settings"))
+        if (!blocked)
         {
-            settings.UnblockSaves();
-            logger.LogWarning("Settings saves unblocked by the user");
+            return;
         }
 
-        if (rules.IsSaveBlocked && await OfferUnblockAsync(window, logger, "rules.json", "Rules", rules.CorruptCopyPath, "an empty rule list"))
-        {
-            rules.UnblockSaves();
-            logger.LogWarning("Rule saves unblocked by the user");
-        }
-    }
-
-    private static Task<bool> OfferUnblockAsync(MainWindow window, ILogger logger, string file, string what, string? copyPath, string fresh)
-    {
-        logger.LogWarning("{What} saves are blocked: {File} failed to load (copy at {Copy}); offering the unblock dialog", what, file, copyPath ?? "none");
+        logger.LogWarning("{What} saves are blocked: {File} failed to load ({Reason}, copy at {Copy}); showing the notice", what, file, corrupt ? "corrupt" : "unreadable", copyPath ?? "none");
         var copy = copyPath is { } path ? $"A copy of the unreadable file is saved at {path}." : "No copy of the file could be saved.";
-        return AppDialogs.ShowMessageAsync(
-            window,
-            $"{what} could not be loaded",
-            $"Earmark could not read {file}, so {what.ToLowerInvariant()} changes are not saved. {copy} Allow saves to start again with {fresh}, or keep saves blocked and repair the file.",
-            "Allow saves",
-            "Keep blocked");
+        var message = corrupt
+            ? $"Earmark could not read {file}, so {what.ToLowerInvariant()} changes are not saved. {copy} Allow saves to start again with {fresh}, or keep saves blocked and repair the file."
+            : $"Earmark could not open {file}, so {what.ToLowerInvariant()} changes are not saved until Earmark restarts. The file is unchanged. Another program, such as OneDrive, can hold it open.";
+        if (await window.ShowNoticeAsync(message, corrupt ? "Allow saves" : null, corrupt ? "Keep blocked" : "Dismiss"))
+        {
+            unblock();
+            logger.LogWarning("{What} saves unblocked by the user", what);
+        }
     }
 
     private static void WireUpdatePill(MainWindow window, UpdateService updates, ILogger logger)

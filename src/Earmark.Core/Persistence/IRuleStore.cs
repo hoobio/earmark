@@ -6,6 +6,8 @@ public interface IRuleStore
 {
     bool IsSaveBlocked { get; }
 
+    bool IsCorrupt { get; }
+
     string? CorruptCopyPath { get; }
 
     ValueTask<IReadOnlyList<RoutingRule>> LoadAsync(CancellationToken ct = default);

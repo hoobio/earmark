@@ -4,6 +4,21 @@ internal static class AtomicFile
 {
     private const int Attempts = 5;
 
+    public static async Task<byte[]> ReadAsync(string path, CancellationToken ct)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return await File.ReadAllBytesAsync(path, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (attempt < Attempts && ex is IOException or UnauthorizedAccessException)
+            {
+                await Task.Delay(100 * attempt, ct).ConfigureAwait(false);
+            }
+        }
+    }
+
     public static async Task WriteAsync(string path, byte[] bytes, CancellationToken ct)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);

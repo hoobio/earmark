@@ -170,6 +170,7 @@ public sealed class RoutingApplierTests : IDisposable
     {
         private List<RoutingRule> _rules = new();
         public bool IsSaveBlocked => false;
+        public bool IsCorrupt => false;
         public string? CorruptCopyPath => null;
         public ValueTask<IReadOnlyList<RoutingRule>> LoadAsync(CancellationToken ct = default) => ValueTask.FromResult<IReadOnlyList<RoutingRule>>(_rules);
         public ValueTask SaveAsync(IEnumerable<RoutingRule> rules, CancellationToken ct = default)

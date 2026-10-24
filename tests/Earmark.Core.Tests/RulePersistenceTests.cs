@@ -53,6 +53,7 @@ public sealed class RulePersistenceTests : IDisposable
         await load.Should().ThrowAsync<JsonException>();
 
         rules.IsSaveBlocked.Should().BeTrue();
+        rules.IsCorrupt.Should().BeTrue();
         rules.CorruptCopyPath.Should().Be(store.CorruptCopyPath).And.NotBeNull();
         Path.GetFileName(store.CorruptCopyPath!).Should().StartWith("rules.corrupt-").And.EndWith(".json");
         (await File.ReadAllTextAsync(store.CorruptCopyPath!, Ct)).Should().Be(garbage);
@@ -113,6 +114,7 @@ public sealed class RulePersistenceTests : IDisposable
         await load.Should().ThrowAsync<JsonException>();
 
         settings.IsSaveBlocked.Should().BeTrue();
+        settings.IsCorrupt.Should().BeTrue();
         settings.Current.VerboseLogging.Should().BeFalse();
         Path.GetFileName(settings.CorruptCopyPath!).Should().StartWith("settings.corrupt-").And.EndWith(".json");
         (await File.ReadAllTextAsync(settings.CorruptCopyPath!, Ct)).Should().Be(garbage);
@@ -129,6 +131,65 @@ public sealed class RulePersistenceTests : IDisposable
         await reloaded.LoadAsync(Ct);
         reloaded.Current.VerboseLogging.Should().BeTrue();
         reloaded.IsSaveBlocked.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Locked_files_block_saves_without_counting_as_corrupt()
+    {
+        var settingsPath = Path.Combine(_dir, "settings.json");
+        await File.WriteAllTextAsync(settingsPath, "{\"verboseLogging\": true}", Ct);
+        await File.WriteAllTextAsync(RulesPath, "[]", Ct);
+        using var store = new JsonRuleStore(RulesPath);
+        using var settings = new SettingsService(settingsPath);
+
+        using (File.Open(settingsPath, FileMode.Open, FileAccess.Read, FileShare.None))
+        using (File.Open(RulesPath, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            var loadSettings = () => settings.LoadAsync(Ct);
+            var loadRules = async () => await store.LoadAsync(Ct);
+            await loadSettings.Should().ThrowAsync<IOException>();
+            await loadRules.Should().ThrowAsync<IOException>();
+        }
+
+        settings.IsSaveBlocked.Should().BeTrue();
+        settings.IsCorrupt.Should().BeFalse();
+        settings.CorruptCopyPath.Should().BeNull();
+        store.IsSaveBlocked.Should().BeTrue();
+        store.IsCorrupt.Should().BeFalse();
+        store.CorruptCopyPath.Should().BeNull();
+
+        await settings.SaveAsync(Ct);
+        var saveRules = async () => await store.SaveAsync(new[] { Rule("new") }, Ct);
+        await saveRules.Should().ThrowAsync<InvalidOperationException>();
+        (await File.ReadAllTextAsync(settingsPath, Ct)).Should().Be("{\"verboseLogging\": true}");
+        (await File.ReadAllTextAsync(RulesPath, Ct)).Should().Be("[]");
+        Directory.GetFiles(_dir, "*.corrupt-*").Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Briefly_locked_files_load_after_a_retry()
+    {
+        var settingsPath = Path.Combine(_dir, "settings.json");
+        await File.WriteAllTextAsync(settingsPath, "{\"verboseLogging\": true}", Ct);
+        await File.WriteAllTextAsync(RulesPath, "[{\"name\": \"kept\"}]", Ct);
+        using var store = new JsonRuleStore(RulesPath);
+        using var settings = new SettingsService(settingsPath);
+
+        var settingsLock = File.Open(settingsPath, FileMode.Open, FileAccess.Read, FileShare.None);
+        var rulesLock = File.Open(RulesPath, FileMode.Open, FileAccess.Read, FileShare.None);
+        _ = Task.Delay(150, Ct).ContinueWith(_ =>
+        {
+            settingsLock.Dispose();
+            rulesLock.Dispose();
+        }, Ct, TaskContinuationOptions.None, TaskScheduler.Default);
+
+        var loadedRules = await store.LoadAsync(Ct);
+        await settings.LoadAsync(Ct);
+
+        loadedRules.Select(r => r.Name).Should().Equal("kept");
+        store.IsSaveBlocked.Should().BeFalse();
+        settings.Current.VerboseLogging.Should().BeTrue();
+        settings.IsSaveBlocked.Should().BeFalse();
     }
 
     [Fact]

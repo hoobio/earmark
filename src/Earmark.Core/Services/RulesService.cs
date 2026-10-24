@@ -24,6 +24,8 @@ public sealed class RulesService : IRulesService, IDisposable
 
     public bool IsSaveBlocked => _store.IsSaveBlocked;
 
+    public bool IsCorrupt => _store.IsCorrupt;
+
     public string? CorruptCopyPath => _store.CorruptCopyPath;
 
     public event EventHandler? RulesChanged;
