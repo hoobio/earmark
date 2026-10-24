@@ -22,6 +22,8 @@ public sealed class RulesService : IRulesService, IDisposable
 
     public IReadOnlyList<RoutingRule> Rules => _rules;
 
+    public bool IsSaveBlocked => _store.IsSaveBlocked;
+
     public event EventHandler? RulesChanged;
 
     public async Task LoadAsync(CancellationToken ct = default)
@@ -40,14 +42,14 @@ public sealed class RulesService : IRulesService, IDisposable
         RaiseChanged();
     }
 
-    public async Task UpsertAsync(RoutingRule rule, CancellationToken ct = default)
+    public void UnblockSaves() => _store.UnblockSaves();
+
+    public Task UpsertAsync(RoutingRule rule, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(rule);
-
-        await _gate.WaitAsync(ct).ConfigureAwait(false);
-        try
+        return MutateAsync(current =>
         {
-            var copy = new List<RoutingRule>(_rules);
+            var copy = new List<RoutingRule>(current);
             var idx = copy.FindIndex(r => r.Id == rule.Id);
             if (idx >= 0)
             {
@@ -57,79 +59,59 @@ public sealed class RulesService : IRulesService, IDisposable
             {
                 copy.Add(rule);
             }
-
-            _rules = copy;
-            await _store.SaveAsync(copy, ct).ConfigureAwait(false);
-        }
-        finally
-        {
-            _gate.Release();
-        }
-
-        RaiseChanged();
+            return copy;
+        }, ct);
     }
 
-    public async Task InsertAsync(RoutingRule rule, int index, CancellationToken ct = default)
+    public Task InsertAsync(RoutingRule rule, int index, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(rule);
-
-        await _gate.WaitAsync(ct).ConfigureAwait(false);
-        try
+        return MutateAsync(current =>
         {
-            var copy = new List<RoutingRule>(_rules);
-            var clamped = Math.Clamp(index, 0, copy.Count);
-            copy.Insert(clamped, rule);
-            _rules = copy;
-            await _store.SaveAsync(copy, ct).ConfigureAwait(false);
-        }
-        finally
-        {
-            _gate.Release();
-        }
-
-        RaiseChanged();
+            var copy = new List<RoutingRule>(current);
+            copy.Insert(Math.Clamp(index, 0, copy.Count), rule);
+            return copy;
+        }, ct);
     }
 
-    public async Task DeleteAsync(Guid ruleId, CancellationToken ct = default)
-    {
-        await _gate.WaitAsync(ct).ConfigureAwait(false);
-        try
+    public Task DeleteAsync(Guid ruleId, CancellationToken ct = default) =>
+        MutateAsync(current =>
         {
-            var copy = new List<RoutingRule>(_rules);
+            var copy = new List<RoutingRule>(current);
             copy.RemoveAll(r => r.Id == ruleId);
-            _rules = copy;
-            await _store.SaveAsync(copy, ct).ConfigureAwait(false);
-        }
-        finally
-        {
-            _gate.Release();
-        }
+            return copy;
+        }, ct);
 
-        RaiseChanged();
-    }
-
-    public async Task ReorderAsync(IReadOnlyList<Guid> orderedIds, CancellationToken ct = default)
+    public Task ReorderAsync(IReadOnlyList<Guid> orderedIds, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(orderedIds);
-
-        await _gate.WaitAsync(ct).ConfigureAwait(false);
-        try
+        return MutateAsync(current =>
         {
-            var map = _rules.ToDictionary(r => r.Id);
+            var map = current.ToDictionary(r => r.Id);
             var ordered = new List<RoutingRule>(orderedIds.Count);
             foreach (var id in orderedIds)
             {
-                if (map.TryGetValue(id, out var rule))
+                if (map.Remove(id, out var rule))
                 {
                     ordered.Add(rule);
-                    map.Remove(id);
                 }
             }
 
             // Append any rules not in orderedIds (defensive).
             ordered.AddRange(map.Values);
-            _rules = ordered;
-            await _store.SaveAsync(ordered, ct).ConfigureAwait(false);
+            return ordered;
+        }, ct);
+    }
+
+    // Persist first, publish second: a save the store refuses must not leave memory ahead of disk.
+    private async Task MutateAsync(Func<List<RoutingRule>, List<RoutingRule>> mutate, CancellationToken ct)
+    {
+        await _gate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var next = mutate(_rules);
+            await _store.SaveAsync(next, ct).ConfigureAwait(false);
+            _rules = next;
         }
         finally
         {

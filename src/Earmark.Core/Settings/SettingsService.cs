@@ -1,6 +1,8 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
+using Earmark.Core.Persistence;
+
 namespace Earmark.Core.Settings;
 
 [JsonSourceGenerationOptions(
@@ -56,30 +58,8 @@ public sealed class SettingsService : IDisposable
         await _gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-
-            await using var buffer = new MemoryStream();
-            await JsonSerializer
-                .SerializeAsync(buffer, Current, SettingsJsonContext.Default.AppSettings, ct)
-                .ConfigureAwait(false);
-
-            var bytes = buffer.ToArray();
-            for (var attempt = 0; attempt < 5; attempt++)
-            {
-                try
-                {
-                    await File.WriteAllBytesAsync(_path, bytes, ct).ConfigureAwait(false);
-                    break;
-                }
-                catch (IOException) when (attempt < 4)
-                {
-                    await Task.Delay(100 * (attempt + 1), ct).ConfigureAwait(false);
-                }
-                catch (UnauthorizedAccessException) when (attempt < 4)
-                {
-                    await Task.Delay(100 * (attempt + 1), ct).ConfigureAwait(false);
-                }
-            }
+            var bytes = JsonSerializer.SerializeToUtf8Bytes(Current, SettingsJsonContext.Default.AppSettings);
+            await AtomicFile.WriteAsync(_path, bytes, ct).ConfigureAwait(false);
         }
         finally
         {
