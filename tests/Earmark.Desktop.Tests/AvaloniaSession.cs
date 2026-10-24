@@ -17,7 +17,7 @@ using Earmark.Desktop.Views;
 using Microsoft.Extensions.DependencyInjection;
 
 [assembly: AssemblyFixture(typeof(Earmark.Desktop.Tests.AvaloniaSession))]
-[assembly: CollectionBehavior(DisableTestParallelization = true)]
+[assembly: Xunit.v3.Parallelization(Mode = Xunit.Sdk.ParallelMode.None)]
 
 namespace Earmark.Desktop.Tests;
 
