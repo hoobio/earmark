@@ -22,7 +22,12 @@ public sealed class CardWrapPanel : Panel
 
     protected override Size MeasureOverride(Size availableSize) => Layout(availableSize.Width, arrange: false);
 
-    protected override Size ArrangeOverride(Size finalSize) => Layout(finalSize.Width, arrange: true);
+    protected override Size ArrangeOverride(Size finalSize)
+    {
+        var size = Layout(finalSize.Width, arrange: true);
+        Glide.Arranged(this);
+        return size;
+    }
 
     private Size Layout(double width, bool arrange)
     {

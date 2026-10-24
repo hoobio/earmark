@@ -25,7 +25,7 @@
                         <Binding Path="Card.BackgroundArt" Converter="{x:Static ObjectConverters.IsNotNull}" />
                     </MultiBinding>
                 </Panel.IsVisible>
-                <Image Source="{Binding Card.BackgroundArt}" Stretch="UniformToFill" />
+                <ctl:CrossfadeImage Content="{Binding Card.BackgroundArt}" />
                 <Border Classes="ArtScrim" />
             </Panel>
             <Border Classes="MutedTint" IsVisible="{Binding Card.IsMuted}" IsHitTestVisible="False" />
@@ -42,13 +42,10 @@
                             <Image Classes="TileIcon" Source="{Binding Card.WaveLinkIcon}" IsVisible="{Binding Card.ShowWaveLinkIcon}" />
                         </Panel>
                     </Button>
-                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <TextBlock Classes="BodyStrong" Text="{Binding Card.NameOnly}" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Card.FullName}" />
-                            <TextBlock Classes="Glyph PinGlyph" Text="&#xEE75;" IsVisible="{Binding Card.IsQuickPinned}" ToolTip.Tip="Pinned to Quick Controls" />
-                        </StackPanel>
-                        <TextBlock Classes="Caption Tertiary" Text="{Binding Card.Subtext}" IsVisible="{Binding Card.HasSubtext}" TextTrimming="CharacterEllipsis" />
-                    </StackPanel>
+                    <Grid Grid.Column="1" ColumnDefinitions="*,Auto" ColumnSpacing="6" VerticalAlignment="Center">
+                        <TextBlock Classes="BodyStrong" Text="{Binding Card.Name}" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Card.Name}" />
+                        <TextBlock Grid.Column="1" Classes="Glyph PinGlyph" Text="&#xEE75;" IsVisible="{Binding Card.IsQuickPinned}" ToolTip.Tip="Pinned to Quick Controls" />
+                    </Grid>
                     <Button
                         Grid.Column="2"
                         Classes="CardIcon"
@@ -117,7 +114,7 @@
                         <DataTemplate x:DataType="vm:NowPlayingViewModel">
                             <Panel Classes="Strip">
                                 <Panel Classes="StripArt" IsHitTestVisible="False">
-                                    <Image Source="{Binding Artwork}" Stretch="UniformToFill" />
+                                    <ctl:CrossfadeImage Content="{Binding Artwork}" />
                                     <Border Classes="ArtScrim" />
                                 </Panel>
                                 <Grid Classes="StripBody" ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto">
@@ -181,7 +178,7 @@
                     </ItemsControl.IsVisible>
                     <ItemsControl.ItemsPanel>
                         <ItemsPanelTemplate>
-                            <WrapPanel ItemSpacing="12" LineSpacing="8" />
+                            <ctl:GlidingWrapPanel ItemSpacing="12" LineSpacing="8" />
                         </ItemsPanelTemplate>
                     </ItemsControl.ItemsPanel>
                     <ItemsControl.ItemTemplate>
@@ -240,7 +237,7 @@
                             <TextBlock Classes="Glyph" Text="&#xE488;" />
                         </ToggleButton>
                     </Grid>
-                    <ItemsControl ItemsSource="{Binding Card.AdditionalRules}" IsVisible="{Binding Card.IsRulesExpanded}">
+                    <ItemsControl x:Name="MoreRules" ItemsSource="{Binding Card.AdditionalRules}" IsVisible="False" ClipToBounds="True">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate x:DataType="vm:RuleSummary">
                                 <Button Classes="RuleChip" Tag="{Binding}" Opacity="{Binding Opacity}" ToolTip.Tip="Open in Rules" Click="OnRuleClick">

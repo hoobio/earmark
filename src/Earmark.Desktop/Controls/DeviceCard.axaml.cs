@@ -1,8 +1,10 @@
 using Avalonia;
+using Avalonia.Animation;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Styling;
 using Avalonia.VisualTree;
 
 using Earmark.Desktop.Services;
@@ -41,6 +43,8 @@ public sealed partial class DeviceCard : UserControl
     private (double Volume, bool Muted)? _sliderStart;
     private PointerPressedEventArgs? _press;
     private object? _pressSource;
+    private bool _rulesShown;
+    private int _rulesRun;
 
     public DeviceCard()
     {
@@ -74,6 +78,87 @@ public sealed partial class DeviceCard : UserControl
         if (change.Property == CardProperty || change.Property == IsOverlayProperty)
         {
             Root.DataContext = Card is { } card ? new DeviceCardContext(card, IsOverlay) : null;
+        }
+
+        if (change.Property == CardProperty && this.IsAttachedToVisualTree())
+        {
+            Watch(change.OldValue as DeviceCardViewModel, Card);
+        }
+    }
+
+    protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnAttachedToVisualTree(e);
+        Watch(null, Card);
+    }
+
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnDetachedFromVisualTree(e);
+        Watch(Card, null);
+    }
+
+    private void Watch(DeviceCardViewModel? old, DeviceCardViewModel? card)
+    {
+        if (old is not null)
+        {
+            old.PropertyChanged -= OnCardPropertyChanged;
+        }
+
+        if (card is not null)
+        {
+            card.PropertyChanged += OnCardPropertyChanged;
+        }
+
+        _rulesShown = card?.IsRulesExpanded == true;
+        _rulesRun++;
+        MoreRules.IsVisible = _rulesShown;
+        MoreRules.ClearValue(MaxHeightProperty);
+        MoreRules.ClearValue(OpacityProperty);
+    }
+
+    private void OnCardPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(DeviceCardViewModel.IsRulesExpanded) or "" or null && Card is { } card && card.IsRulesExpanded != _rulesShown)
+        {
+            _ = AnimateRulesAsync(card.IsRulesExpanded);
+        }
+    }
+
+    private async Task AnimateRulesAsync(bool expand)
+    {
+        _rulesShown = expand;
+        _rulesRun++;
+        if (!Motion.Enabled)
+        {
+            MoreRules.IsVisible = expand;
+            return;
+        }
+
+        var run = ++_rulesRun;
+        var from = MoreRules.IsVisible ? MoreRules.Bounds.Height : 0;
+        MoreRules.IsVisible = true;
+        MoreRules.ClearValue(MaxHeightProperty);
+        MoreRules.Measure(new Size(MoreRules.Bounds.Width > 0 ? MoreRules.Bounds.Width : Bounds.Width, double.PositiveInfinity));
+        var to = expand ? MoreRules.DesiredSize.Height : 0;
+        MoreRules.MaxHeight = to;
+        MoreRules.Opacity = expand ? 1 : 0;
+        var animation = new Animation
+        {
+            Duration = Motion.Duration,
+            Easing = Motion.Standard,
+            Children =
+            {
+                new KeyFrame { Cue = new Cue(0), Setters = { new Setter(MaxHeightProperty, from), new Setter(OpacityProperty, expand ? 0d : 1d) } },
+                new KeyFrame { Cue = new Cue(1), Setters = { new Setter(MaxHeightProperty, to), new Setter(OpacityProperty, expand ? 1d : 0d) } },
+            },
+        };
+        await animation.RunAsync(MoreRules);
+        if (_rulesRun == run)
+        {
+            MoreRules.IsVisible = expand;
+            MoreRules.ClearValue(MaxHeightProperty);
+            MoreRules.ClearValue(OpacityProperty);
         }
     }
 
