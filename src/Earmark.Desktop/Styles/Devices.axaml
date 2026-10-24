@@ -90,7 +90,7 @@
         <Setter Property="Background" Value="{DynamicResource CriticalTintBrush}" />
     </Style>
     <Style Selector="Border.DeviceCard Border.ArtScrim">
-        <Setter Property="Background" Value="#C01F2430" />
+        <Setter Property="Background" Value="#C0181C26" />
     </Style>
 
     <Style Selector="Border.DeviceCard Button.Tile">

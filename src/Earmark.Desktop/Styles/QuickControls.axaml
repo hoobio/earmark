@@ -17,9 +17,9 @@
     </Styles.Resources>
 
     <Style Selector="ContentControl.QuickPanel.Acrylic">
-        <Setter Property="Background" Value="#B81F2430" />
+        <Setter Property="Background" Value="#B8181C26" />
     </Style>
     <Style Selector="ContentControl.QuickPanel.Acrylic Border.DeviceCard">
-        <Setter Property="Background" Value="#80232834" />
+        <Setter Property="Background" Value="#801F2430" />
     </Style>
 </Styles>

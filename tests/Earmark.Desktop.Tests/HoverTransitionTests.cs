@@ -21,7 +21,7 @@ namespace Earmark.Desktop.Tests;
 
 public sealed class HoverTransitionTests(AvaloniaSession session)
 {
-    private static readonly Color Ground = Color.Parse("#FF1F2430");
+    private static readonly Color Ground = Color.Parse("#FF181C26");
     private static readonly string[] Items = ["One", "Two"];
     private static readonly string[] Segments = ["All", "Render", "Capture"];
     private static readonly string[] Pages = ["Rules", "Sessions", "Settings"];
