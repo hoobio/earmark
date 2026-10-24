@@ -76,6 +76,8 @@ jobs:
         || (github.event_name == 'workflow_dispatch' && inputs.force_build)
       )
     runs-on: windows-latest
+    env:
+      HAS_SIGNING_CERT: ${{ secrets.SIGNING_CERTIFICATE != '' && vars.SIGNING_CERT_THUMBPRINT != '' }}
     outputs:
       package-version: ${{ steps.version.outputs.package-version }}
       release-version: ${{ steps.version.outputs.release-version }}
@@ -126,6 +128,20 @@ jobs:
             New-Item -ItemType Directory -Path "staging\msix-unsigned-$env:PLATFORM" -Force | Out-Null
             Copy-Item $package.MsixUnsignedTest "staging\msix-unsigned-$env:PLATFORM"
           }
+
+      - name: Sign MSIX
+        if: env.HAS_SIGNING_CERT == 'true'
+        uses: hoobio/pipeline-tools/pipeline/github/step/sign-msix@v2.2.1
+        with:
+          pfx-base64: ${{ secrets.SIGNING_CERTIFICATE }}
+          pfx-password: ${{ secrets.SIGNING_CERTIFICATE_PASSWORD }}
+          thumbprint: ${{ vars.SIGNING_CERT_THUMBPRINT }}
+          packages-path: ${{ github.workspace }}\staging\msix-${{ matrix.platform }}
+
+      - name: Skip-sign notice
+        if: env.HAS_SIGNING_CERT != 'true'
+        shell: bash
+        run: echo "::warning::SIGNING_CERTIFICATE / SIGNING_CERT_THUMBPRINT not set; MSIX produced unsigned."
 
       - name: Upload MSIX artifact
         uses: actions/upload-artifact@v7
@@ -333,7 +349,7 @@ jobs:
             Sort-Object { [version]($_.FullName -replace '.*\\(\d+\.\d+\.\d+\.\d+)\\.*', '$1') } -Descending |
             Select-Object -First 1 -ExpandProperty FullName
           if (-not $signtool) { throw 'Could not locate signtool.exe under the Windows SDK' }
-          & $signtool sign /fd SHA256 /sha1 $env:THUMBPRINT /td SHA256 staging\Earmark.exe
+          & $signtool sign /fd SHA256 /sha1 $env:THUMBPRINT /tr http://timestamp.digicert.com /td SHA256 staging\Earmark.exe
           if ($LASTEXITCODE -ne 0) { throw "signtool failed for staging\Earmark.exe (exit $LASTEXITCODE)" }
 
       - name: Skip-sign notice
@@ -844,10 +860,11 @@ jobs:
 
   store-flight:
     name: Submit to Store pre-release flight
-    needs: [release-please, build-msix, msix-bundle]
+    needs: [release-please, lint-and-test, build-msix, msix-bundle]
     if: >-
       always()
-      && github.event_name != 'pull_request'
+      && github.event_name == 'workflow_dispatch'
+      && needs.lint-and-test.result == 'success'
       && needs.msix-bundle.result == 'success'
       && vars.STORE_FLIGHT_ID != ''
       && vars.AZURE_CLIENT_ID != ''
