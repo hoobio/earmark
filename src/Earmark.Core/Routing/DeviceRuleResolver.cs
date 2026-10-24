@@ -28,15 +28,11 @@ public static class DeviceRuleResolver
     public static DeviceRuleTargets Resolve(
         AudioEndpoint endpoint,
         IReadOnlyList<RoutingRule> rules,
-        IReadOnlyList<AudioEndpoint> endpoints,
-        IReadOnlyList<AudioSession> sessions,
-        IRuleMatcher matcher)
+        IReadOnlyDictionary<Guid, bool> met)
     {
         ArgumentNullException.ThrowIfNull(endpoint);
         ArgumentNullException.ThrowIfNull(rules);
-        ArgumentNullException.ThrowIfNull(endpoints);
-        ArgumentNullException.ThrowIfNull(sessions);
-        ArgumentNullException.ThrowIfNull(matcher);
+        ArgumentNullException.ThrowIfNull(met);
 
         DeviceRuleTarget<float>? volume = null;
         DeviceRuleTarget<bool>? muted = null;
@@ -46,10 +42,9 @@ public static class DeviceRuleResolver
             if (volume.HasValue && muted.HasValue) break;
             if (!rule.Enabled) continue;
 
-            var met = matcher.ConditionsMet(rule, endpoints, sessions);
             var label = string.IsNullOrEmpty(rule.Name) ? rule.Id.ToString() : rule.Name;
 
-            foreach (var action in rule.ActiveActions(met))
+            foreach (var action in rule.ActiveActions(met[rule.Id]))
             {
                 if (volume.HasValue && muted.HasValue) break;
                 if (!action.IsValid) continue;

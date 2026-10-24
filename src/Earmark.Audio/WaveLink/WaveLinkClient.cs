@@ -10,6 +10,7 @@ namespace Earmark.Audio.WaveLink;
 public sealed class WaveLinkClient : IAsyncDisposable
 {
     private const string OriginHeader = "streamdeck://";
+    private static readonly TimeSpan CallTimeout = TimeSpan.FromSeconds(5);
 
     private readonly ILogger<WaveLinkClient> _logger;
     private readonly ConcurrentDictionary<long, TaskCompletionSource<JsonElement>> _pending = new();
@@ -101,6 +102,8 @@ public sealed class WaveLinkClient : IAsyncDisposable
         var id = Interlocked.Increment(ref _nextId);
         var tcs = new TaskCompletionSource<JsonElement>(TaskCreationOptions.RunContinuationsAsynchronously);
         _pending[id] = tcs;
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(CallTimeout);
 
         try
         {
@@ -119,22 +122,29 @@ public sealed class WaveLinkClient : IAsyncDisposable
                 writer.WriteEndObject();
             }
 
-            await _sendLock.WaitAsync(ct).ConfigureAwait(false);
+            await _sendLock.WaitAsync(timeout.Token).ConfigureAwait(false);
             try
             {
-                await socket.SendAsync(ms.GetBuffer().AsMemory(0, (int)ms.Length), WebSocketMessageType.Text, true, ct).ConfigureAwait(false);
+                await socket.SendAsync(ms.GetBuffer().AsMemory(0, (int)ms.Length), WebSocketMessageType.Text, true, timeout.Token).ConfigureAwait(false);
             }
             finally
             {
                 _sendLock.Release();
             }
 
-            using var registration = ct.Register(static state =>
+            using var registration = timeout.Token.Register(static state =>
             {
                 ((TaskCompletionSource<JsonElement>)state!).TrySetCanceled();
             }, tcs);
 
             return await tcs.Task.ConfigureAwait(false);
+        }
+        // Not an OperationCanceledException: callers read that as shutdown and stay silent.
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("Wave Link: '{Method}' got no reply in {Timeout}; dropping the connection", method, CallTimeout);
+            socket.Abort();
+            throw new TimeoutException($"Wave Link did not answer '{method}' within {CallTimeout}.");
         }
         finally
         {

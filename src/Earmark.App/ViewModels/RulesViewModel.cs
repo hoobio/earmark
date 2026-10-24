@@ -22,8 +22,6 @@ public partial class RulesViewModel : ObservableObject, IDisposable
     private readonly RoutingApplier _applier;
     private readonly IAudioSessionService _sessions;
     private readonly IAudioEndpointService _endpoints;
-    private readonly IRuleEvaluator _evaluator;
-    private readonly IRuleMatcher _matcher;
     private readonly IWaveLinkService _waveLink;
     private readonly IDispatcherQueueProvider _dispatcher;
     private readonly Lock _gate = new();
@@ -36,8 +34,6 @@ public partial class RulesViewModel : ObservableObject, IDisposable
         RoutingApplier applier,
         IAudioSessionService sessions,
         IAudioEndpointService endpoints,
-        IRuleEvaluator evaluator,
-        IRuleMatcher matcher,
         IWaveLinkService waveLink,
         IDispatcherQueueProvider dispatcher)
     {
@@ -45,8 +41,6 @@ public partial class RulesViewModel : ObservableObject, IDisposable
         _applier = applier ?? throw new ArgumentNullException(nameof(applier));
         _sessions = sessions ?? throw new ArgumentNullException(nameof(sessions));
         _endpoints = endpoints ?? throw new ArgumentNullException(nameof(endpoints));
-        _evaluator = evaluator ?? throw new ArgumentNullException(nameof(evaluator));
-        _matcher = matcher ?? throw new ArgumentNullException(nameof(matcher));
         _waveLink = waveLink ?? throw new ArgumentNullException(nameof(waveLink));
         _dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
 
@@ -320,23 +314,23 @@ public partial class RulesViewModel : ObservableObject, IDisposable
         _dispatcher.Enqueue(() =>
         {
             var liveRules = Items.Select(r => r.ToRule()).ToList();
+            var conditionsMet = RuleMatcher.EvaluateConditions(liveRules, endpoints, sessions);
             // liveRules is a positional projection of Items, so Items[i] maps to liveRules[i];
             // index directly instead of an O(n) Id scan per row.
             for (var i = 0; i < Items.Count; i++)
             {
                 var row = Items[i];
                 row.Recompute(sessions, endpoints, snapshot, waveLinkState);
-                var evaluation = _evaluator.Evaluate(liveRules[i], liveRules, sessions, endpoints);
+                var evaluation = RuleEvaluator.Evaluate(liveRules[i], liveRules, sessions, endpoints, conditionsMet);
                 row.ApplyEvaluation(evaluation);
 
                 // Flag actions superseded by an earlier (higher-priority) rule so the editor can warn
                 // that they won't run. Uses the same first-match-wins precedence the appliers enforce.
                 // A disabled rule isn't running at all, so it shows no shadow warning.
-                var met = _matcher.ConditionsMet(liveRules[i], endpoints, sessions);
                 var shadowed = liveRules[i].Enabled
-                    ? RuleShadowAnalyzer.ShadowedActiveActions(liveRules[i], met, liveRules, endpoints, sessions, _matcher)
+                    ? RuleShadowAnalyzer.ShadowedActiveActions(liveRules[i], liveRules, endpoints, sessions, conditionsMet)
                     : new HashSet<int>();
-                row.ApplyShadow(shadowed, met);
+                row.ApplyShadow(shadowed, conditionsMet[liveRules[i].Id]);
             }
         });
     }

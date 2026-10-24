@@ -51,35 +51,31 @@ internal static class DeviceRulesSummary
         IReadOnlyList<RoutingRule> rules,
         IReadOnlyList<AudioEndpoint> renderEndpoints,
         IReadOnlyList<AudioEndpoint> captureEndpoints,
-        IReadOnlyList<AudioSession> sessions,
-        IRuleMatcher matcher,
-        IRuleEvaluator evaluator)
+        IReadOnlyList<AudioSession> sessions)
     {
         ArgumentNullException.ThrowIfNull(endpoint);
         ArgumentNullException.ThrowIfNull(rules);
         ArgumentNullException.ThrowIfNull(renderEndpoints);
         ArgumentNullException.ThrowIfNull(captureEndpoints);
         ArgumentNullException.ThrowIfNull(sessions);
-        ArgumentNullException.ThrowIfNull(matcher);
-        ArgumentNullException.ThrowIfNull(evaluator);
 
         var summaries = new List<RuleSummary>();
         var combinedEndpoints = renderEndpoints.Concat(captureEndpoints).ToList();
+        var met = RuleMatcher.EvaluateConditions(rules, combinedEndpoints, sessions);
 
         // The lock state (which dimension is pinned, to what, by which rule) comes from the
         // shared DeviceRuleResolver - the exact first-match-wins computation the routing applier
         // uses to enforce these rules - so the lock icon and the enforcement can't disagree.
-        var targets = DeviceRuleResolver.Resolve(endpoint, rules, combinedEndpoints, sessions, matcher);
+        var targets = DeviceRuleResolver.Resolve(endpoint, rules, met);
 
         foreach (var rule in rules)
         {
             if (!RuleTargetsEndpoint(rule, endpoint)) continue;
 
             var name = string.IsNullOrWhiteSpace(rule.Name) ? "Unnamed rule" : rule.Name;
-            var evaluation = evaluator.Evaluate(rule, rules, sessions, combinedEndpoints);
+            var evaluation = RuleEvaluator.Evaluate(rule, rules, sessions, combinedEndpoints, met);
             // Summarise the branch that's actually live so the count matches what's applied.
-            var met = matcher.ConditionsMet(rule, combinedEndpoints, sessions);
-            var matchSummary = BuildMatchSummary(rule.ActiveActions(met), sessions, combinedEndpoints);
+            var matchSummary = BuildMatchSummary(rule.ActiveActions(met[rule.Id]), sessions, combinedEndpoints);
 
             summaries.Add(new RuleSummary(
                 rule.Id, name, evaluation.Status, evaluation.Message, matchSummary));

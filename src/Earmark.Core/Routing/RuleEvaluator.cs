@@ -14,34 +14,20 @@ public enum RuleStatus
 
 public sealed record RuleEvaluation(RuleStatus Status, string Message);
 
-public interface IRuleEvaluator
+public static class RuleEvaluator
 {
-    RuleEvaluation Evaluate(
+    public static RuleEvaluation Evaluate(
         RoutingRule rule,
         IReadOnlyList<RoutingRule> allRules,
         IReadOnlyList<AudioSession> sessions,
-        IReadOnlyList<AudioEndpoint> endpoints);
-}
-
-public sealed class RuleEvaluator : IRuleEvaluator
-{
-    private readonly IRuleMatcher _matcher;
-
-    public RuleEvaluator(IRuleMatcher matcher)
-    {
-        _matcher = matcher ?? throw new ArgumentNullException(nameof(matcher));
-    }
-
-    public RuleEvaluation Evaluate(
-        RoutingRule rule,
-        IReadOnlyList<RoutingRule> allRules,
-        IReadOnlyList<AudioSession> sessions,
-        IReadOnlyList<AudioEndpoint> endpoints)
+        IReadOnlyList<AudioEndpoint> endpoints,
+        IReadOnlyDictionary<Guid, bool> conditionsMet)
     {
         ArgumentNullException.ThrowIfNull(rule);
         ArgumentNullException.ThrowIfNull(allRules);
         ArgumentNullException.ThrowIfNull(sessions);
         ArgumentNullException.ThrowIfNull(endpoints);
+        ArgumentNullException.ThrowIfNull(conditionsMet);
 
         if (!rule.Enabled)
         {
@@ -53,7 +39,7 @@ public sealed class RuleEvaluator : IRuleEvaluator
             return new RuleEvaluation(RuleStatus.Incomplete, "No actions configured");
         }
 
-        var met = _matcher.ConditionsMet(rule, endpoints, sessions);
+        var met = conditionsMet[rule.Id];
 
         // Conditions unmet with no "otherwise" branch: a classic conditional rule that's simply
         // inactive right now. When the rule HAS an else branch we evaluate that branch below
@@ -73,7 +59,7 @@ public sealed class RuleEvaluator : IRuleEvaluator
                 met ? "No actions in the main branch" : "No actions in the otherwise branch");
         }
 
-        var (claimedDefault, claimedApp) = ClaimsBefore(rule, allRules, sessions, endpoints);
+        var (claimedDefault, claimedApp) = ClaimsBefore(rule, allRules, sessions, endpoints, conditionsMet);
 
         var anyActiveTarget = false;
         var anyShadowed = false;
@@ -166,11 +152,12 @@ public sealed class RuleEvaluator : IRuleEvaluator
         return new RuleEvaluation(RuleStatus.Idle, $"No matches right now{suffix}");
     }
 
-    private (HashSet<(EndpointFlow, DefaultRoleKind)> defaults, HashSet<(EndpointFlow, uint)> apps) ClaimsBefore(
+    private static (HashSet<(EndpointFlow, DefaultRoleKind)> defaults, HashSet<(EndpointFlow, uint)> apps) ClaimsBefore(
         RoutingRule target,
         IReadOnlyList<RoutingRule> allRules,
         IReadOnlyList<AudioSession> sessions,
-        IReadOnlyList<AudioEndpoint> endpoints)
+        IReadOnlyList<AudioEndpoint> endpoints,
+        IReadOnlyDictionary<Guid, bool> conditionsMet)
     {
         var defaults = new HashSet<(EndpointFlow, DefaultRoleKind)>();
         var apps = new HashSet<(EndpointFlow, uint)>();
@@ -186,8 +173,7 @@ public sealed class RuleEvaluator : IRuleEvaluator
                 continue;
             }
 
-            var earlierMet = _matcher.ConditionsMet(earlier, endpoints, sessions);
-            foreach (var action in earlier.ActiveActions(earlierMet))
+            foreach (var action in earlier.ActiveActions(conditionsMet[earlier.Id]))
             {
                 if (!action.IsValid)
                 {

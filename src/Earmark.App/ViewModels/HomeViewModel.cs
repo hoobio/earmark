@@ -52,8 +52,6 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     private readonly IAudioPolicyService _policy;
     private readonly RoutingApplier _routingApplier;
     private readonly ISessionIconService _iconService;
-    private readonly IRuleMatcher _matcher;
-    private readonly IRuleEvaluator _evaluator;
     private readonly SettingsService _settings;
     private readonly IWaveLinkService _waveLink;
     private readonly IWaveLinkVisualService _waveLinkVisuals;
@@ -135,8 +133,6 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         IAudioPolicyService policy,
         RoutingApplier routingApplier,
         ISessionIconService iconService,
-        IRuleMatcher matcher,
-        IRuleEvaluator evaluator,
         SettingsService settings,
         IWaveLinkService waveLink,
         IWaveLinkVisualService waveLinkVisuals,
@@ -159,8 +155,6 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         _policy = policy ?? throw new ArgumentNullException(nameof(policy));
         _routingApplier = routingApplier ?? throw new ArgumentNullException(nameof(routingApplier));
         _iconService = iconService ?? throw new ArgumentNullException(nameof(iconService));
-        _matcher = matcher ?? throw new ArgumentNullException(nameof(matcher));
-        _evaluator = evaluator ?? throw new ArgumentNullException(nameof(evaluator));
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
         _waveLink = waveLink ?? throw new ArgumentNullException(nameof(waveLink));
         _waveLinkVisuals = waveLinkVisuals ?? throw new ArgumentNullException(nameof(waveLinkVisuals));
@@ -529,6 +523,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         var sessionsSnapshot = _sessions.GetSessions();
         var rulesSnapshot = _rules.Rules;
         List<AudioEndpoint>? combinedEndpointsCache = null;
+        IReadOnlyDictionary<Guid, bool>? metCache = null;
 
         // Group every showable session's pid by app identity (executable path). One chip stands
         // in for an app's several processes, so its meter must reflect the loudest sibling - this
@@ -593,7 +588,8 @@ public partial class HomeViewModel : ObservableObject, IDisposable
                     combinedEndpointsCache ??= _endpoints.GetEndpoints(EndpointFlow.Render)
                         .Concat(_endpoints.GetEndpoints(EndpointFlow.Capture))
                         .ToList();
-                    var match = _matcher.FindAppRoute(session, EndpointFlow.Render, rulesSnapshot, combinedEndpointsCache, sessionsSnapshot);
+                    metCache ??= RuleMatcher.EvaluateConditions(rulesSnapshot, combinedEndpointsCache, sessionsSnapshot);
+                    var match = RuleMatcher.FindAppRoute(session, EndpointFlow.Render, rulesSnapshot, combinedEndpointsCache, metCache);
                     var revivedChip = new AppChip(session, card.Endpoint.Id, _iconService, card.MeterOptions, match?.Rule, ownerCard: card, onHide: HideApp, onHideOnDevice: HideAppOnDevice, onClose: CloseApp, onTerminate: TerminateApp, canControlProcess: ProcessControlService.CanControl(session.ProcessId), canCloseProcess: _processControl.CanClose(session.ProcessId), isElevated: ProcessControlService.IsElevated(session.ProcessId))
                     {
                         RulePinnedHere = match is not null &&
@@ -1204,6 +1200,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         var renderEndpoints = _endpoints.GetEndpoints(EndpointFlow.Render);
         var captureEndpoints = _endpoints.GetEndpoints(EndpointFlow.Capture);
         var combined = renderEndpoints.Concat(captureEndpoints).ToList();
+        var met = RuleMatcher.EvaluateConditions(rules, combined, sessions);
 
         // Resolve each visible session's rule-pinned render route ONCE here, on the debounced
         // path. The matcher loops rules x actions x regex; the route doesn't depend on the
@@ -1225,7 +1222,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
                 liveSessionByIdentity[session.IdentityKey] = session;
             }
             if (routeByPid.ContainsKey(session.ProcessId)) continue;
-            routeByPid[session.ProcessId] = _matcher.FindAppRoute(session, EndpointFlow.Render, rules, combined, sessions);
+            routeByPid[session.ProcessId] = RuleMatcher.FindAppRoute(session, EndpointFlow.Render, rules, combined, met);
         }
 
         // Every running process's identity, regardless of rule match or audio session. Lets the
@@ -1244,7 +1241,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         var alwaysShowPinned = _settings.Current.AlwaysShowPinnedApps;
         var runningIdentities = new HashSet<string>(StringComparer.Ordinal);
         var synthetic = alwaysShowPinned
-            ? BuildSyntheticSessions(rules, combined, sessions, realIdentities, routeByPid, runningIdentities)
+            ? BuildSyntheticSessions(rules, combined, met, realIdentities, routeByPid, runningIdentities)
             : new List<AudioSession>();
         IReadOnlyList<AudioSession> effectiveSessions = sessions;
         if (synthetic.Count > 0)
@@ -1281,7 +1278,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         var captureEndpoints = _endpoints.GetEndpoints(EndpointFlow.Capture);
         foreach (var card in _allCards)
         {
-            var summary = DeviceRulesSummary.For(card.Endpoint, rules, renderEndpoints, captureEndpoints, sessions, _matcher, _evaluator);
+            var summary = DeviceRulesSummary.For(card.Endpoint, rules, renderEndpoints, captureEndpoints, sessions);
             card.UpdateRuleSummary(summary);
         }
     }
@@ -1297,7 +1294,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     private List<AudioSession> BuildSyntheticSessions(
         IReadOnlyList<RoutingRule> rules,
         IReadOnlyList<AudioEndpoint> combined,
-        IReadOnlyList<AudioSession> sessions,
+        IReadOnlyDictionary<Guid, bool> met,
         HashSet<string> realIdentities,
         Dictionary<uint, AppRouteMatch?> routeByPid,
         HashSet<string> runningIdentities)
@@ -1317,7 +1314,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
             if (!seen.Add(key)) continue;
             if (!ShouldShow(session)) continue;
 
-            var match = _matcher.FindAppRoute(session, EndpointFlow.Render, rules, combined, sessions);
+            var match = RuleMatcher.FindAppRoute(session, EndpointFlow.Render, rules, combined, met);
             if (match is null) continue;
 
             routeByPid[session.ProcessId] = match;
@@ -1382,7 +1379,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
         {
             var key = idToKey[endpoint.Id];
             liveKeys.Add(key);
-            var summary = DeviceRulesSummary.For(endpoint, rules, renderEndpoints, captureEndpoints, sessions, _matcher, _evaluator);
+            var summary = DeviceRulesSummary.For(endpoint, rules, renderEndpoints, captureEndpoints, sessions);
             var volume = _endpoints.GetVolume(endpoint.Id) ?? 0f;
             var muted = _endpoints.GetMuted(endpoint.Id) ?? false;
             snapshots.Add(ToSnapshot(endpoint, key, isConnected: true, volume, muted, summary, LookupConfig(deviceConfigs, key, endpoint.Id), btByEndpointId[endpoint.Id]));
@@ -1407,7 +1404,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
                 IsDefaultCommunications: false,
                 ContainerId: row.ContainerId,
                 IsBluetooth: row.IsBluetooth);
-            var summary = DeviceRulesSummary.For(endpoint, rules, renderEndpoints, captureEndpoints, sessions, _matcher, _evaluator);
+            var summary = DeviceRulesSummary.For(endpoint, rules, renderEndpoints, captureEndpoints, sessions);
             snapshots.Add(ToSnapshot(endpoint, row.Key, isConnected: false, volume: 0f, muted: false, summary, LookupConfig(deviceConfigs, row.Key, row.LastEndpointId), row.IsBluetooth));
         }
 

@@ -1,5 +1,6 @@
 using Earmark.Core.Audio;
 using Earmark.Core.Models;
+using Earmark.Core.Persistence;
 using Earmark.Core.Routing;
 using Earmark.Core.Services;
 using Earmark.Core.WaveLink;
@@ -8,6 +9,11 @@ using Microsoft.Extensions.Logging;
 
 namespace Earmark.Audio.Routing;
 
+/// <summary>
+/// The rule engine. Event-driven passes (sessions, rules, defaults, endpoints, Wave Link) plus a slow
+/// drift timer; each pass reads one snapshot of endpoints, sessions and per-rule condition state and
+/// enforces pinned actions every pass and one-shot actions on their rule's activation edge only.
+/// </summary>
 public sealed class RoutingApplier : IDisposable
 {
     // Drift-guard only. The real triggers are SessionAdded / SessionRemoved /
@@ -19,14 +25,11 @@ public sealed class RoutingApplier : IDisposable
     // mirrors the Devices page's 600ms user-grace window.
     private static readonly TimeSpan VolumeReconcileDebounce = TimeSpan.FromMilliseconds(500);
 
-    // Device connect / disconnect can flip a DevicePresent / DeviceMissing condition, which gates
-    // whether a rule's main vs else actions fire. Debounced because one Bluetooth connect raises a
-    // burst of endpoint events (and can briefly flicker present/absent) - re-arming on each change
-    // means we only re-apply once the topology settles, instead of oscillating the rule's branches.
+    // One Bluetooth connect raises a burst of endpoint events (and can briefly flicker
+    // present/absent); re-arming on each change re-applies once the topology settles instead of
+    // oscillating a presence-gated rule between its branches.
     private static readonly TimeSpan EndpointsChangeDebounce = TimeSpan.FromMilliseconds(750);
 
-    // A reconcile pass (no condition edge): only pinned actions are enforced. One-shot actions are
-    // skipped because they fire once on their activation edge and are then left alone.
     private static readonly IReadOnlySet<Guid> NoEdges = new HashSet<Guid>();
 
     private readonly IRulesService _rules;
@@ -34,20 +37,22 @@ public sealed class RoutingApplier : IDisposable
     private readonly IAudioEndpointService _endpoints;
     private readonly EndpointWriter _writer;
     private readonly IAudioPolicyService _policy;
-    private readonly IRuleMatcher _matcher;
     private readonly IWaveLinkService _waveLink;
     private readonly ILogger<RoutingApplier> _logger;
     private readonly HashSet<string> _appliedSessionKeys = new(StringComparer.OrdinalIgnoreCase);
     private readonly Lock _appliedGate = new();
     private readonly SemaphoreSlim _applyGate = new(1, 1);
+    private readonly SemaphoreSlim _waveLinkGate = new(1, 1);
+    private readonly HashSet<uint> _newSessionPids = new();
+    private readonly Lock _newSessionGate = new();
 
-    // Per-rule "were the conditions met last time we evaluated". Only ever read/written inside the
-    // _applyGate-protected ApplyAll, so it needs no extra lock. A rule whose met-ness changed since
-    // last cycle (or that we've not seen) has an "activation edge" this cycle: its now-active
-    // branch's one-shot actions fire once. Cleared on a forced re-apply (rule edit / manual
-    // reapply) so a freshly-edited rule re-arms its one-shots.
+    // Guarded by _applyGate. A rule whose met-ness changed since the previous pass (or that is new
+    // or edited) has an activation edge this pass: its live branch's one-shot actions fire once.
     private readonly Dictionary<Guid, bool> _lastConditionsMet = new();
+    private readonly Dictionary<Guid, string> _ruleFingerprints = new();
+    private IReadOnlyList<RoutingRule>? _lastRules;
 
+    private int _rerunPending;
     private bool _started;
     private Timer? _timer;
     private Timer? _volumeReconcileTimer;
@@ -60,7 +65,6 @@ public sealed class RoutingApplier : IDisposable
         IAudioEndpointService endpoints,
         EndpointWriter writer,
         IAudioPolicyService policy,
-        IRuleMatcher matcher,
         IWaveLinkService waveLink,
         ILogger<RoutingApplier> logger)
     {
@@ -69,11 +73,11 @@ public sealed class RoutingApplier : IDisposable
         _endpoints = endpoints;
         _writer = writer;
         _policy = policy;
-        _matcher = matcher;
         _waveLink = waveLink;
         _logger = logger;
     }
 
+    /// <summary>Raised after a per-app route is written, on the applying thread.</summary>
     public event EventHandler<AppliedRoute>? RouteApplied;
 
     public void Start()
@@ -107,91 +111,194 @@ public sealed class RoutingApplier : IDisposable
             }
         });
 
-        _timer = new Timer(OnTimerTick, null, PeriodicInterval, PeriodicInterval);
-        // Single-shot debounce timer for external-change reconcile; armed by ScheduleVolumeReconcile.
+        _timer = new Timer(_ => RunRequested("Periodic re-apply"), null, PeriodicInterval, PeriodicInterval);
         _volumeReconcileTimer = new Timer(OnVolumeReconcileTick, null, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
-        // Single-shot debounce timer for device connect/disconnect; armed by OnEndpointsChanged.
-        _endpointsChangeTimer = new Timer(OnEndpointsChangeTick, null, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+        _endpointsChangeTimer = new Timer(_ => RunRequested("Endpoints-changed reapply", "Reapplied rules after endpoint topology change"), null, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
         _logger.LogInformation("Routing applier started; periodic interval = {Interval}", PeriodicInterval);
     }
 
-    public Task ApplyAllAsync(bool force = false) =>
-        ApplyAllInternalAsync(force, skipIfBusy: false);
-
-    private async Task ApplyAllInternalAsync(bool force, bool skipIfBusy)
+    /// <summary>
+    /// Runs one pass and waits for it, Wave Link included. <paramref name="force"/> is the manual
+    /// Reapply: every rule re-arms its one-shot actions and the per-app dedupe is cleared.
+    /// </summary>
+    public async Task ApplyAllAsync(bool force = false)
     {
-        if (_rules.Rules.Count == 0)
-        {
-            return;
-        }
-
-        if (skipIfBusy)
-        {
-            if (!await _applyGate.WaitAsync(0).ConfigureAwait(false))
-            {
-                return;
-            }
-        }
-        else
-        {
-            await _applyGate.WaitAsync().ConfigureAwait(false);
-        }
-
+        WaveLinkWork? waveLinkWork;
+        await _applyGate.WaitAsync().ConfigureAwait(false);
         try
         {
-            if (force)
-            {
-                lock (_appliedGate)
-                {
-                    _appliedSessionKeys.Clear();
-                }
-                // A forced re-apply (rule edit / manual reapply) re-arms every rule's one-shot
-                // actions: clearing the baseline makes the edge computation below treat them all
-                // as freshly activated so a just-edited one-shot fires once.
-                _lastConditionsMet.Clear();
-                _logger.LogInformation("ApplyAll: forced re-apply, caches cleared");
-            }
-
-            var renderEndpoints = _endpoints.GetEndpoints(EndpointFlow.Render);
-            var captureEndpoints = _endpoints.GetEndpoints(EndpointFlow.Capture);
-            var sessions = _sessions.GetSessions();
-            var combined = renderEndpoints.Concat(captureEndpoints).ToList();
-            var edges = ComputeActivationEdges(combined, sessions);
-
-            await Task.Run(() =>
-            {
-                ApplyDefaultDevices(edges);
-                ApplyApplicationsToSessions(edges);
-                ApplyVolumeAndMuteRules(edges);
-            }).ConfigureAwait(false);
-
-            var ct = _cts?.Token ?? CancellationToken.None;
-            await ApplyWaveLinkRulesAsync(edges, ct).ConfigureAwait(false);
+            Interlocked.Exchange(ref _rerunPending, 0);
+            waveLinkWork = await Task.Run(() => RunPass(force)).ConfigureAwait(false);
         }
         finally
         {
             _applyGate.Release();
         }
+
+        await RunWaveLinkPassAsync(waveLinkWork).ConfigureAwait(false);
+        await DrainPendingAsync().ConfigureAwait(false);
     }
 
     /// <summary>
-    /// The set of rules that have an activation edge this cycle: their conditions' met-ness changed
-    /// since the previous evaluation (or we've never seen them). The now-active branch's one-shot
-    /// actions fire once on an edge; pinned actions apply every cycle regardless. Updates the
-    /// baseline as a side effect. Must be called inside <see cref="_applyGate"/>.
+    /// Coalesced, non-blocking pass request. An event that arrives while a pass runs is not dropped:
+    /// the flag is set before the gate is tried, and every gate holder re-checks it after release.
     /// </summary>
-    private HashSet<Guid> ComputeActivationEdges(IReadOnlyList<AudioEndpoint> endpoints, IReadOnlyList<AudioSession> sessions)
+    private Task RequestApplyAsync()
+    {
+        Interlocked.Exchange(ref _rerunPending, 1);
+        return Task.Run(DrainPendingAsync);
+    }
+
+    private async Task DrainPendingAsync()
+    {
+        while (Volatile.Read(ref _rerunPending) == 1 && await _applyGate.WaitAsync(0).ConfigureAwait(false))
+        {
+            WaveLinkWork? waveLinkWork;
+            try
+            {
+                Interlocked.Exchange(ref _rerunPending, 0);
+                waveLinkWork = RunPass(force: false);
+            }
+            finally
+            {
+                _applyGate.Release();
+            }
+
+            await RunWaveLinkPassAsync(waveLinkWork).ConfigureAwait(false);
+        }
+    }
+
+    private async void RunRequested(string failureContext, string? successMessage = null)
+    {
+        if (_cts is null || _cts.IsCancellationRequested) return;
+        try
+        {
+            await RequestApplyAsync().ConfigureAwait(false);
+            if (successMessage is not null)
+            {
+                _logger.LogInformation("{Message}", successMessage);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "{Context} failed", failureContext);
+        }
+    }
+
+    private sealed record Snapshot(
+        IReadOnlyList<RoutingRule> Rules,
+        IReadOnlyList<AudioEndpoint> Render,
+        IReadOnlyList<AudioEndpoint> Capture,
+        IReadOnlyList<AudioEndpoint> All,
+        IReadOnlyList<AudioSession> Sessions,
+        IReadOnlyDictionary<Guid, bool> Met);
+
+    private sealed record WaveLinkWork(IReadOnlyList<RoutingRule> Rules, IReadOnlyDictionary<Guid, bool> Met, IReadOnlySet<Guid> Edges);
+
+    private Snapshot TakeSnapshot(IReadOnlyList<RoutingRule> rules)
+    {
+        var render = _endpoints.GetEndpoints(EndpointFlow.Render);
+        var capture = _endpoints.GetEndpoints(EndpointFlow.Capture);
+        var all = render.Concat(capture).ToList();
+        var sessions = _sessions.GetSessions();
+        return new Snapshot(rules, render, capture, all, sessions, RuleMatcher.EvaluateConditions(rules, all, sessions));
+    }
+
+    // Must hold _applyGate.
+    private WaveLinkWork? RunPass(bool force)
+    {
+        var rules = _rules.Rules;
+        if (rules.Count == 0)
+        {
+            return null;
+        }
+
+        if (force)
+        {
+            ClearDedupe();
+            _lastConditionsMet.Clear();
+            _logger.LogInformation("ApplyAll: forced re-apply, caches cleared");
+        }
+
+        RearmChangedRules(rules);
+
+        var snapshot = TakeSnapshot(rules);
+        var edges = ComputeActivationEdges(snapshot);
+        HashSet<uint> newPids;
+        lock (_newSessionGate)
+        {
+            newPids = new HashSet<uint>(_newSessionPids);
+            _newSessionPids.Clear();
+        }
+
+        ApplyDefaultDevices(snapshot, edges);
+        ApplyApplicationsToSessions(snapshot, edges, newPids);
+        ApplyVolumeAndMuteRules(snapshot, edges);
+
+        return HasEnactableWaveLinkAction(rules, edges) ? new WaveLinkWork(rules, snapshot.Met, edges) : null;
+    }
+
+    /// <summary>
+    /// Re-arms one-shot actions of rules that are new or whose content changed since the last pass,
+    /// and only those: saving rule B must not re-fire rule A's one-shots. Any change to the rule
+    /// list also clears the per-app dedupe, because a reorder or delete can hand a session back to a
+    /// rule whose earlier key would otherwise suppress the re-pin.
+    /// </summary>
+    private void RearmChangedRules(IReadOnlyList<RoutingRule> rules)
+    {
+        if (ReferenceEquals(rules, _lastRules))
+        {
+            return;
+        }
+
+        var live = new HashSet<Guid>();
+        foreach (var rule in rules)
+        {
+            live.Add(rule.Id);
+            var fingerprint = JsonRuleStore.Fingerprint(rule);
+            if (_ruleFingerprints.TryGetValue(rule.Id, out var previous) && previous == fingerprint)
+            {
+                continue;
+            }
+
+            _ruleFingerprints[rule.Id] = fingerprint;
+            _lastConditionsMet.Remove(rule.Id);
+        }
+
+        foreach (var id in _ruleFingerprints.Keys.Where(k => !live.Contains(k)).ToList())
+        {
+            _ruleFingerprints.Remove(id);
+        }
+
+        if (_lastRules is not null)
+        {
+            ClearDedupe();
+        }
+
+        _lastRules = rules;
+    }
+
+    private void ClearDedupe()
+    {
+        lock (_appliedGate)
+        {
+            _appliedSessionKeys.Clear();
+        }
+    }
+
+    // Must hold _applyGate. Updates the baseline as a side effect.
+    private HashSet<Guid> ComputeActivationEdges(Snapshot snapshot)
     {
         var edges = new HashSet<Guid>();
         var live = new HashSet<Guid>();
-        foreach (var rule in _rules.Rules)
+        foreach (var rule in snapshot.Rules)
         {
             if (!rule.Enabled)
             {
                 continue;
             }
             live.Add(rule.Id);
-            var met = _matcher.ConditionsMet(rule, endpoints, sessions);
+            var met = snapshot.Met[rule.Id];
             if (!_lastConditionsMet.TryGetValue(rule.Id, out var prev) || prev != met)
             {
                 edges.Add(rule.Id);
@@ -211,87 +318,58 @@ public sealed class RoutingApplier : IDisposable
         return edges;
     }
 
-    /// <summary>True when an action should be enacted this cycle: a pinned action always, a one-shot
-    /// only on its rule's activation edge (or a forced activation such as a brand-new session).</summary>
-    private static bool ShouldEnact(RuleAction action, Guid ruleId, IReadOnlySet<Guid> edges, bool forceActivation = false)
-        => action.Pinned || forceActivation || edges.Contains(ruleId);
+    private static bool ShouldEnact(bool pinned, Guid ruleId, IReadOnlySet<Guid> edges, bool forceActivation = false)
+        => pinned || forceActivation || edges.Contains(ruleId);
 
-    public Task<AppliedRoute?> ApplyAsync(AudioSession session)
+    private void ApplyApplicationsToSessions(Snapshot snapshot, IReadOnlySet<Guid> edges, HashSet<uint> newPids)
     {
-        ArgumentNullException.ThrowIfNull(session);
-
-        var sessions = _sessions.GetSessions();
-        var renderEndpoints = _endpoints.GetEndpoints(EndpointFlow.Render);
-        var captureEndpoints = _endpoints.GetEndpoints(EndpointFlow.Capture);
-
-        // A newly-added session is itself an activation: its one-shot app routes fire once here.
-        ApplyAppForFlow(session, EndpointFlow.Render, renderEndpoints, sessions, NoEdges, forceActivation: true);
-        ApplyAppForFlow(session, EndpointFlow.Capture, captureEndpoints, sessions, NoEdges, forceActivation: true);
-        return Task.FromResult<AppliedRoute?>(null);
-    }
-
-    private void ApplyApplicationsToSessions(IReadOnlySet<Guid> edges)
-    {
-        var sessions = _sessions.GetSessions();
-        if (sessions.Count == 0)
+        if (snapshot.Sessions.Count == 0)
         {
             return;
         }
 
-        var renderEndpoints = _endpoints.GetEndpoints(EndpointFlow.Render);
-        var captureEndpoints = _endpoints.GetEndpoints(EndpointFlow.Capture);
+        _logger.LogDebug("ApplyAll: {Count} sessions, {RuleCount} rules", snapshot.Sessions.Count, snapshot.Rules.Count);
 
-        _logger.LogDebug("ApplyAll: {Count} sessions, {RuleCount} rules", sessions.Count, _rules.Rules.Count);
-
-        foreach (var session in sessions)
+        // A process has one session per device it opened; the route is per process.
+        foreach (var session in snapshot.Sessions.DistinctBy(s => s.ProcessId))
         {
-            ApplyAppForFlow(session, EndpointFlow.Render, renderEndpoints, sessions, edges);
-            ApplyAppForFlow(session, EndpointFlow.Capture, captureEndpoints, sessions, edges);
+            // A newly-added session is itself an activation: its one-shot app routes fire once.
+            var isNew = newPids.Contains(session.ProcessId);
+            ApplyAppForFlow(session, EndpointFlow.Render, snapshot, edges, isNew);
+            ApplyAppForFlow(session, EndpointFlow.Capture, snapshot, edges, isNew);
         }
     }
 
-    private void ApplyAppForFlow(AudioSession session, EndpointFlow flow, IReadOnlyList<AudioEndpoint> endpoints, IReadOnlyList<AudioSession> sessions, IReadOnlySet<Guid> edges, bool forceActivation = false)
+    private void ApplyAppForFlow(AudioSession session, EndpointFlow flow, Snapshot snapshot, IReadOnlySet<Guid> edges, bool forceActivation)
     {
-        var match = _matcher.FindAppRoute(session, flow, _rules.Rules, endpoints, sessions);
-        if (match is null)
+        var endpoints = flow == EndpointFlow.Render ? snapshot.Render : snapshot.Capture;
+        var match = RuleMatcher.FindAppRoute(session, flow, snapshot.Rules, endpoints, snapshot.Met);
+        if (match is null || !ShouldEnact(match.Action.Pinned, match.Rule.Id, edges, forceActivation))
         {
             return;
         }
 
-        // A one-shot app route only applies on its activation edge (rule edit / condition flip /
-        // new session); pinned routes apply every cycle (the dedupe still prevents redundant writes).
-        if (!ShouldEnact(match.Action, match.Rule.Id, edges, forceActivation))
-        {
-            return;
-        }
-
-        var pidString = session.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture);
-        ApplyAppFlow(session, match.Rule, match.Endpoint, pidString, flow);
-    }
-
-    private void ApplyAppFlow(AudioSession session, RoutingRule rule, AudioEndpoint endpoint, string pidString, EndpointFlow flow)
-    {
-        var key = $"app|{session.ProcessId}|{rule.Id}|{endpoint.Id}|{flow}";
+        var key = $"app|{session.ProcessId}|{match.Rule.Id}|{match.Endpoint.Id}|{flow}";
         lock (_appliedGate)
         {
             if (!_appliedSessionKeys.Add(key))
             {
                 _logger.LogDebug("Skip re-apply for {Process} (pid {Pid}, {Flow}) -> already pinned to {Endpoint}",
-                    session.ProcessName, session.ProcessId, flow, endpoint.DisplayName);
+                    session.ProcessName, session.ProcessId, flow, match.Endpoint.DisplayName);
                 return;
             }
         }
 
         try
         {
-            _policy.SetDefaultEndpointForApp(pidString, endpoint.Id, RoleScope.All, flow);
-            var applied = new AppliedRoute(
-                rule.Id, rule.Name, session.SessionIdentifier, session.ProcessName,
-                endpoint.Id, endpoint.DisplayName,
-                DateTimeOffset.UtcNow, true, null);
-            RouteApplied?.Invoke(this, applied);
+            var pid = session.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            _policy.SetDefaultEndpointForApp(pid, match.Endpoint.Id, RoleScope.All, flow);
+            RouteApplied?.Invoke(this, new AppliedRoute(
+                match.Rule.Id, match.Rule.Name, session.SessionIdentifier, session.ProcessName,
+                match.Endpoint.Id, match.Endpoint.DisplayName,
+                DateTimeOffset.UtcNow, true, null));
             _logger.LogInformation("Applied rule {Rule} to {Process} (pid {Pid}, {Flow}) -> {Endpoint}",
-                rule.Name, session.ProcessName, session.ProcessId, flow, endpoint.DisplayName);
+                match.Rule.Name, session.ProcessName, session.ProcessId, flow, match.Endpoint.DisplayName);
         }
         catch (Exception ex)
         {
@@ -304,53 +382,14 @@ public sealed class RoutingApplier : IDisposable
         }
     }
 
-    private void ApplyDefaultDevices(IReadOnlySet<Guid> edges)
+    private void ApplyDefaultDevices(Snapshot snapshot, IReadOnlySet<Guid> edges)
     {
-        var hasOutputDefault = false;
-        var hasInputDefault = false;
-        foreach (var rule in _rules.Rules)
+        foreach (var flow in new[] { EndpointFlow.Render, EndpointFlow.Capture })
         {
-            if (!rule.Enabled)
-            {
-                continue;
-            }
-
-            // Superset gate over both branches - whether each fires is decided condition-aware
-            // inside FindDefaultDevice; this just decides whether to bother running that flow.
-            // A one-shot default action only counts on its rule's activation edge.
-            foreach (var action in rule.Actions.Concat(rule.ElseActions))
-            {
-                if (!action.IsValid || action.Kind != ActionKind.DefaultDevice)
-                {
-                    continue;
-                }
-                if (!ShouldEnact(action, rule.Id, edges))
-                {
-                    continue;
-                }
-
-                if (action.Flow == EndpointFlow.Render) hasOutputDefault = true;
-                if (action.Flow == EndpointFlow.Capture) hasInputDefault = true;
-            }
+            var endpoints = flow == EndpointFlow.Render ? snapshot.Render : snapshot.Capture;
+            ApplyDefaultRole(flow, DefaultRoleKind.Default, RoleScope.Default, endpoints, snapshot, edges);
+            ApplyDefaultRole(flow, DefaultRoleKind.Communications, RoleScope.Communications, endpoints, snapshot, edges);
         }
-
-        var sessions = _sessions.GetSessions();
-
-        if (hasOutputDefault)
-        {
-            ApplyDefaultFlow(EndpointFlow.Render, _endpoints.GetEndpoints(EndpointFlow.Render), sessions, edges);
-        }
-
-        if (hasInputDefault)
-        {
-            ApplyDefaultFlow(EndpointFlow.Capture, _endpoints.GetEndpoints(EndpointFlow.Capture), sessions, edges);
-        }
-    }
-
-    private void ApplyDefaultFlow(EndpointFlow flow, IReadOnlyList<AudioEndpoint> endpoints, IReadOnlyList<AudioSession> sessions, IReadOnlySet<Guid> edges)
-    {
-        ApplyDefaultRole(flow, DefaultRoleKind.Default, RoleScope.Default, endpoints, sessions, edges);
-        ApplyDefaultRole(flow, DefaultRoleKind.Communications, RoleScope.Communications, endpoints, sessions, edges);
     }
 
     private void ApplyDefaultRole(
@@ -358,23 +397,18 @@ public sealed class RoutingApplier : IDisposable
         DefaultRoleKind roleKind,
         RoleScope scope,
         IReadOnlyList<AudioEndpoint> endpoints,
-        IReadOnlyList<AudioSession> sessions,
+        Snapshot snapshot,
         IReadOnlySet<Guid> edges)
     {
-        var match = _matcher.FindDefaultDevice(flow, roleKind, _rules.Rules, endpoints, sessions);
-        if (match is null)
-        {
-            return;
-        }
+        var match = RuleMatcher.FindDefaultDevice(flow, roleKind, snapshot.Rules, endpoints, snapshot.Met);
 
         // A one-shot default-device action sets the default only on its activation edge; afterwards
         // the user is free to switch the default away without us snapping it back.
-        if (!ShouldEnact(match.Action, match.Rule.Id, edges))
+        if (match is null || !ShouldEnact(match.Action.Pinned, match.Rule.Id, edges))
         {
             return;
         }
 
-        // Get-before-Set: skip if the OS already has our target for this role.
         var current = roleKind == DefaultRoleKind.Default
             ? endpoints.FirstOrDefault(e => e.Flow == flow && e.IsDefault)
             : endpoints.FirstOrDefault(e => e.Flow == flow && e.IsDefaultCommunications);
@@ -384,41 +418,29 @@ public sealed class RoutingApplier : IDisposable
             return;
         }
 
-        var success = _policy.SetSystemDefaultEndpoint(match.Endpoint.Id, flow, scope);
-        if (success)
+        if (_policy.SetSystemDefaultEndpoint(match.Endpoint.Id, flow, scope))
         {
             _logger.LogInformation("Applied default-device rule -> {Flow}/{Role} = {Endpoint}", flow, roleKind, match.Endpoint.DisplayName);
         }
     }
 
-    private async void OnSessionAdded(object? sender, AudioSessionEvent e)
+    private void OnSessionAdded(object? sender, AudioSessionEvent e)
     {
-        try
+        _logger.LogInformation("Session added: {Process} (pid {Pid})", e.Session.ProcessName, e.Session.ProcessId);
+        lock (_newSessionGate)
         {
-            _logger.LogInformation("Session added: {Process} (pid {Pid})", e.Session.ProcessName, e.Session.ProcessId);
-            await ApplyAsync(e.Session).ConfigureAwait(false);
+            _newSessionPids.Add(e.Session.ProcessId);
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Auto-apply failed for new session");
-        }
+        RunRequested("Auto-apply for new session");
     }
 
     private void OnSessionRemoved(object? sender, AudioSessionRemovedEvent e)
     {
         var prefix = $"app|{e.ProcessId}|";
-        var removed = 0;
+        int removed;
         lock (_appliedGate)
         {
-            _appliedSessionKeys.RemoveWhere(k =>
-            {
-                if (k.StartsWith(prefix, StringComparison.Ordinal))
-                {
-                    removed++;
-                    return true;
-                }
-                return false;
-            });
+            removed = _appliedSessionKeys.RemoveWhere(k => k.StartsWith(prefix, StringComparison.Ordinal));
         }
 
         if (removed > 0)
@@ -431,7 +453,7 @@ public sealed class RoutingApplier : IDisposable
     {
         try
         {
-            await ApplyAllInternalAsync(force: true, skipIfBusy: false).ConfigureAwait(false);
+            await ApplyAllAsync().ConfigureAwait(false);
             _logger.LogInformation("Reapplied all rules after rule change");
         }
         catch (Exception ex)
@@ -440,79 +462,26 @@ public sealed class RoutingApplier : IDisposable
         }
     }
 
-    // A device connecting / disconnecting can flip a DevicePresent / DeviceMissing condition, so
-    // the rule stack must re-evaluate. Debounced (re-armed on each event) so a connect's burst of
-    // endpoint events - and any brief present/absent flicker - settles into a single re-apply
-    // instead of oscillating a presence-gated rule between its main and else branches.
     private void OnEndpointsChanged(object? sender, EventArgs e)
     {
         if (_cts is null || _cts.IsCancellationRequested) return;
         _endpointsChangeTimer?.Change(EndpointsChangeDebounce, Timeout.InfiniteTimeSpan);
     }
 
-    private async void OnEndpointsChangeTick(object? state)
-    {
-        if (_cts is null || _cts.IsCancellationRequested) return;
-        try
-        {
-            // skipIfBusy coalesces with any in-flight apply; the volume/mute/Wave Link passes
-            // re-resolve from scratch each run. A passive (non-forced) re-apply is enough: the edge
-            // computation detects any condition that just flipped and fires its one-shot branch.
-            await ApplyAllInternalAsync(force: false, skipIfBusy: true).ConfigureAwait(false);
-            _logger.LogInformation("Reapplied rules after endpoint topology change");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Endpoints-changed reapply failed");
-        }
-    }
+    // The Set itself raises DefaultsChanged; the Get-before-Set in ApplyDefaultRole makes that
+    // echo a no-op. A default change can also flip a "Default device is" condition.
+    private void OnDefaultsChanged(object? sender, EventArgs e) => RunRequested("Default-device-changed handler");
 
-    private async void OnDefaultsChanged(object? sender, EventArgs e)
-    {
-        try
-        {
-            // The Set itself triggers OnDefaultDeviceChanged. Use skipIfBusy so the in-flight
-            // Apply finishes without us stacking another evaluation; the Get-before-Set check
-            // in ApplyDefaultFlow short-circuits when the OS already has our target. A default
-            // change can also flip a "Default device is" condition, which the edge pass catches.
-            await ApplyAllInternalAsync(force: false, skipIfBusy: true).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Default-device-changed handler failed");
-        }
-    }
+    private void OnWaveLinkSnapshotChanged(object? sender, EventArgs e) => RunRequested("Wave Link snapshot-changed handler");
 
-    private async void OnWaveLinkSnapshotChanged(object? sender, EventArgs e)
-    {
-        // External drift (user moves a device in Wave Link, snapshot pull catches up to a
-        // restart, etc.) shouldn't wait for the 5-min timer to reconcile. skipIfBusy stops
-        // the SetMix call's own snapshot ripple from stacking re-applies on top of the
-        // in-flight one; the post-fix claim logic is idempotent so a passive re-check is cheap.
-        try
-        {
-            await ApplyAllInternalAsync(force: false, skipIfBusy: true).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Wave Link snapshot-changed handler failed");
-        }
-    }
-
-    // Windows-endpoint volume/mute changes (any active render or capture device). The WL-side
-    // equivalent rides OnWaveLinkSnapshotChanged; together they cover both transports.
     private void OnExternalVolumeChanged(object? sender, EndpointVolumeChangedEventArgs e) =>
         ScheduleVolumeReconcile();
 
     private void OnExternalMuteChanged(object? sender, EndpointMuteChangedEventArgs e) =>
         ScheduleVolumeReconcile();
 
-    // Re-assert volume/mute-lock rules after an external change, event-driven like the Devices
-    // page. Debounced through the single reconcile timer so a slider drag coalesces into one
-    // re-clamp once the user lets go. Skipped when no rule PINS volume/mute (one-shot rules don't
-    // reconcile), so machines without lock rules don't wake on every system volume keypress. Our
-    // own write is a no-op once settled (SetVolume/SetMuted skip when already at target), so this
-    // converges in one cycle.
+    // Skipped when no rule PINS volume/mute (one-shot rules don't reconcile), so machines without
+    // lock rules don't wake on every system volume keypress.
     private void ScheduleVolumeReconcile()
     {
         if (_cts is null || _cts.IsCancellationRequested) return;
@@ -525,9 +494,6 @@ public sealed class RoutingApplier : IDisposable
         foreach (var rule in _rules.Rules)
         {
             if (!rule.Enabled) continue;
-            // Either branch may carry the volume/mute action - this only gates whether the
-            // reconcile timer arms; the resolver picks the live branch when it runs. Only pinned
-            // actions reconcile, so a one-shot-only rule must not arm the timer.
             foreach (var action in rule.Actions.Concat(rule.ElseActions))
             {
                 if (action.IsValid && action.Pinned && (action.IsVolumeAction || action.IsMuteAction)) return true;
@@ -545,7 +511,11 @@ public sealed class RoutingApplier : IDisposable
             try
             {
                 // A reconcile is not an activation edge: enforce pinned volume/mute only.
-                await Task.Run(() => ApplyVolumeAndMuteRules(NoEdges)).ConfigureAwait(false);
+                var rules = _rules.Rules;
+                if (rules.Count > 0)
+                {
+                    ApplyVolumeAndMuteRules(TakeSnapshot(rules), NoEdges);
+                }
             }
             finally
             {
@@ -558,123 +528,92 @@ public sealed class RoutingApplier : IDisposable
         }
     }
 
-    private async void OnTimerTick(object? state)
+    // Per-device first-match-wins via the shared DeviceRuleResolver, the same logic the Devices
+    // page uses for its lock indicator, so enforcement and the indicator can't drift.
+    private void ApplyVolumeAndMuteRules(Snapshot snapshot, IReadOnlySet<Guid> edges)
     {
-        if (_cts is null || _cts.IsCancellationRequested)
+        foreach (var endpoint in snapshot.All)
         {
-            return;
-        }
+            if (endpoint.State != EndpointState.Active) continue;
 
-        try
-        {
-            await ApplyAllInternalAsync(force: false, skipIfBusy: true).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Periodic re-apply failed");
-        }
-    }
-
-    private void ApplyVolumeAndMuteRules(IReadOnlySet<Guid> edges)
-    {
-        // Per-device first-match-wins, symmetric with app/default-device rules. The effective
-        // volume / mute target for each endpoint comes from the shared DeviceRuleResolver - the
-        // same logic the Devices page uses to decide whether a card is locked - so enforcement
-        // here and the lock indicator there can't drift. A one-shot target is only enacted on its
-        // rule's activation edge; a pinned target is reconciled every pass.
-        var renderEndpoints = _endpoints.GetEndpoints(EndpointFlow.Render);
-        var captureEndpoints = _endpoints.GetEndpoints(EndpointFlow.Capture);
-        var allEndpoints = renderEndpoints
-            .Concat(captureEndpoints)
-            .Where(e => e.State == EndpointState.Active)
-            .ToList();
-        if (allEndpoints.Count == 0)
-        {
-            return;
-        }
-
-        var sessions = _sessions.GetSessions();
-
-        foreach (var endpoint in allEndpoints)
-        {
-            var targets = DeviceRuleResolver.Resolve(endpoint, _rules.Rules, allEndpoints, sessions, _matcher);
+            var targets = DeviceRuleResolver.Resolve(endpoint, snapshot.Rules, snapshot.Met);
 
             if (targets.Volume is { } v && ShouldEnact(v.Pinned, v.SourceRuleId, edges))
             {
-                var capturedVolume = v.Value;
-                var capturedRule = v.SourceName;
-                var capturedDevice = endpoint.DisplayName;
-                var capturedEndpoint = endpoint;
-                _ = Task.Run(async () =>
-                {
-                    try
-                    {
-                        var ok = await _writer.SetVolumeAsync(capturedEndpoint, capturedVolume).ConfigureAwait(false);
-                        if (ok)
-                        {
-                            _logger.LogInformation("Applied volume rule '{Rule}': '{Device}' -> {Volume:F2}",
-                                capturedRule, capturedDevice, capturedVolume);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogDebug(ex, "Volume rule '{Rule}' write failed for {Device}", capturedRule, capturedDevice);
-                    }
-                });
+                _ = WriteAsync(
+                    () => _writer.SetVolumeAsync(endpoint, v.Value),
+                    () => _logger.LogInformation("Applied volume rule '{Rule}': '{Device}' -> {Volume:F2}", v.SourceName, endpoint.DisplayName, v.Value),
+                    v.SourceName, endpoint.DisplayName);
             }
             if (targets.Muted is { } m && ShouldEnact(m.Pinned, m.SourceRuleId, edges))
             {
-                var capturedMute = m.Value;
-                var capturedRule = m.SourceName;
-                var capturedDevice = endpoint.DisplayName;
-                var capturedEndpoint = endpoint;
-                _ = Task.Run(async () =>
-                {
-                    try
-                    {
-                        var ok = await _writer.SetMutedAsync(capturedEndpoint, capturedMute).ConfigureAwait(false);
-                        if (ok)
-                        {
-                            _logger.LogInformation("Applied {Verb} rule '{Rule}': '{Device}'",
-                                capturedMute ? "mute" : "unmute", capturedRule, capturedDevice);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogDebug(ex, "Mute rule '{Rule}' write failed for {Device}", capturedRule, capturedDevice);
-                    }
-                });
+                _ = WriteAsync(
+                    () => _writer.SetMutedAsync(endpoint, m.Value),
+                    () => _logger.LogInformation("Applied {Verb} rule '{Rule}': '{Device}'", m.Value ? "mute" : "unmute", m.SourceName, endpoint.DisplayName),
+                    m.SourceName, endpoint.DisplayName);
             }
         }
     }
 
-    // Overload taking the resolved dimension's pinned flag + source rule directly.
-    private static bool ShouldEnact(bool pinned, Guid ruleId, IReadOnlySet<Guid> edges)
-        => pinned || edges.Contains(ruleId);
-
-    private readonly record struct WaveLinkClaim(string TargetMixId, string RuleName);
-
-    private async Task ApplyWaveLinkRulesAsync(IReadOnlySet<Guid> edges, CancellationToken ct)
+    private async Task WriteAsync(Func<Task<bool>> write, Action onWritten, string rule, string device)
     {
-        var needSnapshot = false;
-        foreach (var rule in _rules.Rules)
+        try
+        {
+            if (await Task.Run(write).ConfigureAwait(false))
+            {
+                onWritten();
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Rule '{Rule}' write failed for {Device}", rule, device);
+        }
+    }
+
+    private static bool HasEnactableWaveLinkAction(IReadOnlyList<RoutingRule> rules, IReadOnlySet<Guid> edges)
+    {
+        foreach (var rule in rules)
         {
             if (!rule.Enabled) continue;
             foreach (var action in rule.Actions.Concat(rule.ElseActions))
             {
-                if (action.IsValid && action.IsWaveLinkAction && ShouldEnact(action, rule.Id, edges))
+                if (action.IsValid && action.IsWaveLinkAction && ShouldEnact(action.Pinned, rule.Id, edges))
                 {
-                    needSnapshot = true;
-                    break;
+                    return true;
                 }
             }
-            if (needSnapshot) break;
         }
-        if (!needSnapshot)
-        {
-            return;
-        }
+        return false;
+    }
 
+    // Runs outside _applyGate: a slow or hung Wave Link must not stall the rest of routing.
+    private async Task RunWaveLinkPassAsync(WaveLinkWork? work)
+    {
+        if (work is null) return;
+        var ct = _cts?.Token ?? CancellationToken.None;
+        try
+        {
+            await _waveLinkGate.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                await ApplyWaveLinkRulesAsync(work, ct).ConfigureAwait(false);
+            }
+            finally
+            {
+                _waveLinkGate.Release();
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Wave Link pass failed");
+        }
+    }
+
+    private readonly record struct WaveLinkClaim(string TargetMixId, string RuleName);
+
+    private async Task ApplyWaveLinkRulesAsync(WaveLinkWork work, CancellationToken ct)
+    {
         WaveLinkSnapshot? snapshot;
         try
         {
@@ -688,11 +627,11 @@ public sealed class RoutingApplier : IDisposable
         }
         if (snapshot is null)
         {
-            _logger.LogDebug("Wave Link: snapshot unavailable; skipping {Count} rules", _rules.Rules.Count);
+            _logger.LogDebug("Wave Link: snapshot unavailable; skipping {Count} rules", work.Rules.Count);
             return;
         }
 
-        var claims = BuildWaveLinkClaims(snapshot, edges);
+        var claims = BuildWaveLinkClaims(snapshot, work);
 
         foreach (var output in snapshot.OutputDevices)
         {
@@ -706,14 +645,7 @@ public sealed class RoutingApplier : IDisposable
                 continue;
             }
 
-            bool ok;
-            try
-            {
-                ok = await _waveLink.SetMixForOutputAsync(output.DeviceId, output.OutputId, claim.TargetMixId, ct).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) { return; }
-
-            if (ok)
+            if (await _waveLink.SetMixForOutputAsync(output.DeviceId, output.OutputId, claim.TargetMixId, ct).ConfigureAwait(false))
             {
                 _logger.LogInformation("Applied Wave Link rule '{Rule}': '{Device}' {From} -> {To}",
                     claim.RuleName,
@@ -724,36 +656,25 @@ public sealed class RoutingApplier : IDisposable
         }
     }
 
-    private Dictionary<string, WaveLinkClaim> BuildWaveLinkClaims(WaveLinkSnapshot snapshot, IReadOnlySet<Guid> edges)
+    private static Dictionary<string, WaveLinkClaim> BuildWaveLinkClaims(WaveLinkSnapshot snapshot, WaveLinkWork work)
     {
         var claims = new Dictionary<string, WaveLinkClaim>(StringComparer.Ordinal);
         var setOwnedMixes = new HashSet<string>(StringComparer.Ordinal);
-        var renderEndpoints = _endpoints.GetEndpoints(EndpointFlow.Render);
-        var sessions = _sessions.GetSessions();
 
-        foreach (var rule in _rules.Rules)
+        foreach (var rule in work.Rules)
         {
             if (!rule.Enabled) continue;
 
-            var met = _matcher.ConditionsMet(rule, renderEndpoints, sessions);
             var ruleLabel = string.IsNullOrEmpty(rule.Name) ? rule.Id.ToString() : rule.Name;
 
-            foreach (var action in rule.ActiveActions(met))
+            foreach (var action in rule.ActiveActions(work.Met[rule.Id]))
             {
                 if (!action.IsValid || !action.IsWaveLinkAction) continue;
                 // A one-shot mix action only contributes a claim on its activation edge; otherwise
                 // the device is left wherever the user / Wave Link last put it.
-                if (!ShouldEnact(action, rule.Id, edges)) continue;
+                if (!ShouldEnact(action.Pinned, rule.Id, work.Edges)) continue;
 
-                WaveLinkMixInfo? matchedMix = null;
-                foreach (var mix in snapshot.Mixes)
-                {
-                    if (PatternMatcher.Matches(action.MixMatchMode, action.MixPattern, mix.Name))
-                    {
-                        matchedMix = mix;
-                        break;
-                    }
-                }
+                var matchedMix = snapshot.Mixes.FirstOrDefault(mix => PatternMatcher.Matches(action.MixMatchMode, action.MixPattern, mix.Name));
                 if (matchedMix is null) continue;
 
                 if (action.Membership == MixMembership.Exclusive)
@@ -764,30 +685,22 @@ public sealed class RoutingApplier : IDisposable
                 foreach (var output in snapshot.OutputDevices)
                 {
                     if (claims.ContainsKey(output.DeviceId)) continue;
-                    var deviceMatches = PatternMatcher.Matches(action.DeviceMatchMode, action.DevicePattern, output.DeviceName);
+                    if (!PatternMatcher.Matches(action.DeviceMatchMode, action.DevicePattern, output.DeviceName)) continue;
 
                     switch (action.Membership)
                     {
                         case MixMembership.Include:
                         case MixMembership.Exclusive:
-                            if (deviceMatches)
-                            {
-                                claims[output.DeviceId] = new WaveLinkClaim(matchedMix.Id, ruleLabel);
-                            }
+                            claims[output.DeviceId] = new WaveLinkClaim(matchedMix.Id, ruleLabel);
                             break;
                         case MixMembership.Exclude:
-                            if (deviceMatches)
-                            {
-                                // Pin the device regardless of current mix. If it's currently on
-                                // the mix-to-remove, target empty so the apply pass strips it.
-                                // Otherwise hold its current mix so later Include/Exclusive rules
-                                // can't re-add it - without this guard, an Exclusive rule further
-                                // down repeatedly re-adds what Exclude just stripped.
-                                var target = string.Equals(output.CurrentMixId, matchedMix.Id, StringComparison.Ordinal)
-                                    ? string.Empty
-                                    : output.CurrentMixId;
-                                claims[output.DeviceId] = new WaveLinkClaim(target, ruleLabel);
-                            }
+                            // Pin the device regardless of current mix: strip it if it's on the
+                            // mix-to-remove, otherwise hold its current mix so a later Include or
+                            // Exclusive rule can't re-add what this Exclude just stripped.
+                            var target = string.Equals(output.CurrentMixId, matchedMix.Id, StringComparison.Ordinal)
+                                ? string.Empty
+                                : output.CurrentMixId;
+                            claims[output.DeviceId] = new WaveLinkClaim(target, ruleLabel);
                             break;
                     }
                 }

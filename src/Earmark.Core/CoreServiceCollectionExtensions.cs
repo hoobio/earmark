@@ -1,5 +1,4 @@
 using Earmark.Core.Persistence;
-using Earmark.Core.Routing;
 using Earmark.Core.Services;
 using Earmark.Core.Settings;
 
@@ -15,8 +14,6 @@ public static class CoreServiceCollectionExtensions
 
         services.AddSingleton<IRuleStore>(_ => new JsonRuleStore(rulesPath));
         services.AddSingleton<IRulesService, RulesService>();
-        services.AddSingleton<IRuleMatcher, RuleMatcher>();
-        services.AddSingleton<IRuleEvaluator, RuleEvaluator>();
         services.AddSingleton(_ => new SettingsService(settingsPath));
         services.AddSingleton<DeviceDefaultsService>();
         return services;

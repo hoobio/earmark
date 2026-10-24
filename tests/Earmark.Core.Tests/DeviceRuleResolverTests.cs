@@ -9,8 +9,6 @@ namespace Earmark.Core.Tests;
 
 public class DeviceRuleResolverTests
 {
-    private readonly RuleMatcher _matcher = new();
-
     private static AudioEndpoint Endpoint(string name, EndpointFlow flow = EndpointFlow.Render) =>
         new($"id:{name}", name, "", flow, EndpointState.Active, false, false);
 
@@ -30,11 +28,8 @@ public class DeviceRuleResolverTests
             Actions = { new RuleAction { Kind = ActionKind.DeviceMute, DevicePattern = pattern, Muted = muted, Pinned = pinned } },
         };
 
-    private DeviceRuleTargets Resolve(AudioEndpoint endpoint, params RoutingRule[] rules)
-    {
-        var endpoints = new[] { endpoint };
-        return DeviceRuleResolver.Resolve(endpoint, rules, endpoints, Array.Empty<AudioSession>(), _matcher);
-    }
+    private static DeviceRuleTargets Resolve(AudioEndpoint endpoint, params RoutingRule[] rules) =>
+        DeviceRuleResolver.Resolve(endpoint, rules, RuleMatcher.EvaluateConditions(rules, new[] { endpoint }, Array.Empty<AudioSession>()));
 
     [Fact]
     public void Resolves_volume_and_mute_independently()
@@ -101,7 +96,7 @@ public class DeviceRuleResolverTests
         };
 
         // XM6 absent -> else branch -> unmuted target
-        var targets = DeviceRuleResolver.Resolve(ep, new[] { rule }, new[] { ep }, Array.Empty<AudioSession>(), _matcher);
+        var targets = Resolve(ep, rule);
         targets.Muted!.Value.Value.Should().BeFalse();
     }
 }

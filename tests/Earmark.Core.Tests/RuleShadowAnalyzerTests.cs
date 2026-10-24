@@ -9,8 +9,6 @@ namespace Earmark.Core.Tests;
 
 public class RuleShadowAnalyzerTests
 {
-    private readonly RuleMatcher _matcher = new();
-
     private static AudioEndpoint Ep(string name, EndpointFlow flow = EndpointFlow.Render) =>
         new($"id:{name}", name, "", flow, EndpointState.Active, false, false);
 
@@ -31,8 +29,8 @@ public class RuleShadowAnalyzerTests
         Actions = { new RuleAction { Kind = ActionKind.DeviceVolume, DevicePattern = device, Volume = 1f } },
     };
 
-    private HashSet<int> Shadow(RoutingRule target, IReadOnlyList<RoutingRule> all, IReadOnlyList<AudioEndpoint> eps, IReadOnlyList<AudioSession> sess) =>
-        RuleShadowAnalyzer.ShadowedActiveActions(target, _matcher.ConditionsMet(target, eps, sess), all, eps, sess, _matcher);
+    private static HashSet<int> Shadow(RoutingRule target, IReadOnlyList<RoutingRule> all, IReadOnlyList<AudioEndpoint> eps, IReadOnlyList<AudioSession> sess) =>
+        RuleShadowAnalyzer.ShadowedActiveActions(target, all, eps, sess, RuleMatcher.EvaluateConditions(all.Append(target).ToList(), eps, sess));
 
     [Fact]
     public void Later_app_rule_targeting_same_app_and_flow_is_shadowed()

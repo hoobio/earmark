@@ -1,5 +1,3 @@
-using System.Text.RegularExpressions;
-
 using Earmark.Core.Models;
 
 namespace Earmark.Core.Routing;
@@ -17,23 +15,21 @@ namespace Earmark.Core.Routing;
 public static class RuleShadowAnalyzer
 {
     /// <summary>
-    /// Indices (into <paramref name="target"/>'s active branch, selected by
-    /// <paramref name="targetConditionsMet"/>) of actions wholly superseded by earlier enabled
-    /// rules' active actions.
+    /// Indices (into <paramref name="target"/>'s active branch) of actions wholly superseded by
+    /// earlier enabled rules' active actions.
     /// </summary>
     public static HashSet<int> ShadowedActiveActions(
         RoutingRule target,
-        bool targetConditionsMet,
         IReadOnlyList<RoutingRule> allRules,
         IReadOnlyList<AudioEndpoint> endpoints,
         IReadOnlyList<AudioSession> sessions,
-        IRuleMatcher matcher)
+        IReadOnlyDictionary<Guid, bool> conditionsMet)
     {
         ArgumentNullException.ThrowIfNull(target);
         ArgumentNullException.ThrowIfNull(allRules);
         ArgumentNullException.ThrowIfNull(endpoints);
         ArgumentNullException.ThrowIfNull(sessions);
-        ArgumentNullException.ThrowIfNull(matcher);
+        ArgumentNullException.ThrowIfNull(conditionsMet);
 
         var claimed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -49,8 +45,7 @@ public static class RuleShadowAnalyzer
                 continue;
             }
 
-            var met = matcher.ConditionsMet(rule, endpoints, sessions);
-            foreach (var action in rule.ActiveActions(met))
+            foreach (var action in rule.ActiveActions(conditionsMet[rule.Id]))
             {
                 foreach (var key in ClaimKeys(action, endpoints, sessions))
                 {
@@ -60,7 +55,7 @@ public static class RuleShadowAnalyzer
         }
 
         var shadowed = new HashSet<int>();
-        var active = target.ActiveActions(targetConditionsMet);
+        var active = target.ActiveActions(conditionsMet[target.Id]);
         for (var i = 0; i < active.Count; i++)
         {
             var keys = ClaimKeys(active[i], endpoints, sessions);
