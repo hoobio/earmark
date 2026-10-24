@@ -35,6 +35,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Earmark.Desktop.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Earmark.Core\Earmark.Core.csproj" />
     <ProjectReference Include="..\Earmark.Audio\Earmark.Audio.csproj" />
   </ItemGroup>
