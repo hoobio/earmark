@@ -1,4 +1,9 @@
 <Styles
     xmlns="https://github.com/avaloniaui"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Style Selector="Border.SessionRow">
+        <Setter Property="Background" Value="{DynamicResource CardBackgroundFillColorDefaultBrush}" />
+        <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="Padding" Value="16,12" />
+    </Style>
 </Styles>
