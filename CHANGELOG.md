@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.1.2](https://github.com/hoobio/earmark/compare/v2.1.1...v2.1.2) (2026-10-24)
+
+
+### Miscellaneous Chores
+
+* **deps:** update dependency naudio.wasapi to v3 ([#97](https://github.com/hoobio/earmark/issues/97)) ([bcee4ee](https://github.com/hoobio/earmark/commit/bcee4ee2dd6a6a09399889a09e50680896d95517))
+* **deps:** update xunit-dotnet monorepo to v4 ([#95](https://github.com/hoobio/earmark/issues/95)) ([1eed13b](https://github.com/hoobio/earmark/commit/1eed13b0ee9e0815314f9e5931ccc650b25a097c))
+
 ## [2.1.1](https://github.com/hoobio/earmark/compare/v2.1.0...v2.1.1) (2026-10-24)
 
 
