@@ -58,7 +58,7 @@ jobs:
         shell: pwsh
         run: |
           foreach ($project in Get-ChildItem tests -Recurse -Filter *.csproj) {
-            dotnet test $project.FullName -c Release --no-build
+            dotnet test --project $project.FullName -c Release --no-build
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
 
