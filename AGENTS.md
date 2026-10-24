@@ -169,6 +169,14 @@ Earmark follows the Steward companion's hard-won Avalonia practice:
 - **Cross-thread UI**: engine callbacks are off the UI thread; touching a control or an `ObservableCollection` bound to one from them throws or corrupts. Use `Ui.Post`.
 - **`Microsoft.Win32.Registry`** is in the Windows TFM; adding the package triggers `NU1510`.
 - **CsWin32**: `Earmark.Audio` generates interop from `NativeMethods.txt`; add a name there instead of hand-writing a `DllImport`.
+- **ContextMenu**: FluentAvaloniaUI 3.1.0 ships no `ContextMenu` theme; `Styles/Controls.axaml` supplies one.
+- **Template precedence**: in Avalonia 12 a value set in a control template outranks a style setter without a pseudo-class. Restyle templated parts through the theme's resource keys or a selector with a pseudo-class.
+- **Resource name clashes**: FluentAvalonia defines resources with the same names as Earmark's tokens (for example `ContentDialogPadding`). Read Earmark's own tokens with `StaticResource`.
+- **DataContext**: do not set an inner `DataContext` from a `StyledProperty` changed callback. The callback can fire during `DataContext` propagation and the inner compiled bindings keep a null source (the blank `DeviceGroupView`). Rely on inheritance.
+- **Animations**: animate the control's `RenderTransform` property, not the `TranslateTransform` object. Avalonia 12 throws `InvalidCastException` on the latter.
+- **Dev launch flags**: `Earmark.exe --open=<Page> --no-activate --monitor=rightmost` opens the named page on the rightmost monitor without taking focus.
+- **Parallel agents**: each agent builds with its own `--artifacts-path` so builds do not lock each other's files.
+- **Render checks**: `PrintWindow` capture of the app window is acceptable for render checks.
 
 ## Version, About, and the update check
 
