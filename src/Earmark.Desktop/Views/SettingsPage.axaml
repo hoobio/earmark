@@ -82,9 +82,6 @@
                     <views:SettingsCard Header="Show rules" Description="Show each device card's rules section. Off hides it on every card.">
                         <ToggleSwitch IsChecked="{Binding ShowRules, Mode=TwoWay}" OnContent="{x:Null}" OffContent="{x:Null}" AutomationProperties.Name="Show rules" />
                     </views:SettingsCard>
-                </StackPanel>
-
-                <StackPanel Classes="SettingsGroup" Margin="0,12,0,0">
                     <views:SettingsCard Header="App indicators" Description="Show a chip for each app playing through a device. Drag a chip onto another card to reroute the app." HeaderGlyph="{StaticResource Glyph.Speaker}">
                         <ToggleSwitch IsChecked="{Binding ShowAppIndicators, Mode=TwoWay}" OnContent="{x:Null}" OffContent="{x:Null}" AutomationProperties.Name="App indicators" />
                     </views:SettingsCard>
@@ -103,18 +100,12 @@
                     <views:SettingsCard Header="Hidden apps" Description="{Binding HiddenAppsDescription}" IsEnabled="{Binding ShowAppIndicators}">
                         <Button Content="Manage" Click="OnManageHiddenAppsClick" />
                     </views:SettingsCard>
-                </StackPanel>
-
-                <StackPanel Classes="SettingsGroup" Margin="0,12,0,0">
                     <views:SettingsCard Header="Now playing" Description="Show a media strip on a device's card when an app playing through it shares track info with Windows. The app's chip moves into the strip." HeaderGlyph="{StaticResource Glyph.Speaker}">
                         <ToggleSwitch IsChecked="{Binding ShowNowPlaying, Mode=TwoWay}" OnContent="{x:Null}" OffContent="{x:Null}" AutomationProperties.Name="Now playing" />
                     </views:SettingsCard>
                     <views:SettingsCard Header="Fill card background" Description="Use the artwork as a dimmed background across the whole card. With several playing apps, the primary one wins." IsEnabled="{Binding ShowNowPlaying}">
                         <ToggleSwitch IsChecked="{Binding NowPlayingCardBackground, Mode=TwoWay}" OnContent="{x:Null}" OffContent="{x:Null}" AutomationProperties.Name="Fill card background" />
                     </views:SettingsCard>
-                </StackPanel>
-
-                <StackPanel Classes="SettingsGroup" Margin="0,12,0,0">
                     <views:SettingsCard Header="Peak meter" Description="The level meter behind each device's volume slider. Off shows a plain slider." HeaderGlyph="{StaticResource Glyph.Routing}">
                         <ListBox Theme="{StaticResource SegmentedStyle}" SelectedIndex="{Binding PeakMeterColourModeIndex, Mode=TwoWay}" AutomationProperties.Name="Peak meter style">
                             <ListBoxItem Content="Gradient" />
@@ -151,6 +142,9 @@
                     <views:SettingsCard Header="Peak-hold tick" Description="Show the line that marks the recent loudest peak. It turns red on clipping." IsEnabled="{Binding IsMeterEnabled}">
                         <ToggleSwitch IsChecked="{Binding PeakMeterShowHold, Mode=TwoWay}" OnContent="{x:Null}" OffContent="{x:Null}" AutomationProperties.Name="Peak-hold tick" />
                     </views:SettingsCard>
+                    <views:SettingsCard Header="Reset Devices page" Description="Restore the default device groups, order and visibility, and unhide any hidden app chips. Your rules and other settings do not change." HeaderGlyph="{StaticResource Glyph.UpdateRestore}">
+                        <Button Content="Reset" Click="OnResetDevicesClick" />
+                    </views:SettingsCard>
                 </StackPanel>
 
                 <ItemsControl ItemsSource="{Binding Overrides}" Margin="0,12,0,0">
@@ -167,12 +161,6 @@
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
-
-                <StackPanel Classes="SettingsGroup" Margin="0,12,0,0">
-                    <views:SettingsCard Header="Reset Devices page" Description="Restore the default device groups, order and visibility, and unhide any hidden app chips. Your rules and other settings do not change." HeaderGlyph="{StaticResource Glyph.UpdateRestore}">
-                        <Button Content="Reset" Click="OnResetDevicesClick" />
-                    </views:SettingsCard>
-                </StackPanel>
 
                 <TextBlock Text="System tray" Classes="Caption" Margin="0,20,0,4" />
                 <StackPanel Classes="SettingsGroup">

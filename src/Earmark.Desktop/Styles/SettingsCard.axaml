@@ -95,6 +95,7 @@
     </Style>
     <Style Selector="StackPanel.SettingsGroup > views|SettingsCard">
         <Setter Property="CornerRadius" Value="{StaticResource GroupMiddleCornerRadius}" />
+        <Setter Property="BorderThickness" Value="0" />
     </Style>
     <Style Selector="StackPanel.SettingsGroup > views|SettingsCard:nth-child(1)">
         <Setter Property="CornerRadius" Value="{StaticResource GroupTopCornerRadius}" />
