@@ -2,6 +2,39 @@
     x:Class="Earmark.Desktop.Views.DevicesPage"
     xmlns="https://github.com/avaloniaui"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    Padding="{StaticResource PageGutter}">
-    <TextBlock Classes="PageTitle" Text="Devices" />
+    xmlns:ctl="using:Earmark.Desktop.Controls"
+    xmlns:vm="using:Earmark.Desktop.ViewModels.Devices"
+    x:DataType="vm:DevicesViewModel"
+    Padding="{StaticResource PageGutter}"
+    Focusable="True">
+    <Grid RowDefinitions="Auto,*" Background="Transparent">
+        <Grid Classes="DevicesHeader" ColumnDefinitions="*,Auto">
+            <TextBlock Classes="PageTitle" Text="Devices" IsVisible="{Binding ShowHeader}" />
+            <Button x:Name="OptionsButton" Grid.Column="1" Classes="CardIcon" ToolTip.Tip="Page options" Click="OnOptionsClick">
+                <TextBlock Classes="Glyph" Text="{StaticResource Glyph.More}" />
+            </Button>
+        </Grid>
+        <ScrollViewer x:Name="Scroller" Grid.Row="1" Classes="DevicesScroller">
+            <Panel>
+                <TextBlock Classes="Body Secondary EmptyState" Text="Loading devices..." IsVisible="{Binding IsInitializing}" />
+                <TextBlock Classes="Body Secondary EmptyState" Text="No audio devices" IsVisible="{Binding ShowEmptyState}" />
+                <TextBlock Classes="Body Secondary EmptyState" Text="Nothing to show. Hidden and disconnected devices are filtered out; turn them on from the page options." IsVisible="{Binding ShowFilteredEmptyState}" />
+                <ItemsControl x:Name="BlocksHost" ItemsSource="{Binding Blocks}" Background="Transparent" DragDrop.AllowDrop="True">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <ctl:CardWrapPanel MinItemWidth="{Binding ColumnMinWidth}" HeightMode="{Binding CardHeight}" />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.DataTemplates>
+                        <DataTemplate DataType="vm:DeviceCardViewModel">
+                            <ctl:DeviceCard Card="{Binding}" />
+                        </DataTemplate>
+                        <DataTemplate DataType="vm:DeviceGroupViewModel">
+                            <ctl:DeviceGroupView Group="{Binding}" />
+                        </DataTemplate>
+                    </ItemsControl.DataTemplates>
+                </ItemsControl>
+            </Panel>
+        </ScrollViewer>
+    </Grid>
 </UserControl>

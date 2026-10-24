@@ -1,0 +1,270 @@
+<UserControl
+    x:Class="Earmark.Desktop.Controls.DeviceCard"
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ctl="using:Earmark.Desktop.Controls"
+    xmlns:vm="using:Earmark.Desktop.ViewModels.Devices"
+    x:DataType="vm:DeviceCardViewModel">
+    <Border
+        x:Name="Root"
+        x:DataType="ctl:DeviceCardContext"
+        Classes="DeviceCard"
+        Classes.Compact="{Binding Options.Compact}"
+        Classes.Fill="{Binding Options.NowPlayingFill}"
+        Classes.NoAppMeters="{Binding !Options.ShowAppMeters}"
+        Classes.Overlay="{Binding IsOverlay}"
+        Classes.DropTarget="{Binding IsDropTarget}"
+        Opacity="{Binding Card.CardOpacity}"
+        DragDrop.AllowDrop="True">
+        <Panel>
+            <Panel IsHitTestVisible="False">
+                <Panel.IsVisible>
+                    <MultiBinding Converter="{x:Static BoolConverters.And}">
+                        <Binding Path="Options.ShowNowPlaying" />
+                        <Binding Path="Options.NowPlayingFill" />
+                        <Binding Path="Card.BackgroundArt" Converter="{x:Static ObjectConverters.IsNotNull}" />
+                    </MultiBinding>
+                </Panel.IsVisible>
+                <Image Source="{Binding Card.BackgroundArt}" Stretch="UniformToFill" />
+                <Border Classes="ArtScrim" />
+            </Panel>
+            <Border Classes="MutedTint" IsVisible="{Binding Card.IsMuted}" IsHitTestVisible="False" />
+            <StackPanel Classes="CardBody">
+                <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
+                    <Button
+                        Classes="Tile"
+                        Background="{Binding Card.TileBrush}"
+                        IsEnabled="{Binding Card.IsMuteEditable}"
+                        ToolTip.Tip="{Binding Card.MuteTooltip}"
+                        Click="OnTileClick">
+                        <Panel>
+                            <TextBlock Classes="Glyph TileGlyph" Text="{Binding Card.Glyph}" Foreground="{Binding Card.GlyphBrush}" IsVisible="{Binding Card.ShowGlyph}" />
+                            <Image Classes="TileIcon" Source="{Binding Card.WaveLinkIcon}" IsVisible="{Binding Card.ShowWaveLinkIcon}" />
+                        </Panel>
+                    </Button>
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <TextBlock Classes="BodyStrong" Text="{Binding Card.NameOnly}" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Card.FullName}" />
+                            <TextBlock Classes="Glyph PinGlyph" Text="&#xEE75;" IsVisible="{Binding Card.IsQuickPinned}" ToolTip.Tip="Pinned to Quick Controls" />
+                        </StackPanel>
+                        <TextBlock Classes="Caption Tertiary" Text="{Binding Card.Subtext}" IsVisible="{Binding Card.HasSubtext}" TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+                    <Button
+                        Grid.Column="2"
+                        Classes="CardIcon"
+                        VerticalAlignment="Top"
+                        IsVisible="{Binding Card.IsBluetooth}"
+                        IsEnabled="{Binding !Card.IsBluetoothBusy}"
+                        ToolTip.Tip="{Binding Card.BluetoothTooltip}"
+                        Click="OnBluetoothClick">
+                        <TextBlock Classes="Glyph" Text="{Binding Card.BluetoothGlyph}" />
+                    </Button>
+                </Grid>
+
+                <WrapPanel Classes="Badges" IsVisible="{Binding Options.ShowBadges}">
+                    <TextBlock Classes="Caption Secondary FlowLabel" Text="{Binding Card.FlowLabel}" IsVisible="{Binding Card.ShowFlowLabel}" />
+                    <Border Classes="Pill" IsVisible="{Binding Card.IsDefault}">
+                        <TextBlock Classes="Caption" Text="{Binding Card.DefaultPillText}" />
+                    </Border>
+                    <Border Classes="Pill" IsVisible="{Binding Card.IsDefaultCommunications}">
+                        <TextBlock Classes="Caption" Text="{Binding Card.CommunicationsPillText}" />
+                    </Border>
+                    <Border Classes="Pill" IsVisible="{Binding Card.IsDisconnected}" ToolTip.Tip="This device isn't connected right now. Its settings are remembered and it reactivates when it reconnects.">
+                        <TextBlock Classes="Caption Secondary" Text="Disconnected" />
+                    </Border>
+                </WrapPanel>
+
+                <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+                    <Grid.IsVisible>
+                        <MultiBinding Converter="{x:Static BoolConverters.Or}">
+                            <Binding Path="Options.ShowMeter" />
+                            <Binding Path="Card.ShowVolumeControls" />
+                        </MultiBinding>
+                    </Grid.IsVisible>
+                    <Panel Classes="VolumeArea" Opacity="{Binding Card.VolumeAreaOpacity}" ToolTip.Tip="{Binding Card.MeterTooltip}">
+                        <ctl:PeakMeter
+                            x:Name="Meter"
+                            Classes="Device"
+                            Source="{Binding Card}"
+                            Options="{Binding Options}"
+                            Volume="{Binding Card.Volume}"
+                            IsVisible="{Binding Options.ShowMeter}" />
+                        <Slider
+                            x:Name="VolumeSlider"
+                            Classes="Volume"
+                            Classes.OverMeter="{Binding Options.ShowMeter}"
+                            Minimum="0"
+                            Maximum="100"
+                            SmallChange="1"
+                            LargeChange="5"
+                            Value="{Binding Card.Volume}"
+                            IsEnabled="{Binding Card.IsVolumeEditable}"
+                            IsVisible="{Binding Card.ShowVolumeControls}" />
+                        <Border Background="Transparent" IsVisible="{Binding Card.IsVolumeLocked}" ToolTip.Tip="{Binding Card.VolumeLockedTooltip}" />
+                    </Panel>
+                    <TextBlock Grid.Column="1" Classes="Caption Secondary VolumeText" Text="{Binding Card.VolumeText}" IsVisible="{Binding Card.ShowVolumeControls}" />
+                    <TextBlock Grid.Column="2" Classes="Glyph LockGlyph" Text="&#xEBAC;" IsVisible="{Binding Card.ShowVolumeLockIcon}" ToolTip.Tip="{Binding Card.VolumeLockedTooltip}" />
+                </Grid>
+
+                <ItemsControl Classes="NowPlaying" ItemsSource="{Binding Card.NowPlaying}">
+                    <ItemsControl.IsVisible>
+                        <MultiBinding Converter="{x:Static BoolConverters.And}">
+                            <Binding Path="Options.ShowNowPlaying" />
+                            <Binding Path="Card.HasNowPlaying" />
+                        </MultiBinding>
+                    </ItemsControl.IsVisible>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:NowPlayingViewModel">
+                            <Panel Classes="Strip">
+                                <Panel Classes="StripArt" IsHitTestVisible="False">
+                                    <Image Source="{Binding Artwork}" Stretch="UniformToFill" />
+                                    <Border Classes="ArtScrim" />
+                                </Panel>
+                                <Grid Classes="StripBody" ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto,Auto">
+                                    <StackPanel Classes="StripApp" Orientation="Horizontal" Spacing="6">
+                                        <Panel Width="16" Height="16">
+                                            <Image Source="{Binding Chip.Icon}" IsVisible="{Binding Chip.HasIcon}" />
+                                            <TextBlock Classes="Glyph Small" Text="{Binding Chip.FallbackGlyph}" IsVisible="{Binding !Chip.HasIcon}" />
+                                        </Panel>
+                                        <TextBlock Classes="Caption Secondary" Text="{Binding Chip.Label}" TextTrimming="CharacterEllipsis" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Row="1" Classes="StripText">
+                                        <TextBlock Classes="BodyStrong" Text="{Binding Title}" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Title}" />
+                                        <TextBlock Classes="Caption Secondary" Text="{Binding Artist}" IsVisible="{Binding HasArtist}" TextTrimming="CharacterEllipsis" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="1" Grid.RowSpan="2" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                                        <Button Classes="Transport" IsEnabled="{Binding CanPrevious}" ToolTip.Tip="Previous" Click="OnPreviousClick">
+                                            <TextBlock Classes="Glyph" Text="&#xEED6;" />
+                                        </Button>
+                                        <Button Classes="Transport Play" IsEnabled="{Binding CanPlayPause}" ToolTip.Tip="{Binding PlayPauseTooltip}" Click="OnPlayPauseClick">
+                                            <TextBlock Classes="Glyph" Text="{Binding PlayPauseGlyph}" />
+                                        </Button>
+                                        <Button Classes="Transport" IsEnabled="{Binding CanNext}" ToolTip.Tip="Next" Click="OnNextClick">
+                                            <TextBlock Classes="Glyph" Text="&#xECAB;" />
+                                        </Button>
+                                    </StackPanel>
+                                    <Slider
+                                        Grid.Row="2"
+                                        Grid.ColumnSpan="2"
+                                        Classes="Volume Seek"
+                                        Minimum="0"
+                                        Maximum="{Binding DurationSeconds}"
+                                        Value="{Binding PositionSeconds}"
+                                        IsVisible="{Binding HasProgress}"
+                                        ToolTip.Tip="{Binding PositionText}"
+                                        Tag="{Binding}" />
+                                    <StackPanel Grid.Row="2" Classes="Live" Orientation="Horizontal" Spacing="6" IsVisible="{Binding IsLive}">
+                                        <Ellipse Width="8" Height="8" Fill="{DynamicResource SystemFillColorCriticalBrush}" />
+                                        <TextBlock Classes="Caption LiveText" Text="LIVE" />
+                                    </StackPanel>
+                                </Grid>
+                            </Panel>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <Border Classes="Divider">
+                    <Border.IsVisible>
+                        <MultiBinding Converter="{x:Static BoolConverters.And}">
+                            <Binding Path="Options.ShowDividers" />
+                            <Binding Path="Options.ShowAppIndicators" />
+                            <Binding Path="Card.HasRowApps" />
+                        </MultiBinding>
+                    </Border.IsVisible>
+                </Border>
+                <ItemsControl Classes="Apps" ItemsSource="{Binding Card.Apps}">
+                    <ItemsControl.IsVisible>
+                        <MultiBinding Converter="{x:Static BoolConverters.And}">
+                            <Binding Path="Options.ShowAppIndicators" />
+                            <Binding Path="Card.HasRowApps" />
+                        </MultiBinding>
+                    </ItemsControl.IsVisible>
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <WrapPanel ItemSpacing="12" LineSpacing="8" />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:AppChipViewModel">
+                            <Border Classes="Chip" IsVisible="{Binding IsInRow}" ToolTip.Tip="{Binding Tooltip}" Opacity="{Binding Opacity}" Tag="{Binding}">
+                                <Grid RowDefinitions="32,Auto">
+                                    <Image Source="{Binding Icon}" IsVisible="{Binding HasIcon}" Width="28" Height="28" />
+                                    <TextBlock Classes="Glyph ChipGlyph" Text="{Binding FallbackGlyph}" IsVisible="{Binding !HasIcon}" />
+                                    <ctl:PeakMeter Grid.Row="1" Classes="Chip" IsChip="True" Source="{Binding}" />
+                                    <Border Classes="Badge" HorizontalAlignment="Right" VerticalAlignment="Top" IsVisible="{Binding ShowLockBadge}" ToolTip.Tip="{Binding LockTooltip}">
+                                        <TextBlock Classes="Glyph" Text="&#xEBAC;" />
+                                    </Border>
+                                    <Border Classes="Badge" HorizontalAlignment="Left" VerticalAlignment="Top" IsVisible="{Binding IsClosed}" ToolTip.Tip="App closed - no longer running">
+                                        <TextBlock Classes="Glyph" Text="&#xE6D3;" />
+                                    </Border>
+                                    <Border Classes="Badge Elevated" HorizontalAlignment="Right" VerticalAlignment="Bottom" IsVisible="{Binding IsElevated}" ToolTip.Tip="Running as administrator (elevated)">
+                                        <TextBlock Classes="Glyph" Text="&#xF039;" />
+                                    </Border>
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <Border Classes="Divider">
+                    <Border.IsVisible>
+                        <MultiBinding Converter="{x:Static BoolConverters.And}">
+                            <Binding Path="Options.ShowDividers" />
+                            <Binding Path="Options.ShowRules" />
+                        </MultiBinding>
+                    </Border.IsVisible>
+                </Border>
+                <StackPanel Classes="Rules">
+                    <StackPanel.IsVisible>
+                        <MultiBinding Converter="{x:Static BoolConverters.And}">
+                            <Binding Path="Options.ShowRules" />
+                            <Binding Path="Card.HasRules" />
+                        </MultiBinding>
+                    </StackPanel.IsVisible>
+                    <Grid ColumnDefinitions="*,Auto">
+                        <Button Classes="RuleChip" Tag="{Binding Card.FirstRule}" Opacity="{Binding Card.FirstRule.Opacity, FallbackValue=1}" ToolTip.Tip="Open in Rules" Click="OnRuleClick">
+                            <StackPanel Spacing="2">
+                                <TextBlock Classes="BodyStrong" Text="{Binding Card.FirstRule.Name, FallbackValue=''}" TextTrimming="CharacterEllipsis" />
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <TextBlock Classes="Caption Secondary" Text="{Binding Card.FirstRule.StatusMessage, FallbackValue=''}" />
+                                    <TextBlock Classes="Caption Tertiary" Text="{Binding Card.FirstRule.MatchSummary, FallbackValue=''}" />
+                                </StackPanel>
+                            </StackPanel>
+                        </Button>
+                        <ToggleButton
+                            Grid.Column="1"
+                            Classes="RuleExpander"
+                            IsChecked="{Binding Card.IsRulesExpanded}"
+                            IsVisible="{Binding Card.HasMultipleRules}"
+                            ToolTip.Tip="{Binding Card.MoreRulesLabel}">
+                            <TextBlock Classes="Glyph" Text="&#xE488;" />
+                        </ToggleButton>
+                    </Grid>
+                    <ItemsControl ItemsSource="{Binding Card.AdditionalRules}" IsVisible="{Binding Card.IsRulesExpanded}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:RuleSummary">
+                                <Button Classes="RuleChip" Tag="{Binding}" Opacity="{Binding Opacity}" ToolTip.Tip="Open in Rules" Click="OnRuleClick">
+                                    <StackPanel Spacing="2">
+                                        <TextBlock Classes="BodyStrong" Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                                        <StackPanel Orientation="Horizontal" Spacing="6">
+                                            <TextBlock Classes="Caption Secondary" Text="{Binding StatusMessage}" />
+                                            <TextBlock Classes="Caption Tertiary" Text="{Binding MatchSummary}" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Button>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+                <TextBlock Classes="Caption Tertiary" Text="No rules target this device.">
+                    <TextBlock.IsVisible>
+                        <MultiBinding Converter="{x:Static BoolConverters.And}">
+                            <Binding Path="Options.ShowRules" />
+                            <Binding Path="Card.HasNoRules" />
+                        </MultiBinding>
+                    </TextBlock.IsVisible>
+                </TextBlock>
+            </StackPanel>
+        </Panel>
+    </Border>
+</UserControl>

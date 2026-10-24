@@ -1,0 +1,26 @@
+<UserControl
+    x:Class="Earmark.Desktop.Controls.DeviceGroupView"
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ctl="using:Earmark.Desktop.Controls"
+    xmlns:vm="using:Earmark.Desktop.ViewModels.Devices"
+    x:DataType="vm:DeviceGroupViewModel">
+    <StackPanel x:Name="Root" Classes="DeviceGroup" Spacing="8">
+        <Panel x:Name="Header" Classes="GroupHeader" Background="Transparent" DragDrop.AllowDrop="True">
+            <TextBlock Classes="BodyStrong GroupTitle" Text="{Binding Title}" IsVisible="{Binding IsNotEditing}" ToolTip.Tip="Double-click to rename" DoubleTapped="OnTitleDoubleTapped" />
+            <TextBox x:Name="TitleEditor" Classes="GroupTitleEditor" Text="{Binding Title, Mode=OneWay}" IsVisible="{Binding IsEditing}" KeyDown="OnTitleKeyDown" LostFocus="OnTitleLostFocus" />
+        </Panel>
+        <ItemsControl ItemsSource="{Binding Members}">
+            <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                    <ctl:CardWrapPanel MinItemWidth="{Binding Owner.ColumnMinWidth}" HeightMode="{Binding Owner.CardHeight}" />
+                </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:DeviceCardViewModel">
+                    <ctl:DeviceCard Card="{Binding}" />
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
+        </ItemsControl>
+    </StackPanel>
+</UserControl>

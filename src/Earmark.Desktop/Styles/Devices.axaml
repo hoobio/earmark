@@ -1,4 +1,343 @@
 <Styles
     xmlns="https://github.com/avaloniaui"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ctl="using:Earmark.Desktop.Controls">
+    <Styles.Resources>
+        <ControlTheme x:Key="SliderFillButton" TargetType="RepeatButton">
+            <Setter Property="Focusable" Value="False" />
+            <Setter Property="Template">
+                <ControlTemplate>
+                    <Border Background="Transparent">
+                        <Border Name="Fill" Height="4" CornerRadius="2" VerticalAlignment="Center" Background="{TemplateBinding Background}" />
+                    </Border>
+                </ControlTemplate>
+            </Setter>
+        </ControlTheme>
+        <ControlTheme x:Key="VolumeSliderTheme" TargetType="Slider">
+            <Setter Property="MinHeight" Value="24" />
+            <Setter Property="Background" Value="#FF343B4C" />
+            <Setter Property="Foreground" Value="#FF409FFF" />
+            <Setter Property="Template">
+                <ControlTemplate>
+                    <Grid Name="grid" Background="Transparent">
+                        <Border Name="TrackBackground" Height="4" CornerRadius="2" VerticalAlignment="Center" Background="{TemplateBinding Background}" Margin="7,0" />
+                        <Track
+                            Name="PART_Track"
+                            Orientation="Horizontal"
+                            Minimum="{TemplateBinding Minimum}"
+                            Maximum="{TemplateBinding Maximum}"
+                            Value="{TemplateBinding Value, Mode=TwoWay}"
+                            IsDirectionReversed="{TemplateBinding IsDirectionReversed}">
+                            <Track.DecreaseButton>
+                                <RepeatButton Name="PART_DecreaseButton" Theme="{StaticResource SliderFillButton}" Background="{TemplateBinding Foreground}" />
+                            </Track.DecreaseButton>
+                            <Track.IncreaseButton>
+                                <RepeatButton Name="PART_IncreaseButton" Theme="{StaticResource SliderFillButton}" Background="Transparent" />
+                            </Track.IncreaseButton>
+                            <Thumb Name="thumb" Width="14" Height="14">
+                                <Thumb.Template>
+                                    <ControlTemplate>
+                                        <Border Name="ThumbBody" CornerRadius="4" Background="#FF73D0FF" />
+                                    </ControlTemplate>
+                                </Thumb.Template>
+                            </Thumb>
+                        </Track>
+                    </Grid>
+                </ControlTemplate>
+            </Setter>
+            <Style Selector="^:disabled /template/ Border#ThumbBody">
+                <Setter Property="Background" Value="#FF4E5768" />
+            </Style>
+            <Style Selector="^:disabled /template/ RepeatButton#PART_DecreaseButton">
+                <Setter Property="Background" Value="#FF4E5768" />
+            </Style>
+            <Style Selector="^:pointerover /template/ Border#ThumbBody">
+                <Setter Property="Background" Value="#FFA6E1FF" />
+            </Style>
+        </ControlTheme>
+    </Styles.Resources>
+
+    <Style Selector="Slider.Volume">
+        <Setter Property="Theme" Value="{StaticResource VolumeSliderTheme}" />
+    </Style>
+    <Style Selector="Slider.Volume.OverMeter">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Foreground" Value="Transparent" />
+    </Style>
+    <Style Selector="Slider.Seek">
+        <Setter Property="MinHeight" Value="18" />
+    </Style>
+
+    <Style Selector="Border.DeviceCard">
+        <Setter Property="Background" Value="{DynamicResource CardBackgroundFillColorDefaultBrush}" />
+        <Setter Property="CornerRadius" Value="{DynamicResource OverlayCornerRadius}" />
+        <Setter Property="ClipToBounds" Value="True" />
+        <Setter Property="BorderThickness" Value="2" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+    </Style>
+    <Style Selector="Border.DeviceCard.DropTarget">
+        <Setter Property="BorderBrush" Value="#FF409FFF" />
+    </Style>
+    <Style Selector="Border.DeviceCard StackPanel.CardBody">
+        <Setter Property="Margin" Value="14" />
+        <Setter Property="Spacing" Value="12" />
+    </Style>
+    <Style Selector="Border.DeviceCard.Compact StackPanel.CardBody">
+        <Setter Property="Margin" Value="8" />
+        <Setter Property="Spacing" Value="8" />
+    </Style>
+    <Style Selector="Border.DeviceCard Border.MutedTint">
+        <Setter Property="Background" Value="{DynamicResource CriticalTintBrush}" />
+    </Style>
+    <Style Selector="Border.DeviceCard Border.ArtScrim">
+        <Setter Property="Background" Value="#C8232834" />
+    </Style>
+
+    <Style Selector="Border.DeviceCard Button.Tile">
+        <Setter Property="Width" Value="56" />
+        <Setter Property="Height" Value="56" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="CornerRadius" Value="{DynamicResource OverlayCornerRadius}" />
+        <Setter Property="HorizontalContentAlignment" Value="Center" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Border.DeviceCard.Compact Button.Tile">
+        <Setter Property="Width" Value="40" />
+        <Setter Property="Height" Value="40" />
+    </Style>
+    <Style Selector="Border.DeviceCard TextBlock.TileGlyph">
+        <Setter Property="FontSize" Value="28" />
+    </Style>
+    <Style Selector="Border.DeviceCard.Compact TextBlock.TileGlyph">
+        <Setter Property="FontSize" Value="22" />
+    </Style>
+    <Style Selector="Border.DeviceCard Image.TileIcon">
+        <Setter Property="Width" Value="40" />
+        <Setter Property="Height" Value="40" />
+    </Style>
+    <Style Selector="Border.DeviceCard.Compact Image.TileIcon">
+        <Setter Property="Width" Value="28" />
+        <Setter Property="Height" Value="28" />
+    </Style>
+    <Style Selector="TextBlock.PinGlyph">
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="Foreground" Value="#FF73D0FF" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="TextBlock.LockGlyph">
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorTertiaryBrush}" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="TextBlock.Secondary">
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+    </Style>
+    <Style Selector="TextBlock.Tertiary">
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorTertiaryBrush}" />
+    </Style>
+    <Style Selector="TextBlock.VolumeText">
+        <Setter Property="MinWidth" Value="40" />
+        <Setter Property="TextAlignment" Value="Right" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <Style Selector="WrapPanel.Badges">
+        <Setter Property="ItemSpacing" Value="6" />
+        <Setter Property="LineSpacing" Value="4" />
+    </Style>
+    <Style Selector="WrapPanel.Badges TextBlock.FlowLabel">
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Border.Pill">
+        <Setter Property="Background" Value="{DynamicResource ChipBrush}" />
+        <Setter Property="CornerRadius" Value="{DynamicResource ControlCornerRadius}" />
+        <Setter Property="Padding" Value="8,2" />
+    </Style>
+
+    <Style Selector="Panel.VolumeArea">
+        <Setter Property="Height" Value="28" />
+    </Style>
+    <Style Selector="Border.DeviceCard.Compact Panel.VolumeArea">
+        <Setter Property="Height" Value="24" />
+    </Style>
+    <Style Selector="ctl|PeakMeter.Device">
+        <Setter Property="Height" Value="20" />
+        <Setter Property="Margin" Value="0,0,0,0" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Border.DeviceCard.Compact ctl|PeakMeter.Device">
+        <Setter Property="Height" Value="14" />
+    </Style>
+    <Style Selector="ctl|PeakMeter.Chip">
+        <Setter Property="Height" Value="3" />
+        <Setter Property="Margin" Value="0,2,0,0" />
+    </Style>
+    <Style Selector="Border.DeviceCard.NoAppMeters ctl|PeakMeter.Chip">
+        <Setter Property="IsVisible" Value="False" />
+    </Style>
+
+    <Style Selector="Border.Divider">
+        <Setter Property="Height" Value="1" />
+        <Setter Property="Background" Value="{DynamicResource RowHairlineBrush}" />
+        <Setter Property="Margin" Value="-14,0" />
+    </Style>
+    <Style Selector="Border.DeviceCard.Compact Border.Divider">
+        <Setter Property="Margin" Value="-8,0" />
+    </Style>
+
+    <Style Selector="Border.Chip">
+        <Setter Property="Width" Value="32" />
+        <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="TextBlock.ChipGlyph">
+        <Setter Property="FontSize" Value="24" />
+        <Setter Property="HorizontalAlignment" Value="Center" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorTertiaryBrush}" />
+    </Style>
+    <Style Selector="Border.Badge">
+        <Setter Property="Width" Value="14" />
+        <Setter Property="Height" Value="14" />
+        <Setter Property="CornerRadius" Value="7" />
+        <Setter Property="Margin" Value="-3" />
+        <Setter Property="Background" Value="{DynamicResource SolidBackgroundFillColorTertiaryBrush}" />
+    </Style>
+    <Style Selector="Border.Badge TextBlock.Glyph">
+        <Setter Property="FontSize" Value="9" />
+        <Setter Property="HorizontalAlignment" Value="Center" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Border.Badge.Elevated TextBlock.Glyph">
+        <Setter Property="Foreground" Value="{DynamicResource SystemFillColorCautionBrush}" />
+    </Style>
+
+    <Style Selector="Panel.Strip">
+        <Setter Property="Margin" Value="-14,0" />
+    </Style>
+    <Style Selector="Border.DeviceCard.Compact Panel.Strip">
+        <Setter Property="Margin" Value="-8,0" />
+    </Style>
+    <Style Selector="Border.DeviceCard.Fill Panel.StripArt">
+        <Setter Property="IsVisible" Value="False" />
+    </Style>
+    <Style Selector="Grid.StripBody">
+        <Setter Property="Margin" Value="14,8,14,4" />
+        <Setter Property="ColumnSpacing" Value="10" />
+        <Setter Property="RowSpacing" Value="4" />
+    </Style>
+    <Style Selector="Border.DeviceCard.Compact Grid.StripBody">
+        <Setter Property="Margin" Value="8,4,8,2" />
+    </Style>
+    <Style Selector="Border.DeviceCard.Compact StackPanel.StripApp">
+        <Setter Property="IsVisible" Value="False" />
+    </Style>
+    <Style Selector="TextBlock.LiveText">
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Foreground" Value="{DynamicResource SystemFillColorCriticalBrush}" />
+    </Style>
+    <Style Selector="Button.Transport">
+        <Setter Property="Theme" Value="{StaticResource SubtleButtonStyle}" />
+        <Setter Property="Width" Value="32" />
+        <Setter Property="Height" Value="32" />
+        <Setter Property="MinWidth" Value="0" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="CornerRadius" Value="16" />
+        <Setter Property="HorizontalContentAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Button.Transport.Play">
+        <Setter Property="Theme" Value="{StaticResource AccentButtonStyle}" />
+        <Setter Property="Width" Value="36" />
+        <Setter Property="Height" Value="36" />
+        <Setter Property="CornerRadius" Value="18" />
+    </Style>
+    <Style Selector="Border.DeviceCard.Compact Button.Transport">
+        <Setter Property="Width" Value="28" />
+        <Setter Property="Height" Value="28" />
+        <Setter Property="CornerRadius" Value="14" />
+    </Style>
+    <Style Selector="Border.DeviceCard.Compact Button.Transport.Play">
+        <Setter Property="Width" Value="30" />
+        <Setter Property="Height" Value="30" />
+        <Setter Property="CornerRadius" Value="15" />
+    </Style>
+
+    <Style Selector="StackPanel.Rules">
+        <Setter Property="Spacing" Value="4" />
+    </Style>
+    <Style Selector="Button.RuleChip">
+        <Setter Property="Theme" Value="{StaticResource SubtleButtonStyle}" />
+        <Setter Property="HorizontalAlignment" Value="Stretch" />
+        <Setter Property="HorizontalContentAlignment" Value="Left" />
+        <Setter Property="Background" Value="{DynamicResource ChipBrush}" />
+        <Setter Property="Padding" Value="12,8" />
+    </Style>
+    <Style Selector="Border.DeviceCard.Compact Button.RuleChip">
+        <Setter Property="Padding" Value="8,4" />
+    </Style>
+    <Style Selector="ToggleButton.RuleExpander">
+        <Setter Property="Margin" Value="4,0,0,0" />
+        <Setter Property="VerticalAlignment" Value="Stretch" />
+        <Setter Property="MinWidth" Value="32" />
+    </Style>
+    <Style Selector="ToggleButton.RuleExpander:checked TextBlock.Glyph">
+        <Setter Property="RenderTransform" Value="rotate(180deg)" />
+    </Style>
+
+    <Style Selector="Button.CardIcon">
+        <Setter Property="Theme" Value="{StaticResource SubtleButtonStyle}" />
+        <Setter Property="Width" Value="32" />
+        <Setter Property="Height" Value="32" />
+        <Setter Property="MinWidth" Value="0" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="HorizontalContentAlignment" Value="Center" />
+    </Style>
+
+    <Style Selector="StackPanel.DeviceGroup">
+        <Setter Property="Margin" Value="0,4,0,0" />
+    </Style>
+    <Style Selector="TextBlock.GroupTitle">
+        <Setter Property="Margin" Value="2,0,0,0" />
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+    </Style>
+    <Style Selector="TextBox.GroupTitleEditor">
+        <Setter Property="MaxWidth" Value="320" />
+        <Setter Property="HorizontalAlignment" Value="Left" />
+    </Style>
+    <Style Selector="StackPanel.QuickBlock">
+        <Setter Property="Spacing" Value="8" />
+    </Style>
+
+    <Style Selector="Grid.DevicesHeader">
+        <Setter Property="Margin" Value="0,0,0,12" />
+    </Style>
+    <Style Selector="TextBlock.EmptyState">
+        <Setter Property="Margin" Value="0,24" />
+        <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+
+    <Style Selector="MenuItem.Critical">
+        <Setter Property="Foreground" Value="{DynamicResource SystemFillColorCriticalBrush}" />
+    </Style>
+
+    <Style Selector="ToggleButton.GlyphPick">
+        <Setter Property="Width" Value="40" />
+        <Setter Property="Height" Value="40" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="HorizontalContentAlignment" Value="Center" />
+        <Setter Property="FontSize" Value="20" />
+    </Style>
+    <Style Selector="ToggleButton.Swatch">
+        <Setter Property="Width" Value="28" />
+        <Setter Property="Height" Value="28" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="HorizontalContentAlignment" Value="Center" />
+        <Setter Property="BorderThickness" Value="2" />
+        <Setter Property="BorderBrush" Value="Transparent" />
+    </Style>
+    <Style Selector="ToggleButton.Swatch:checked">
+        <Setter Property="BorderBrush" Value="#FFCBCCC6" />
+    </Style>
+    <Style Selector="Grid.OverrideRow">
+        <Setter Property="Margin" Value="0,4" />
+    </Style>
 </Styles>
