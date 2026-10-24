@@ -51,3 +51,5 @@ do {
 } while ($attempt -lt 3)
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed (exit $LASTEXITCODE)" }
 if (-not (Test-Path -LiteralPath (Join-Path $OutputDirectory 'Earmark.exe'))) { throw 'The publish produced no Earmark.exe' }
+# Skia and HarfBuzz ship 100 MB of native symbols that no crash report can use; Earmark's own PDBs stay for stack traces.
+Get-ChildItem -LiteralPath $OutputDirectory -Filter 'lib*.pdb' | Remove-Item
