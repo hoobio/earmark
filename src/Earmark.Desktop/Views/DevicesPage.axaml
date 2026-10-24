@@ -14,7 +14,7 @@
                 <TextBlock Classes="Glyph" Text="{StaticResource Glyph.More}" />
             </Button>
         </Grid>
-        <ScrollViewer x:Name="Scroller" Grid.Row="1" Classes="DevicesScroller">
+        <ScrollViewer x:Name="Scroller" Grid.Row="1" Classes="DevicesScroller" ctl:AutoScroll.IsEnabled="True">
             <Panel>
                 <TextBlock Classes="Body Secondary EmptyState" Text="Loading devices..." IsVisible="{Binding IsInitializing}" />
                 <TextBlock Classes="Body Secondary EmptyState" Text="No audio devices" IsVisible="{Binding ShowEmptyState}" />

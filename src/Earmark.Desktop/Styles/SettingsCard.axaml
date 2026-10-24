@@ -92,30 +92,31 @@
 
     <Style Selector="StackPanel.SettingsGroup">
         <Setter Property="Spacing" Value="1" />
+        <Setter Property="views:GroupEdges.IsEnabled" Value="True" />
     </Style>
     <Style Selector="StackPanel.SettingsGroup > views|SettingsCard">
         <Setter Property="CornerRadius" Value="{StaticResource GroupMiddleCornerRadius}" />
         <Setter Property="BorderThickness" Value="0" />
     </Style>
-    <Style Selector="StackPanel.SettingsGroup > views|SettingsCard:nth-child(1)">
+    <Style Selector="StackPanel.SettingsGroup > views|SettingsCard.FirstVisible">
         <Setter Property="CornerRadius" Value="{StaticResource GroupTopCornerRadius}" />
     </Style>
-    <Style Selector="StackPanel.SettingsGroup > views|SettingsCard:nth-last-child(1)">
+    <Style Selector="StackPanel.SettingsGroup > views|SettingsCard.LastVisible">
         <Setter Property="CornerRadius" Value="{StaticResource GroupBottomCornerRadius}" />
     </Style>
-    <Style Selector="StackPanel.SettingsGroup > views|SettingsCard:nth-child(1):nth-last-child(1)">
+    <Style Selector="StackPanel.SettingsGroup > views|SettingsCard.FirstVisible.LastVisible">
         <Setter Property="CornerRadius" Value="{StaticResource OverlayCornerRadius}" />
     </Style>
     <Style Selector="StackPanel.SettingsGroup > ContentPresenter > Border">
         <Setter Property="CornerRadius" Value="{StaticResource GroupMiddleCornerRadius}" />
     </Style>
-    <Style Selector="StackPanel.SettingsGroup > ContentPresenter:nth-child(1) > Border">
+    <Style Selector="StackPanel.SettingsGroup > ContentPresenter.FirstVisible > Border">
         <Setter Property="CornerRadius" Value="{StaticResource GroupTopCornerRadius}" />
     </Style>
-    <Style Selector="StackPanel.SettingsGroup > ContentPresenter:nth-last-child(1) > Border">
+    <Style Selector="StackPanel.SettingsGroup > ContentPresenter.LastVisible > Border">
         <Setter Property="CornerRadius" Value="{StaticResource GroupBottomCornerRadius}" />
     </Style>
-    <Style Selector="StackPanel.SettingsGroup > ContentPresenter:nth-child(1):nth-last-child(1) > Border">
+    <Style Selector="StackPanel.SettingsGroup > ContentPresenter.FirstVisible.LastVisible > Border">
         <Setter Property="CornerRadius" Value="{StaticResource OverlayCornerRadius}" />
     </Style>
 </Styles>

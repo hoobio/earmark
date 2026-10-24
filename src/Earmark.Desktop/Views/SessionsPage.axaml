@@ -3,6 +3,7 @@
     xmlns="https://github.com/avaloniaui"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:vm="using:Earmark.Desktop.ViewModels"
+    xmlns:ctl="using:Earmark.Desktop.Controls"
     x:DataType="vm:SessionsViewModel"
     Padding="{StaticResource PageGutter}">
     <UserControl.Resources>
@@ -58,7 +59,7 @@
         </Grid>
 
         <TextBlock Grid.Row="1" Classes="Caption" IsVisible="{Binding IsEmpty}" Text="No apps are using audio. Open an app that plays or records sound and it will show up here." Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
-        <ScrollViewer Grid.Row="1" IsVisible="{Binding !IsEmpty}">
+        <ScrollViewer Grid.Row="1" IsVisible="{Binding !IsEmpty}" ctl:AutoScroll.IsEnabled="True">
             <ItemsControl ItemsSource="{Binding Apps}" ItemTemplate="{StaticResource AppCardTemplate}">
                 <ItemsControl.ItemsPanel>
                     <ItemsPanelTemplate>

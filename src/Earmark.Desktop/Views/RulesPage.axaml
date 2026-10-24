@@ -4,6 +4,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:vm="using:Earmark.Desktop.ViewModels.Rules"
     xmlns:views="using:Earmark.Desktop.Views"
+    xmlns:ctl="using:Earmark.Desktop.Controls"
     xmlns:services="using:Earmark.Desktop.Services"
     x:DataType="vm:RulesViewModel">
     <UserControl.Resources>
@@ -153,7 +154,7 @@
                 </StackPanel>
             </Border>
 
-            <ScrollViewer x:Name="Scroller" IsVisible="{Binding HasItems}">
+            <ScrollViewer x:Name="Scroller" IsVisible="{Binding HasItems}" ctl:AutoScroll.IsEnabled="True">
                 <ItemsControl x:Name="RulesList" Tag="Rules" ItemsSource="{Binding Items}" Background="Transparent">
                     <ItemsControl.ItemsPanel>
                         <ItemsPanelTemplate>

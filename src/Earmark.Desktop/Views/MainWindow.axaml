@@ -87,6 +87,13 @@
                 <Image Source="avares://Earmark/Assets/Earmark.png" Width="16" Height="16" VerticalAlignment="Center" />
                 <TextBlock x:Name="TitleText" FontSize="12" VerticalAlignment="Center" />
             </StackPanel>
+            <Panel x:Name="TitleBarSlotHost" Grid.Column="1" VerticalAlignment="Center">
+                <ContentControl x:Name="TitleBarSlot" HorizontalAlignment="Left" VerticalAlignment="Center">
+                    <ContentControl.RenderTransform>
+                        <TranslateTransform />
+                    </ContentControl.RenderTransform>
+                </ContentControl>
+            </Panel>
             <Button
                 x:Name="UpdatePill"
                 Grid.Column="2"

@@ -3,6 +3,8 @@
     xmlns="https://github.com/avaloniaui"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:ui="using:FluentAvalonia.UI.Controls"
+    xmlns:chrome="using:Avalonia.Controls.Chrome"
+    xmlns:ctl="using:Earmark.Desktop.Controls"
     xmlns:views="using:Earmark.Desktop.Views"
     xmlns:vm="using:Earmark.Desktop.ViewModels"
     x:DataType="vm:SettingsViewModel">
@@ -32,12 +34,24 @@
                 </ItemsControl>
             </StackPanel>
         </ui:FAContentDialog>
+        <TextBox
+            x:Key="SearchBox"
+            Width="280"
+            PlaceholderText="Search settings"
+            ToolTip.Tip="Search settings (Ctrl+F)"
+            AutomationProperties.Name="Search settings"
+            chrome:WindowDecorationProperties.ElementRole="User">
+            <TextBox.InnerLeftContent>
+                <TextBlock Classes="Glyph" Text="{StaticResource Glyph.Search}" FontSize="14" Margin="10,0,0,0" VerticalAlignment="Center" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+            </TextBox.InnerLeftContent>
+        </TextBox>
     </UserControl.Resources>
 
-    <ScrollViewer x:Name="Scroller">
+    <ScrollViewer x:Name="Scroller" ctl:AutoScroll.IsEnabled="True">
         <Border MaxWidth="1064" Padding="{StaticResource PageGutter}">
-            <StackPanel Spacing="4">
+            <StackPanel x:Name="Sections" Spacing="4">
                 <TextBlock Classes="PageTitle" Text="Settings" Margin="0,-2,0,12" />
+                <TextBlock x:Name="NoMatches" Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" IsVisible="False" />
 
                 <TextBlock Text="General" Classes="Caption" Margin="0,0,0,4" />
                 <StackPanel Classes="SettingsGroup">

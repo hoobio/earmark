@@ -22,6 +22,7 @@ namespace Earmark.Desktop.Views;
 
 public sealed partial class MainWindow : Window
 {
+    private const double TitleBarSlotGap = 8;
     private static readonly TimeSpan ToastDuration = TimeSpan.FromSeconds(4);
 
     private static readonly Dictionary<string, Type> Pages = new(StringComparer.OrdinalIgnoreCase)
@@ -76,6 +77,7 @@ public sealed partial class MainWindow : Window
         Closing += OnWindowClosing;
         PropertyChanged += OnWindowPropertyChanged;
         Win32Properties.AddWndProcHookCallback(this, OnWndProc);
+        AppTitleBar.LayoutUpdated += (_, _) => PositionTitleBarSlot();
 
         Navigate("Devices");
     }
@@ -87,6 +89,12 @@ public sealed partial class MainWindow : Window
     public Control? CurrentPage => PageHost.Content as Control;
 
     public Button UpdateButton => UpdatePill;
+
+    public object? TitleBarContent
+    {
+        get => TitleBarSlot.Content;
+        set => TitleBarSlot.Content = value;
+    }
 
     private AppSettings Settings => _settingsService.Current;
 
@@ -230,6 +238,24 @@ public sealed partial class MainWindow : Window
         if (animate)
         {
             PlayEntrance(page);
+        }
+    }
+
+    private void PositionTitleBarSlot()
+    {
+        var width = TitleBarSlot.Bounds.Width;
+        if (width <= 0 || TitleBarSlotHost.Bounds.Width <= 0)
+        {
+            return;
+        }
+
+        var room = TitleBarSlotHost.Bounds.Width - width;
+        var centred = (AppTitleBar.Bounds.Width - width) / 2 - TitleBarSlotHost.Bounds.X;
+        var x = room >= 2 * TitleBarSlotGap ? Math.Clamp(centred, TitleBarSlotGap, room - TitleBarSlotGap) : Math.Max(0, room);
+        var offset = (TranslateTransform)TitleBarSlot.RenderTransform!;
+        if (offset.X != x)
+        {
+            offset.X = x;
         }
     }
 
