@@ -170,6 +170,7 @@
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="Padding" Value="0" />
             <Setter Property="ClipToBounds" Value="True" />
+            <Setter Property="AutoScrollToSelectedItem" Value="False" />
             <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
             <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Disabled" />
             <Setter Property="ItemContainerTheme" Value="{StaticResource SegmentedItemTheme}" />
