@@ -219,12 +219,12 @@
                         </MultiBinding>
                     </StackPanel.IsVisible>
                     <Grid ColumnDefinitions="*,Auto">
-                        <Button Classes="RuleChip" Tag="{Binding Card.FirstRule}" Opacity="{Binding Card.FirstRule.Opacity, FallbackValue=1}" ToolTip.Tip="Open in Rules" Click="OnRuleClick">
+                        <Button Classes="RuleChip" x:DataType="vm:RuleSummary" DataContext="{Binding Card.FirstRule}" Tag="{Binding}" Opacity="{Binding Opacity}" ToolTip.Tip="Open in Rules" Click="OnRuleClick">
                             <StackPanel Spacing="2">
-                                <TextBlock Classes="BodyStrong" Text="{Binding Card.FirstRule.Name, FallbackValue=''}" TextTrimming="CharacterEllipsis" />
+                                <TextBlock Classes="BodyStrong" Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
                                 <StackPanel Orientation="Horizontal" Spacing="6">
-                                    <TextBlock Classes="Caption Secondary" Text="{Binding Card.FirstRule.StatusMessage, FallbackValue=''}" />
-                                    <TextBlock Classes="Caption Tertiary" Text="{Binding Card.FirstRule.MatchSummary, FallbackValue=''}" />
+                                    <TextBlock Classes="Caption Secondary" Text="{Binding StatusMessage}" />
+                                    <TextBlock Classes="Caption Tertiary" Text="{Binding MatchSummary}" />
                                 </StackPanel>
                             </StackPanel>
                         </Button>

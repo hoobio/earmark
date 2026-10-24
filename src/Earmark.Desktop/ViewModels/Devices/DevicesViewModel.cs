@@ -95,16 +95,16 @@ public sealed partial class DevicesViewModel : Observable, IDisposable
         _services = services;
         _logger = logger;
 
-        rules.RulesChanged += (_, _) => QueueRebuild();
-        endpoints.EndpointsChanged += (_, _) => QueueRebuild();
-        endpoints.DefaultsChanged += (_, _) => QueueRebuild();
-        waveLink.StateChanged += (_, _) => QueueRebuild();
-        defaults.DefaultsApplied += (_, _) => QueueRebuild();
+        rules.RulesChanged += (_, _) => Ui.Post(QueueRebuild);
+        endpoints.EndpointsChanged += (_, _) => Ui.Post(QueueRebuild);
+        endpoints.DefaultsChanged += (_, _) => Ui.Post(QueueRebuild);
+        waveLink.StateChanged += (_, _) => Ui.Post(QueueRebuild);
+        defaults.DefaultsApplied += (_, _) => Ui.Post(QueueRebuild);
         endpoints.ExternalMuteChanged += (_, e) => Ui.Post(() => OnExternalMute(e.DeviceId, e.Muted));
         endpoints.ExternalVolumeChanged += (_, e) => Ui.Post(() => FindByEndpoint(e.DeviceId)?.SyncVolume(e.Volume));
-        sessions.SessionsChanged += (_, _) => QueueApps();
-        processes.ProcessStarted += (_, _) => QueueApps();
-        processes.ProcessStopped += (_, _) => QueueApps();
+        sessions.SessionsChanged += (_, _) => Ui.Post(QueueApps);
+        processes.ProcessStarted += (_, _) => Ui.Post(QueueApps);
+        processes.ProcessStopped += (_, _) => Ui.Post(QueueApps);
         nowPlaying.Changed += (_, _) => Ui.Post(OnNowPlayingChanged);
         applier.RouteApplied += (_, _) => meters.Refresh();
         settings.SettingsChanged += (_, _) => Ui.Post(OnSettingsChanged);
@@ -112,7 +112,7 @@ public sealed partial class DevicesViewModel : Observable, IDisposable
 
         RefreshHiddenApps();
         _appsSignature = AppsSignature();
-        QueueRebuild();
+        Ui.Post(QueueRebuild);
     }
 
     public IAudioEndpointService Endpoints { get; }
@@ -298,21 +298,18 @@ public sealed partial class DevicesViewModel : Observable, IDisposable
     {
         try
         {
-            await Task.Delay(RebuildDebounce, ct).ConfigureAwait(false);
+            await Task.Delay(RebuildDebounce, ct).ConfigureAwait(true);
             var known = Settings.KnownDevices.Select(Clone).ToList();
-            var built = await Task.Run(() => Build(known, DateTimeOffset.UtcNow), ct).ConfigureAwait(false);
+            var built = await Task.Run(() => Build(known, DateTimeOffset.UtcNow), ct).ConfigureAwait(true);
             if (Settings.SettingsSchemaVersion < AppSettings.DeviceKeySchemaVersion)
             {
-                await _settings.SaveBackupAsync("backup.v0", ct).ConfigureAwait(false);
+                await _settings.SaveBackupAsync("backup.v0", ct).ConfigureAwait(true);
             }
 
-            Ui.Post(() =>
+            if (!ct.IsCancellationRequested)
             {
-                if (!ct.IsCancellationRequested)
-                {
-                    ApplyBuild(built);
-                }
-            });
+                ApplyBuild(built);
+            }
         }
         catch (OperationCanceledException)
         {
