@@ -361,7 +361,6 @@ public sealed partial class QuickControlsWindow : Window
             return;
         }
 
-        (_regionScale, _regionRects) = (scale, rects);
         var diameter = (int)Math.Round(16 * scale) + 1;
         var region = CreateRectRgn(0, 0, 0, 0);
         foreach (var rect in rects)
@@ -382,7 +381,10 @@ public sealed partial class QuickControlsWindow : Window
         {
             _ = DeleteObject(region);
             _logger.LogWarning("Could not set the Quick Controls window region (error {Error})", Marshal.GetLastPInvokeError());
+            return;
         }
+
+        (_regionScale, _regionRects) = (scale, rects);
     }
 
     private int RegionKind()
