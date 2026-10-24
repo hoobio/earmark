@@ -2,6 +2,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 
+using Earmark.Core.Settings;
 using Earmark.Desktop.Services;
 
 namespace Earmark.Desktop.Views;
@@ -10,10 +11,12 @@ public sealed partial class QuickControlsWindow : Window
 {
     private const int EdgeMargin = 8;
 
-    public QuickControlsWindow(ShellSettings settings)
+    public QuickControlsWindow(SettingsService settings)
     {
         InitializeComponent();
-        GroundGlow.IsVisible = settings.UsesMockMica;
+        void ApplyBackdrop() => GroundGlow.IsVisible = settings.Current.Backdrop != BackdropMode.Solid;
+        ApplyBackdrop();
+        settings.SettingsChanged += (_, _) => Ui.Post(ApplyBackdrop);
         Deactivated += (_, _) => Hide();
         KeyDown += (_, e) =>
         {

@@ -1,3 +1,4 @@
+using Earmark.Core;
 using Earmark.Core.Logging;
 using Earmark.Core.Settings;
 using Earmark.Core.WaveLink;
@@ -45,13 +46,17 @@ public sealed class StartupSettingsApplier : IDisposable
         try
         {
             var s = _settings.Current;
-            if (s.LaunchOnStartup)
+            // The Run value is shared by every channel, so a Dev build must not rewrite or delete the installed build's entry.
+            if (!AppInfo.IsDevBuild)
             {
-                StartupRegistration.Register(s.LaunchToTray);
-            }
-            else
-            {
-                StartupRegistration.Unregister();
+                if (s.LaunchOnStartup)
+                {
+                    StartupRegistration.Register(s.LaunchToTray);
+                }
+                else
+                {
+                    StartupRegistration.Unregister();
+                }
             }
 
             var desired = s.VerboseLogging ? LogLevel.Debug : LogLevel.Information;

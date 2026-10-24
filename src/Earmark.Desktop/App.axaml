@@ -18,5 +18,10 @@
         <StyleInclude Source="avares://Earmark/Styles/Controls.axaml" />
         <StyleInclude Source="avares://Earmark/Styles/Dialogs.axaml" />
         <StyleInclude Source="avares://Earmark/Styles/SettingsCard.axaml" />
+        <StyleInclude Source="avares://Earmark/Styles/Devices.axaml" />
+        <StyleInclude Source="avares://Earmark/Styles/Rules.axaml" />
+        <StyleInclude Source="avares://Earmark/Styles/Sessions.axaml" />
+        <StyleInclude Source="avares://Earmark/Styles/Settings.axaml" />
+        <StyleInclude Source="avares://Earmark/Styles/QuickControls.axaml" />
     </Application.Styles>
 </Application>

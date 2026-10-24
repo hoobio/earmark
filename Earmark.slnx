@@ -1,11 +1,31 @@
 <Solution>
+  <Configurations>
+    <Platform Name="Any CPU" />
+    <Platform Name="x64" />
+    <Platform Name="ARM64" />
+  </Configurations>
   <Folder Name="/src/">
-    <Project Path="src/Earmark.App/Earmark.App.csproj" />
-    <Project Path="src/Earmark.Audio/Earmark.Audio.csproj" />
-    <Project Path="src/Earmark.Core/Earmark.Core.csproj" />
-    <Project Path="src/Earmark.Desktop/Earmark.Desktop.csproj" />
+    <Project Path="src/Earmark.App/Earmark.App.csproj">
+      <Platform Solution="*|x64" Project="x64" />
+      <Platform Solution="*|ARM64" Project="ARM64" />
+    </Project>
+    <Project Path="src/Earmark.Audio/Earmark.Audio.csproj">
+      <Platform Solution="*|x64" Project="x64" />
+      <Platform Solution="*|ARM64" Project="ARM64" />
+    </Project>
+    <Project Path="src/Earmark.Core/Earmark.Core.csproj">
+      <Platform Solution="*|x64" Project="x64" />
+      <Platform Solution="*|ARM64" Project="ARM64" />
+    </Project>
+    <Project Path="src/Earmark.Desktop/Earmark.Desktop.csproj">
+      <Platform Solution="*|x64" Project="x64" />
+      <Platform Solution="*|ARM64" Project="ARM64" />
+    </Project>
   </Folder>
   <Folder Name="/tests/">
-    <Project Path="tests/Earmark.Core.Tests/Earmark.Core.Tests.csproj" />
+    <Project Path="tests/Earmark.Core.Tests/Earmark.Core.Tests.csproj">
+      <Platform Solution="*|x64" Project="x64" />
+      <Platform Solution="*|ARM64" Project="ARM64" />
+    </Project>
   </Folder>
 </Solution>

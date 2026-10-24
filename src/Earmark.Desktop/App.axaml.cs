@@ -6,6 +6,12 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Avalonia.Threading;
 
+using Earmark.Audio.Routing;
+using Earmark.Audio.Services;
+using Earmark.Core;
+using Earmark.Core.Audio;
+using Earmark.Core.Services;
+using Earmark.Core.Settings;
 using Earmark.Desktop.Hosting;
 using Earmark.Desktop.Services;
 using Earmark.Desktop.Styles;
@@ -14,6 +20,8 @@ using Earmark.Desktop.Views;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+
+using StartupArgs = Earmark.Desktop.Services.StartupRegistration;
 
 namespace Earmark.Desktop;
 
@@ -33,7 +41,7 @@ public sealed partial class App : Application
         AppFonts.UseGrayscaleText();
     }
 
-    public override void OnFrameworkInitializationCompleted()
+    public override async void OnFrameworkInitializationCompleted()
     {
         base.OnFrameworkInitializationCompleted();
         if (ApplicationLifetime is not IClassicDesktopStyleApplicationLifetime desktop || Instance is not { } instance)
@@ -43,26 +51,69 @@ public sealed partial class App : Application
 
         desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
         _host = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings { DisableDefaults = true }).AddEarmark().Build();
-        var logger = _host.Services.GetRequiredService<ILogger<App>>();
+        var services = _host.Services;
+        var logger = services.GetRequiredService<ILogger<App>>();
         desktop.Exit += (_, _) =>
         {
             logger.LogInformation("Shutting down host");
             _host.Dispose();
         };
 
-        logger.LogInformation("Earmark starting; log file: {LogPath}", AppInfo.CurrentLogPath);
-        logger.LogInformation("Earmark {Version} ({Commit}) on {Os}, {Arch}, packaged {Packaged}", AppInfo.DisplayVersion, AppInfo.ShortCommit ?? "no commit", RuntimeInformation.OSDescription, RuntimeInformation.ProcessArchitecture, AppInfo.IsPackaged);
+        logger.LogInformation("Earmark starting; log file: {LogPath}", ServiceRegistration.CurrentLogPath);
+        logger.LogInformation("Earmark {Version} ({Commit}) on {Os}, {Arch}, packaged {Packaged}", AppInfo.DisplayVersion, AppInfo.ShortCommit ?? "no commit", RuntimeInformation.OSDescription, RuntimeInformation.ProcessArchitecture, PackageIdentity.IsPackaged);
         Dispatcher.UIThread.UnhandledException += (_, e) => logger.LogCritical(e.Exception, "Unhandled UI exception");
         AppDomain.CurrentDomain.UnhandledException += (_, e) => logger.LogCritical(e.ExceptionObject as Exception, "Unhandled AppDomain exception");
         TaskScheduler.UnobservedTaskException += (_, e) => logger.LogCritical(e.Exception, "Unobserved task exception");
-        Avalonia.Logging.Logger.Sink = new AvaloniaLogSink(_host.Services.GetRequiredService<ILogger<AvaloniaLogSink>>());
+        Avalonia.Logging.Logger.Sink = new AvaloniaLogSink(services.GetRequiredService<ILogger<AvaloniaLogSink>>());
 
-        var settings = _host.Services.GetRequiredService<ShellSettings>();
-        logger.LogInformation("Shell settings: stub defaults (backdrop {Backdrop}, tray icon {Tray})", settings.Backdrop, settings.ShowTrayIcon);
-        RefreshRunAtLogin(settings, logger);
+        try
+        {
+            await Task.Run(() => LoadEngineAsync(services, logger));
+            ShowShell(desktop, instance, services, logger);
+            _ = Task.Run(() => StartRoutingAsync(services, logger)).ContinueWith(t => logger.LogError(t.Exception, "Background startup failed"), TaskContinuationOptions.OnlyOnFaulted);
+        }
+        catch (Exception ex)
+        {
+            logger.LogCritical(ex, "Startup failed");
+            throw;
+        }
+    }
 
-        var window = _host.Services.GetRequiredService<MainWindow>();
+    private static async Task LoadEngineAsync(IServiceProvider services, ILogger logger)
+    {
+        var settings = services.GetRequiredService<SettingsService>();
+        await settings.LoadAsync();
+        logger.LogInformation("Settings loaded (backdrop {Backdrop}, tray icon {Tray})", settings.Current.Backdrop, settings.Current.ShowTrayIcon);
+
+        services.GetRequiredService<StartupSettingsApplier>().Start();
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        _ = services.GetRequiredService<IAudioEndpointService>();
+        var endpointsMs = sw.ElapsedMilliseconds;
+        _ = services.GetRequiredService<IAudioSessionService>();
+        var sessionsMs = sw.ElapsedMilliseconds - endpointsMs;
+        _ = services.GetRequiredService<IAudioSessionMeterService>();
+        logger.LogInformation("Audio services initialized in {TotalMs} ms (endpoints {EpMs}, sessions {SessMs}, meters {MeterMs})", sw.ElapsedMilliseconds, endpointsMs, sessionsMs, sw.ElapsedMilliseconds - endpointsMs - sessionsMs);
+
+        var rules = services.GetRequiredService<IRulesService>();
+        await rules.LoadAsync();
+        logger.LogInformation("Rules loaded ({Count} rules, saves blocked {Blocked})", rules.Rules.Count, rules.IsSaveBlocked);
+    }
+
+    private static async Task StartRoutingAsync(IServiceProvider services, ILogger logger)
+    {
+        await services.GetRequiredService<DeviceDefaultsService>().SeedDefaultsIfEmptyAsync();
+        services.GetRequiredService<RoutingApplier>().Start();
+        logger.LogInformation("Routing applier started");
+    }
+
+    private static void ShowShell(IClassicDesktopStyleApplicationLifetime desktop, SingleInstance instance, IServiceProvider services, ILogger logger)
+    {
+        var settings = services.GetRequiredService<SettingsService>().Current;
+        var window = services.GetRequiredService<MainWindow>();
         window.CreateTrayIcon();
+        window.ReapplyRulesRequested += (_, _) => _ = services.GetRequiredService<RoutingApplier>().ApplyAllAsync(force: true)
+            .ContinueWith(t => logger.LogError(t.Exception, "Reapply from the tray failed"), TaskContinuationOptions.OnlyOnFaulted);
         instance.ListenForShow(() =>
         {
             logger.LogInformation("Show signal from a second launch");
@@ -70,8 +121,8 @@ public sealed partial class App : Application
         });
 
         var args = desktop.Args ?? [];
-        var tray = StartupRegistration.HasArgument(args, StartupRegistration.TrayArgument) || settings.LaunchToTray;
-        var noActivate = StartupRegistration.HasArgument(args, StartupRegistration.NoActivateArgument);
+        var tray = StartupArgs.HasArgument(args, StartupArgs.TrayArgument) || settings.LaunchToTray;
+        var noActivate = StartupArgs.HasArgument(args, StartupArgs.NoActivateArgument);
         if (tray || noActivate)
         {
             window.ForegroundGate.Hold();
@@ -93,29 +144,51 @@ public sealed partial class App : Application
             logger.LogInformation("Main window activated");
         }
 
-        new UiWatchdog(window, _host.Services.GetRequiredService<ILogger<UiWatchdog>>()).Start();
+        new UiWatchdog(window, services.GetRequiredService<ILogger<UiWatchdog>>()).Start();
+        _ = OfferUnblockIfCorruptAsync(window, services.GetRequiredService<IRulesService>(), logger);
+        Dispatcher.UIThread.Post(() => WireUpdatePill(window, services.GetRequiredService<UpdateService>(), logger), DispatcherPriority.Background);
     }
 
-    private static void RefreshRunAtLogin(ShellSettings settings, ILogger logger)
+    private static async Task OfferUnblockIfCorruptAsync(MainWindow window, IRulesService rules, ILogger logger)
     {
-        if (!settings.LaunchOnStartup)
+        if (!rules.IsSaveBlocked)
         {
             return;
         }
 
-        if (AppInfo.IsDevBuild)
+        logger.LogWarning("Rule saves are blocked: rules.json failed to load (copy at {Copy})", rules.CorruptCopyPath ?? "none");
+        var copy = rules.CorruptCopyPath is { } path ? $"A copy of the unreadable file is saved at {path}." : "No copy of the file could be saved.";
+        var unblock = await AppDialogs.ShowMessageAsync(
+            window,
+            "Rules could not be loaded",
+            $"Earmark could not read rules.json, so rule changes are not saved. {copy} Allow saves to start again with an empty rule list, or keep saves blocked and repair the file.",
+            "Allow saves",
+            "Keep blocked");
+        if (unblock)
         {
-            logger.LogInformation("Run at login refresh skipped on a Dev build");
-            return;
+            rules.UnblockSaves();
+            logger.LogWarning("Rule saves unblocked by the user");
+        }
+    }
+
+    private static void WireUpdatePill(MainWindow window, UpdateService updates, ILogger logger)
+    {
+        var pill = window.UpdateButton;
+        void Refresh()
+        {
+            pill.IsVisible = updates.Status == UpdateStatus.UpdateAvailable;
+            ToolTip.SetTip(pill, updates.LatestVersion is { } latest ? $"{latest} is available" : null);
         }
 
-        try
+        updates.StatusChanged += (_, _) => Ui.Post(Refresh);
+        pill.Click += async (_, _) =>
         {
-            logger.LogInformation("Run at login refreshed: {Command}", StartupRegistration.Register(settings.LaunchToTray));
-        }
-        catch (Exception ex) when (ex is UnauthorizedAccessException or System.Security.SecurityException or IOException)
-        {
-            logger.LogError(ex, "Refreshing the run-at-login value failed");
-        }
+            if (updates.LatestReleaseUrl is { } url && !await window.Launcher.LaunchUriAsync(new Uri(url)))
+            {
+                logger.LogWarning("Could not open {Url}", url);
+            }
+        };
+        Refresh();
+        _ = updates.CheckForUpdatesAsync(manual: false);
     }
 }

@@ -12,6 +12,7 @@ using Avalonia.Styling;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 
+using Earmark.Core.Settings;
 using Earmark.Desktop.Services;
 
 using Microsoft.Extensions.DependencyInjection;
@@ -32,7 +33,7 @@ public sealed partial class MainWindow : Window
     };
 
     private readonly IServiceProvider _services;
-    private readonly ShellSettings _settings;
+    private readonly SettingsService _settingsService;
     private readonly ILogger<MainWindow> _logger;
     private readonly DispatcherTimer _toastTimer = new() { Interval = ToastDuration };
     private Button? _selectedNav;
@@ -43,17 +44,18 @@ public sealed partial class MainWindow : Window
     private DispatcherTimer? _minimizeHideTimer;
     private DispatcherTimer? _trimTimer;
 
-    public MainWindow(IServiceProvider services, ShellSettings settings, ILogger<MainWindow> logger)
+    public MainWindow(IServiceProvider services, SettingsService settings, ILogger<MainWindow> logger)
     {
         _services = services;
-        _settings = settings;
+        _settingsService = settings;
         _logger = logger;
         InitializeComponent();
 
         // WinUI keeps the 1px top resize border outside its client area, where Avalonia's extended client area draws over it.
         Root.Margin = new Thickness(0, 1, 0, 0);
         TitleText.Text = Title;
-        GroundGlow.IsVisible = settings.UsesMockMica;
+        ApplyShellSettings();
+        settings.SettingsChanged += (_, _) => Ui.Post(ApplyShellSettings);
         _toastTimer.Tick += (_, _) => ShowToast(null);
 
         Activated += (_, _) =>
@@ -85,6 +87,8 @@ public sealed partial class MainWindow : Window
     public Control? CurrentPage => PageHost.Content as Control;
 
     public Button UpdateButton => UpdatePill;
+
+    private AppSettings Settings => _settingsService.Current;
 
     public void Navigate(string tag)
     {
@@ -126,7 +130,7 @@ public sealed partial class MainWindow : Window
         {
             Icon = new WindowIcon(icon),
             ToolTipText = "Earmark",
-            IsVisible = _settings.ShowTrayIcon,
+            IsVisible = Settings.ShowTrayIcon,
             Menu = [open, quick, reapply, new NativeMenuItemSeparator(), exit],
         };
         trayIcon.Clicked += (_, _) => ShowFromTray();
@@ -135,7 +139,7 @@ public sealed partial class MainWindow : Window
 
     public void HideToTray()
     {
-        if (!_settings.ShowTrayIcon)
+        if (!Settings.ShowTrayIcon)
         {
             WindowState = WindowState.Minimized;
             return;
@@ -198,6 +202,15 @@ public sealed partial class MainWindow : Window
         if (Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             desktop.Shutdown();
+        }
+    }
+
+    private void ApplyShellSettings()
+    {
+        GroundGlow.IsVisible = Settings.Backdrop != BackdropMode.Solid;
+        foreach (var trayIcon in TrayIcon.GetIcons(Application.Current!) ?? [])
+        {
+            trayIcon.IsVisible = Settings.ShowTrayIcon;
         }
     }
 
@@ -279,7 +292,7 @@ public sealed partial class MainWindow : Window
         }
 
         e.Cancel = true;
-        if (_settings.CloseToTray && _settings.ShowTrayIcon)
+        if (Settings.CloseToTray && Settings.ShowTrayIcon)
         {
             MinimizeThenHideToTray();
             return;
@@ -292,8 +305,8 @@ public sealed partial class MainWindow : Window
     {
         if (e.Property == WindowStateProperty
             && WindowState == WindowState.Minimized
-            && _settings.ShowTrayIcon
-            && (_settings.MinimizeToTray || _hideWhenMinimized))
+            && Settings.ShowTrayIcon
+            && (Settings.MinimizeToTray || _hideWhenMinimized))
         {
             _hideWhenMinimized = false;
             HideAfterMinimizeAnimation();
