@@ -166,8 +166,13 @@ public sealed partial class NowPlayingViewModel : Observable
             return;
         }
 
-        _artworkHash = _info.ThumbnailHash;
-        var art = await _owner.Images.ArtworkAsync(_info.Thumbnail, _info.ThumbnailHash).ConfigureAwait(true);
+        var hash = _artworkHash = _info.ThumbnailHash;
+        var art = await _owner.Images.ArtworkAsync(_info.Thumbnail, hash).ConfigureAwait(true);
+        if (hash != _artworkHash)
+        {
+            return;
+        }
+
         BlurredArtwork = art?.Blurred;
         Artwork = art?.Sharp;
         Chip.Owner.RaiseNowPlaying();
