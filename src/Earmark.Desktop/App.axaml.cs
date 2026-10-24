@@ -86,6 +86,7 @@ public sealed partial class App : Application
         logger.LogInformation("Settings loaded (backdrop {Backdrop}, tray icon {Tray})", settings.Current.Backdrop, settings.Current.ShowTrayIcon);
 
         services.GetRequiredService<StartupSettingsApplier>().Start();
+        services.GetRequiredService<NotificationService>().Register();
 
         var sw = System.Diagnostics.Stopwatch.StartNew();
         _ = services.GetRequiredService<IAudioEndpointService>();
@@ -112,6 +113,7 @@ public sealed partial class App : Application
         var settings = services.GetRequiredService<SettingsService>().Current;
         var window = services.GetRequiredService<MainWindow>();
         window.CreateTrayIcon();
+        services.GetRequiredService<QuickControlsWindow>().Start();
         window.ReapplyRulesRequested += (_, _) => _ = services.GetRequiredService<RoutingApplier>().ApplyAllAsync(force: true)
             .ContinueWith(t => logger.LogError(t.Exception, "Reapply from the tray failed"), TaskContinuationOptions.OnlyOnFaulted);
         instance.ListenForShow(() =>
@@ -126,6 +128,16 @@ public sealed partial class App : Application
         {
             window.Navigate(openPage);
             logger.LogInformation("Opened page {Page} from the command line", openPage);
+        }
+
+        if (string.Equals(StartupArgs.GetValue(args, StartupArgs.MonitorArgumentPrefix), "rightmost", StringComparison.OrdinalIgnoreCase)
+            && window.Screens.All.MaxBy(screen => screen.Bounds.X) is { } screen)
+        {
+            var area = screen.WorkingArea;
+            var size = PixelSize.FromSize(new Size(window.Width, window.Height), screen.Scaling);
+            window.WindowStartupLocation = WindowStartupLocation.Manual;
+            window.Position = new PixelPoint(area.X + Math.Max(0, (area.Width - size.Width) / 2), area.Y + Math.Max(0, (area.Height - size.Height) / 2));
+            logger.LogInformation("Main window placed on the rightmost screen at {Area}", area);
         }
 
         var tray = openPage is null && (StartupArgs.HasArgument(args, StartupArgs.TrayArgument) || settings.LaunchToTray);

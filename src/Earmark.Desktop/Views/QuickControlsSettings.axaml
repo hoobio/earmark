@@ -1,0 +1,52 @@
+<UserControl
+    x:Class="Earmark.Desktop.Views.QuickControlsSettings"
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:views="using:Earmark.Desktop.Views">
+    <UserControl.Styles>
+        <Style Selector="ToggleSwitch">
+            <Setter Property="OnContent" Value="{x:Null}" />
+            <Setter Property="OffContent" Value="{x:Null}" />
+        </Style>
+    </UserControl.Styles>
+    <StackPanel>
+        <TextBlock Text="Quick Controls" Classes="Caption" Margin="0,0,0,4" />
+        <StackPanel Classes="SettingsGroup">
+            <views:SettingsCard Header="Quick Controls" Description="A floating device-control overlay for pinned devices and groups." HeaderGlyph="&#xEE75;">
+                <ToggleSwitch x:Name="EnabledToggle" AutomationProperties.Name="Enable Quick Controls" />
+            </views:SettingsCard>
+            <views:SettingsCard x:Name="ShortcutCard" Header="Shortcut">
+                <Button Content="Change shortcut" Click="OnChangeShortcut" AutomationProperties.Name="Change Quick Controls shortcut" />
+            </views:SettingsCard>
+            <views:SettingsCard Header="Appearance" Description="Choose the background material for Quick Controls, or inherit the app's Backdrop setting.">
+                <ComboBox x:Name="BackdropBox" MinWidth="170" AutomationProperties.Name="Quick Controls appearance">
+                    <ComboBoxItem Content="Solid" />
+                    <ComboBoxItem Content="Acrylic" />
+                    <ComboBoxItem Content="Mica" />
+                    <ComboBoxItem Content="Use app appearance" />
+                </ComboBox>
+            </views:SettingsCard>
+            <views:SettingsCard Header="Display" Description="Choose where Quick Controls opens.">
+                <ComboBox x:Name="DisplayBox" MinWidth="170" AutomationProperties.Name="Quick Controls display">
+                    <ComboBoxItem Content="Currently active" />
+                    <ComboBoxItem Content="Default display" />
+                </ComboBox>
+            </views:SettingsCard>
+            <views:SettingsCard Header="Compact layout" Description="Render Quick Controls cards in the compact layout, independent of the Devices page.">
+                <ToggleSwitch x:Name="CompactToggle" AutomationProperties.Name="Compact layout" />
+            </views:SettingsCard>
+            <views:SettingsCard Header="Show now playing" Description="Show the now-playing strip on Quick Controls cards.">
+                <ToggleSwitch x:Name="NowPlayingToggle" AutomationProperties.Name="Show now playing" />
+            </views:SettingsCard>
+            <views:SettingsCard Header="Show device badges" Description="Show the Input / Output and Default / Communications pills on Quick Controls cards.">
+                <ToggleSwitch x:Name="BadgesToggle" AutomationProperties.Name="Show device badges" />
+            </views:SettingsCard>
+            <views:SettingsCard Header="Show dividers" Description="Draw the hairline section dividers on Quick Controls cards.">
+                <ToggleSwitch x:Name="DividersToggle" AutomationProperties.Name="Show dividers" />
+            </views:SettingsCard>
+            <views:SettingsCard Header="Show rules" Description="Show each card's rules section in Quick Controls. Off keeps the overlay focused on volume and now playing.">
+                <ToggleSwitch x:Name="RulesToggle" AutomationProperties.Name="Show rules" />
+            </views:SettingsCard>
+        </StackPanel>
+    </StackPanel>
+</UserControl>

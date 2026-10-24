@@ -117,7 +117,7 @@ public sealed partial class MainWindow : Window
         var open = new NativeMenuItem("Open Earmark");
         open.Click += (_, _) => ShowFromTray();
         var quick = new NativeMenuItem("Quick Controls");
-        quick.Click += (_, _) => _services.GetRequiredService<QuickControlsWindow>().ShowNearTray();
+        quick.Click += (_, _) => _services.GetRequiredService<QuickControlsWindow>().Open();
         var reapply = new NativeMenuItem("Reapply rules");
         reapply.Click += (_, _) =>
         {
