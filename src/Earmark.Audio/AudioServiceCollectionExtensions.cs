@@ -18,8 +18,9 @@ public static class AudioServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
 
         services.AddSingleton<IAudioEndpointService, AudioEndpointService>();
-        services.AddSingleton<IAudioSessionService, AudioSessionService>();
-        services.AddSingleton<IAudioSessionMeterService, AudioSessionMeterService>();
+        services.AddSingleton<AudioSessionService>();
+        services.AddSingleton<IAudioSessionService>(sp => sp.GetRequiredService<AudioSessionService>());
+        services.AddSingleton<IAudioSessionMeterService>(sp => sp.GetRequiredService<AudioSessionService>());
         services.AddSingleton<IAudioPolicyService, AudioPolicyService>();
         services.AddSingleton<INowPlayingService, NowPlayingService>();
         services.AddSingleton<IRunningProcessProvider, RunningProcessProvider>();
