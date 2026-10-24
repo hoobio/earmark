@@ -1,4 +1,98 @@
 <Styles
     xmlns="https://github.com/avaloniaui"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Styles.Resources>
+        <x:String x:Key="Glyph.ReOrder">&#xEF1F;</x:String>
+        <x:String x:Key="Glyph.Copy">&#xE5D7;</x:String>
+        <x:String x:Key="Glyph.Delete">&#xE66D;</x:String>
+        <x:String x:Key="Glyph.Save">&#xEF99;</x:String>
+        <x:String x:Key="Glyph.Undo">&#xE1A5;</x:String>
+        <x:String x:Key="Glyph.CheckCircle">&#xE462;</x:String>
+        <x:String x:Key="Glyph.Circle">&#xE494;</x:String>
+        <x:String x:Key="Glyph.Offline">&#xEEA3;</x:String>
+    </Styles.Resources>
+
+    <Style Selector="Border.RuleCard">
+        <Setter Property="Background" Value="{DynamicResource CardBackgroundFillColorDefaultBrush}" />
+        <Setter Property="CornerRadius" Value="{DynamicResource OverlayCornerRadius}" />
+    </Style>
+    <Style Selector="Border.EditorRow">
+        <Setter Property="Background" Value="{DynamicResource ChipBrush}" />
+        <Setter Property="CornerRadius" Value="{DynamicResource ControlCornerRadius}" />
+        <Setter Property="Padding" Value="12" />
+    </Style>
+    <Style Selector="Border.MatchChip">
+        <Setter Property="Background" Value="{DynamicResource SubtleFillColorSecondaryBrush}" />
+        <Setter Property="CornerRadius" Value="{DynamicResource ControlCornerRadius}" />
+        <Setter Property="Padding" Value="6,2" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Border.UnsavedBadge">
+        <Setter Property="Background" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+        <Setter Property="CornerRadius" Value="{DynamicResource ControlCornerRadius}" />
+        <Setter Property="Padding" Value="6,1" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Border.UnsavedBadge > TextBlock">
+        <Setter Property="Foreground" Value="{DynamicResource TextOnAccentFillColorPrimaryBrush}" />
+        <Setter Property="FontSize" Value="{DynamicResource CaptionTextBlockFontSize}" />
+    </Style>
+    <Style Selector="Border.Notice">
+        <Setter Property="Background" Value="{DynamicResource CautionTintBrush}" />
+        <Setter Property="CornerRadius" Value="{DynamicResource ControlCornerRadius}" />
+        <Setter Property="Padding" Value="12,8" />
+    </Style>
+    <Style Selector="Border.DropPlaceholder">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="{DynamicResource DividerStrokeColorDefaultBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="{DynamicResource ControlCornerRadius}" />
+        <Setter Property="Padding" Value="12,10" />
+    </Style>
+    <Style Selector="TextBlock.DragHandle">
+        <Setter Property="FontFamily" Value="{StaticResource IconFontFamily}" />
+        <Setter Property="Text" Value="{StaticResource Glyph.ReOrder}" />
+        <Setter Property="FontSize" Value="16" />
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorTertiaryBrush}" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Cursor" Value="SizeAll" />
+    </Style>
+    <Style Selector="TextBlock.DragHandle:pointerover">
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+    </Style>
+    <Style Selector="TextBlock.Hint">
+        <Setter Property="FontFamily" Value="{StaticResource IconFontFamily}" />
+        <Setter Property="Text" Value="{StaticResource Glyph.Info}" />
+        <Setter Property="FontSize" Value="14" />
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorTertiaryBrush}" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="TextBlock.Section">
+        <Setter Property="FontSize" Value="{DynamicResource BodyTextBlockFontSize}" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="TextBlock.Dim">
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+    </Style>
+    <Style Selector="TextBlock.Faint">
+        <Setter Property="Foreground" Value="{DynamicResource TextFillColorTertiaryBrush}" />
+    </Style>
+    <Style Selector="TextBlock.Caution">
+        <Setter Property="Foreground" Value="{DynamicResource SystemFillColorCautionBrush}" />
+    </Style>
+    <Style Selector="Button.Icon">
+        <Setter Property="Theme" Value="{StaticResource SubtleButtonStyle}" />
+        <Setter Property="Width" Value="32" />
+        <Setter Property="Padding" Value="0" />
+        <Setter Property="FontFamily" Value="{StaticResource IconFontFamily}" />
+        <Setter Property="FontSize" Value="16" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Border#DropIndicator">
+        <Setter Property="Background" Value="{DynamicResource AccentFillColorDefaultBrush}" />
+        <Setter Property="Height" Value="2" />
+        <Setter Property="CornerRadius" Value="1" />
+    </Style>
 </Styles>

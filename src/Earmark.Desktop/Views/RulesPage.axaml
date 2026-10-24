@@ -2,6 +2,300 @@
     x:Class="Earmark.Desktop.Views.RulesPage"
     xmlns="https://github.com/avaloniaui"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    Padding="{StaticResource PageGutter}">
-    <TextBlock Classes="PageTitle" Text="Rules" />
+    xmlns:vm="using:Earmark.Desktop.ViewModels.Rules"
+    x:DataType="vm:RulesViewModel">
+    <UserControl.Resources>
+        <DataTemplate x:Key="PatternTemplate" x:DataType="vm:PatternField">
+            <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto" ColumnSpacing="8" RowSpacing="4">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <TextBlock Text="{Binding Label}" VerticalAlignment="Center" />
+                    <Border Classes="MatchChip" IsVisible="{Binding HasSummary}" ToolTip.Tip="{Binding SummaryTip}">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <TextBlock Classes="Glyph Dim" FontSize="12" Text="{Binding Glyph}" />
+                            <TextBlock Classes="Caption" Text="{Binding Summary}" VerticalAlignment="Center" />
+                            <StackPanel Orientation="Horizontal" Spacing="4" IsVisible="{Binding IsOffline}" ToolTip.Tip="{Binding OfflineNames}">
+                                <TextBlock Classes="Glyph Caution" FontSize="12" Text="{StaticResource Glyph.Offline}" />
+                                <TextBlock Classes="Caption Caution" Text="offline" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+                <TextBlock Grid.Column="1" Classes="Caption Dim" Text="Match" VerticalAlignment="Center" />
+                <TextBox Grid.Row="1" Text="{Binding Pattern, Mode=TwoWay}" PlaceholderText="{Binding Placeholder}" IsVisible="{Binding IsText}" />
+                <AutoCompleteBox Grid.Row="1" Text="{Binding Pattern, Mode=TwoWay}" ItemsSource="{Binding Candidates}" PlaceholderText="{Binding PickPlaceholder}"
+                                 MinimumPrefixLength="0" MinimumPopulateDelay="0" IsVisible="{Binding IsPick}" GotFocus="OnPickerGotFocus" />
+                <ComboBox Grid.Row="1" Grid.Column="1" MinWidth="112" ItemsSource="{Binding ModeOptions}" SelectedItem="{Binding Mode, Mode=TwoWay}"
+                          ToolTip.Tip="How it is matched: Regex, Wildcard (* ?), or pick an exact name" />
+            </Grid>
+        </DataTemplate>
+
+        <DataTemplate x:Key="ConditionTemplate" x:DataType="vm:ConditionRow">
+            <Border Classes="EditorRow">
+                <StackPanel Spacing="8">
+                    <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto" ColumnSpacing="8">
+                        <TextBlock Classes="DragHandle" ToolTip.Tip="Drag to reorder, or onto another rule" />
+                        <Panel Grid.Column="1" VerticalAlignment="Center" ToolTip.Tip="{Binding SatisfiedTip}">
+                            <TextBlock Classes="Glyph" FontSize="16" Foreground="{DynamicResource SystemFillColorSuccessBrush}" Text="{StaticResource Glyph.CheckCircle}" IsVisible="{Binding IsSatisfied}" />
+                            <TextBlock Classes="Glyph Faint" FontSize="16" Text="{StaticResource Glyph.Circle}" IsVisible="{Binding !IsSatisfied}" />
+                        </Panel>
+                        <WrapPanel Grid.Column="2" ItemSpacing="8" LineSpacing="4" VerticalAlignment="Center">
+                            <ComboBox MinWidth="150" ItemsSource="{Binding KindOptions}" SelectedItem="{Binding Kind, Mode=TwoWay}" />
+                            <ToggleSwitch IsChecked="{Binding IsPositive, Mode=TwoWay}" OnContent="{Binding PositiveLabel}" OffContent="{Binding NegativeLabel}" MinWidth="0" />
+                            <ComboBox MinWidth="104" ItemsSource="{Binding FlowOptions}" SelectedItem="{Binding Flow, Mode=TwoWay}" IsVisible="{Binding IsDevice}"
+                                      ToolTip.Tip="Which flow to match: any, output (render) or input (capture)" />
+                        </WrapPanel>
+                        <Button Grid.Column="3" Classes="Icon" Content="{StaticResource Glyph.Copy}" ToolTip.Tip="Duplicate condition" Click="OnDuplicateCondition" />
+                        <Button Grid.Column="4" Classes="Icon" Content="{StaticResource Glyph.Delete}" ToolTip.Tip="Remove condition" Click="OnRemoveCondition" />
+                    </Grid>
+                    <ContentControl Content="{Binding Device}" ContentTemplate="{StaticResource PatternTemplate}" IsVisible="{Binding IsDevice}" />
+                    <ContentControl Content="{Binding App}" ContentTemplate="{StaticResource PatternTemplate}" IsVisible="{Binding IsApplication}" />
+                </StackPanel>
+            </Border>
+        </DataTemplate>
+
+        <DataTemplate x:Key="ActionTemplate" x:DataType="vm:ActionRow">
+            <Border Classes="EditorRow">
+                <StackPanel Spacing="8">
+                    <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto" ColumnSpacing="8">
+                        <TextBlock Classes="DragHandle" ToolTip.Tip="Drag to reorder, between Actions and Otherwise, or onto another rule" />
+                        <WrapPanel Grid.Column="1" ItemSpacing="12" LineSpacing="4" VerticalAlignment="Center">
+                            <ComboBox MinWidth="190" ItemsSource="{Binding KindOptions}" SelectedItem="{Binding Kind, Mode=TwoWay}" />
+                            <ToggleSwitch IsChecked="{Binding IsInput, Mode=TwoWay}" OffContent="Output" OnContent="Input" MinWidth="0" IsVisible="{Binding ShowDirection}" />
+                            <ComboBox MinWidth="220" ItemsSource="{Binding MembershipOptions}" SelectedItem="{Binding Membership, Mode=TwoWay}" IsVisible="{Binding IsWaveLink}" />
+                            <ToggleSwitch IsChecked="{Binding Muted, Mode=TwoWay}" OffContent="Unmute" OnContent="Mute" MinWidth="0" IsVisible="{Binding IsMute}" />
+                            <ToggleSwitch IsChecked="{Binding Pinned, Mode=TwoWay}" OffContent="One-shot" OnContent="Pinned" MinWidth="0"
+                                          ToolTip.Tip="Pinned reverts external changes back to this setting. One-shot applies it once when the rule's conditions are first met, then leaves it free to change." />
+                        </WrapPanel>
+                        <TextBlock Grid.Column="2" Classes="Glyph Caution" FontSize="16" Text="{StaticResource Glyph.Warning}" IsVisible="{Binding IsShadowed}"
+                                   ToolTip.Tip="Superseded by a higher-priority rule - this action won't run." />
+                        <Button Grid.Column="3" Classes="Icon" Content="{StaticResource Glyph.Copy}" ToolTip.Tip="Duplicate action" Click="OnDuplicateAction" />
+                        <Button Grid.Column="4" Classes="Icon" Content="{StaticResource Glyph.Delete}" ToolTip.Tip="Remove action" Click="OnRemoveAction" />
+                    </Grid>
+                    <ContentControl Content="{Binding Mix}" ContentTemplate="{StaticResource PatternTemplate}" IsVisible="{Binding IsWaveLink}" />
+                    <ContentControl Content="{Binding App}" ContentTemplate="{StaticResource PatternTemplate}" IsVisible="{Binding IsApp}" />
+                    <ContentControl Content="{Binding Device}" ContentTemplate="{StaticResource PatternTemplate}" />
+                    <StackPanel Spacing="4" IsVisible="{Binding IsRename}">
+                        <TextBlock Text="New name" />
+                        <TextBox Text="{Binding NewName, Mode=TwoWay}" PlaceholderText="Living Room Speakers" />
+                    </StackPanel>
+                    <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12" IsVisible="{Binding IsVolume}">
+                        <TextBlock Text="Volume" VerticalAlignment="Center" />
+                        <Slider Grid.Column="1" Minimum="0" Maximum="100" SmallChange="1" LargeChange="10" TickFrequency="1" IsSnapToTickEnabled="True" Value="{Binding VolumePercent, Mode=TwoWay}" />
+                        <TextBlock Grid.Column="2" MinWidth="36" TextAlignment="Right" VerticalAlignment="Center" Text="{Binding VolumePercent, StringFormat='{}{0:0}%'}" />
+                    </Grid>
+                    <StackPanel Orientation="Horizontal" Spacing="32" IsVisible="{Binding IsDefault}">
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="Default device" />
+                            <ToggleSwitch IsChecked="{Binding SetsDefault, Mode=TwoWay}" OffContent="Off" OnContent="On" />
+                        </StackPanel>
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="Communications device" />
+                            <ToggleSwitch IsChecked="{Binding SetsCommunications, Mode=TwoWay}" OffContent="Off" OnContent="On" />
+                        </StackPanel>
+                    </StackPanel>
+                    <Border Classes="Notice" IsVisible="{Binding HasDiagnostic}">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <TextBlock Classes="Glyph Caution" FontSize="14" Text="{StaticResource Glyph.Warning}" />
+                            <TextBlock Classes="Caption" Text="{Binding Diagnostic}" TextWrapping="Wrap" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </Border>
+        </DataTemplate>
+
+        <ItemsPanelTemplate x:Key="EditorRowsPanel">
+            <StackPanel Spacing="4" />
+        </ItemsPanelTemplate>
+    </UserControl.Resources>
+
+    <Panel>
+        <DockPanel Margin="{StaticResource PageGutter}">
+            <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8" Margin="0,0,0,16">
+                <StackPanel Classes="DropTop" Tag="Rules" Orientation="Horizontal" Spacing="8" Background="Transparent">
+                    <TextBlock Classes="PageTitle" Text="Rules" />
+                    <TextBlock Classes="Hint" ToolTip.Tip="Rules apply top to bottom: the topmost matching rule wins. Drag a rule onto this title to move it to the top." />
+                </StackPanel>
+                <Button Grid.Column="1" Theme="{StaticResource AccentButtonStyle}" Click="OnAddRule" IsEnabled="{Binding CanEdit}" VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <TextBlock Classes="Glyph" Text="{StaticResource Glyph.Add}" />
+                        <TextBlock Text="Add rule" />
+                    </StackPanel>
+                </Button>
+                <Button Grid.Column="2" Click="OnReapply" VerticalAlignment="Center" ToolTip.Tip="Force re-apply of all rules">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <TextBlock Classes="Glyph" Text="{StaticResource Glyph.Refresh}" />
+                        <TextBlock Text="Reapply" />
+                    </StackPanel>
+                </Button>
+            </Grid>
+
+            <Border DockPanel.Dock="Top" Classes="Notice" Margin="0,0,0,12" IsVisible="{Binding IsSaveBlocked}">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <TextBlock Classes="Glyph Caution" FontSize="16" Text="{StaticResource Glyph.Warning}" />
+                    <TextBlock Text="{Binding BlockedMessage}" TextWrapping="Wrap" VerticalAlignment="Center" />
+                </StackPanel>
+            </Border>
+
+            <Border Classes="RuleCard" Padding="32" IsVisible="{Binding IsEmpty}" VerticalAlignment="Top">
+                <StackPanel Spacing="12" HorizontalAlignment="Center" MaxWidth="420">
+                    <TextBlock Classes="Glyph Faint" FontSize="40" Text="{StaticResource Glyph.Routing}" />
+                    <TextBlock Classes="BodyStrong" FontSize="20" Text="No rules yet" HorizontalAlignment="Center" />
+                    <TextBlock Classes="Dim" TextAlignment="Center" TextWrapping="Wrap"
+                               Text="Create a rule to route an application to a specific output or input device, or to pin the system default device." />
+                    <Button Theme="{StaticResource AccentButtonStyle}" HorizontalAlignment="Center" Click="OnAddRule" IsEnabled="{Binding CanEdit}">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <TextBlock Classes="Glyph" Text="{StaticResource Glyph.Add}" />
+                            <TextBlock Text="Add your first rule" />
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+            </Border>
+
+            <ScrollViewer x:Name="Scroller" IsVisible="{Binding HasItems}">
+                <ItemsControl x:Name="RulesList" Tag="Rules" ItemsSource="{Binding Items}" IsEnabled="{Binding CanEdit}" Background="Transparent">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <StackPanel Spacing="8" />
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="vm:RuleRow">
+                            <Border Classes="RuleCard">
+                                <Border.ContextMenu>
+                                    <ContextMenu>
+                                        <MenuItem Header="{Binding EnabledLabel}" Click="OnToggleEnabled" />
+                                        <MenuItem Header="Duplicate rule" Click="OnDuplicateRule" />
+                                        <Separator />
+                                        <MenuItem Header="Delete rule" Foreground="{DynamicResource SystemFillColorCriticalBrush}" Click="OnDeleteRule" />
+                                    </ContextMenu>
+                                </Border.ContextMenu>
+                                <StackPanel Opacity="{Binding ContentOpacity}">
+                                    <Grid ColumnDefinitions="Auto,Auto,*,48" ColumnSpacing="12" Background="Transparent" Tapped="OnRuleHeaderTapped" Cursor="Hand">
+                                        <TextBlock Classes="DragHandle" Margin="16,0,0,0" ToolTip.Tip="Drag to reorder. The topmost matching rule wins." />
+                                        <ToggleSwitch Grid.Column="1" IsChecked="{Binding Enabled, Mode=TwoWay}" OnContent="{x:Null}" OffContent="{x:Null}" MinWidth="0" VerticalAlignment="Center" />
+                                        <StackPanel Grid.Column="2" Spacing="2" Margin="0,14" VerticalAlignment="Center">
+                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                <TextBlock Classes="BodyStrong" Text="{Binding DisplayName}" TextTrimming="CharacterEllipsis" />
+                                                <TextBlock Classes="Glyph Caution" FontSize="14" Text="{StaticResource Glyph.Warning}" IsVisible="{Binding HasWarning}" ToolTip.Tip="{Binding Warning}" />
+                                                <Border Classes="UnsavedBadge" IsVisible="{Binding IsDirty}" ToolTip.Tip="This rule has unsaved edits. They aren't applied until you click Save.">
+                                                    <TextBlock Text="Unsaved" />
+                                                </Border>
+                                            </StackPanel>
+                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                <TextBlock Classes="Caption Dim" Text="{Binding StatusMessage}" />
+                                                <TextBlock Classes="Caption Faint" Text="{Binding MatchSummary}" />
+                                            </StackPanel>
+                                        </StackPanel>
+                                        <Panel Grid.Column="3">
+                                            <TextBlock Classes="Glyph Dim" FontSize="16" Text="{StaticResource Glyph.ChevronDown}" IsVisible="{Binding !IsExpanded}" />
+                                            <TextBlock Classes="Glyph Dim" FontSize="16" Text="{StaticResource Glyph.ChevronUp}" IsVisible="{Binding IsExpanded}" />
+                                        </Panel>
+                                    </Grid>
+
+                                    <StackPanel Spacing="16" Margin="16,0,16,16" IsVisible="{Binding IsExpanded}">
+                                        <StackPanel Spacing="4">
+                                            <TextBlock Text="Name" />
+                                            <TextBox Text="{Binding Name, Mode=TwoWay}" />
+                                        </StackPanel>
+
+                                        <StackPanel Spacing="8">
+                                            <Grid Classes="DropTop" Tag="Conditions" ColumnDefinitions="*,Auto" Background="Transparent">
+                                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                                    <TextBlock Classes="Section" Text="Conditions" />
+                                                    <TextBlock Classes="Hint" ToolTip.Tip="All conditions must be true for the rule to take effect. Leave empty to always run." />
+                                                </StackPanel>
+                                                <Button Grid.Column="1" Click="OnAddCondition">
+                                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                                        <TextBlock Classes="Glyph" Text="{StaticResource Glyph.Add}" />
+                                                        <TextBlock Text="Add condition" />
+                                                    </StackPanel>
+                                                </Button>
+                                            </Grid>
+                                            <ItemsControl Tag="Conditions" ItemsSource="{Binding Conditions}" ItemTemplate="{StaticResource ConditionTemplate}" ItemsPanel="{StaticResource EditorRowsPanel}" Background="Transparent" />
+                                            <Border Classes="DropTop DropPlaceholder" Tag="Conditions" IsVisible="{Binding HasNoConditions}">
+                                                <TextBlock Classes="Caption Dim" Text="No conditions. Drag one here, or use Add condition." HorizontalAlignment="Center" TextWrapping="Wrap" />
+                                            </Border>
+                                        </StackPanel>
+
+                                        <StackPanel Spacing="8">
+                                            <Grid Classes="DropTop" Tag="Actions" ColumnDefinitions="*,Auto" Background="Transparent">
+                                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                                    <TextBlock Classes="Section" Text="Actions" />
+                                                    <TextBlock Classes="Hint" ToolTip.Tip="Each action runs in order. The topmost wins for the same target." />
+                                                </StackPanel>
+                                                <Button Grid.Column="1" Theme="{StaticResource AccentButtonStyle}" Click="OnAddAction">
+                                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                                        <TextBlock Classes="Glyph" Text="{StaticResource Glyph.Add}" />
+                                                        <TextBlock Text="Add action" />
+                                                    </StackPanel>
+                                                </Button>
+                                            </Grid>
+                                            <ItemsControl Tag="Actions" ItemsSource="{Binding Actions}" ItemTemplate="{StaticResource ActionTemplate}" ItemsPanel="{StaticResource EditorRowsPanel}" Background="Transparent" />
+                                            <Border Classes="DropTop DropPlaceholder" Tag="Actions" IsVisible="{Binding HasNoActions}">
+                                                <TextBlock Classes="Caption Dim" Text="No actions. Drag one here, or use Add action." HorizontalAlignment="Center" TextWrapping="Wrap" />
+                                            </Border>
+                                        </StackPanel>
+
+                                        <StackPanel Spacing="8" IsVisible="{Binding ShowElse}">
+                                            <Grid Classes="DropTop" Tag="Else" ColumnDefinitions="*,Auto" Background="Transparent">
+                                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                                    <TextBlock Classes="Section" Text="Otherwise" />
+                                                    <TextBlock Classes="Hint" ToolTip.Tip="Run these instead when the conditions above are not met." />
+                                                </StackPanel>
+                                                <Button Grid.Column="1" Click="OnAddElseAction">
+                                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                                        <TextBlock Classes="Glyph" Text="{StaticResource Glyph.Add}" />
+                                                        <TextBlock Text="Add action" />
+                                                    </StackPanel>
+                                                </Button>
+                                            </Grid>
+                                            <ItemsControl Tag="Else" ItemsSource="{Binding ElseActions}" ItemTemplate="{StaticResource ActionTemplate}" ItemsPanel="{StaticResource EditorRowsPanel}" Background="Transparent" />
+                                            <Border Classes="DropTop DropPlaceholder" Tag="Else" IsVisible="{Binding HasNoElseActions}">
+                                                <TextBlock Classes="Caption Dim" Text="No 'otherwise' actions. Drag one here, or use Add action." HorizontalAlignment="Center" TextWrapping="Wrap" />
+                                            </Border>
+                                        </StackPanel>
+
+                                        <Grid ColumnDefinitions="*,Auto">
+                                            <StackPanel Orientation="Horizontal" Spacing="8" IsVisible="{Binding IsDirty}">
+                                                <Button Theme="{StaticResource AccentButtonStyle}" Click="OnSave">
+                                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                                        <TextBlock Classes="Glyph" Text="{StaticResource Glyph.Save}" />
+                                                        <TextBlock Text="Save" />
+                                                    </StackPanel>
+                                                </Button>
+                                                <Button Click="OnDiscard" ToolTip.Tip="Discard unsaved edits">
+                                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                                        <TextBlock Classes="Glyph" Text="{StaticResource Glyph.Undo}" />
+                                                        <TextBlock Text="Discard" />
+                                                    </StackPanel>
+                                                </Button>
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                                                <Button Click="OnDuplicateRule" ToolTip.Tip="Duplicate this rule below">
+                                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                                        <TextBlock Classes="Glyph" Text="{StaticResource Glyph.Copy}" />
+                                                        <TextBlock Text="Duplicate rule" />
+                                                    </StackPanel>
+                                                </Button>
+                                                <Button Theme="{StaticResource CriticalButtonStyle}" Click="OnDeleteRule">
+                                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                                        <TextBlock Classes="Glyph" Text="{StaticResource Glyph.Delete}" />
+                                                        <TextBlock Text="Delete rule" />
+                                                    </StackPanel>
+                                                </Button>
+                                            </StackPanel>
+                                        </Grid>
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+        </DockPanel>
+
+        <Canvas x:Name="DropLayer" IsHitTestVisible="False">
+            <Border x:Name="DropIndicator" IsVisible="False" />
+        </Canvas>
+    </Panel>
 </UserControl>
