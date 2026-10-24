@@ -44,14 +44,8 @@ public sealed class TaskbarMediaControls(INowPlayingService nowPlaying, ILogger<
             return;
         }
 
-        try
+        if (!CreateTaskbar())
         {
-            _taskbar = (ITaskbarList3)Activator.CreateInstance(Type.GetTypeFromCLSID(new Guid("56FDF344-FD6D-11d0-958A-006097C9A090"))!)!;
-            _taskbar.HrInit();
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Taskbar: ITaskbarList3 unavailable; thumbnail media controls disabled");
             return;
         }
 
@@ -77,8 +71,10 @@ public sealed class TaskbarMediaControls(INowPlayingService nowPlaying, ILogger<
 
     private nint WndProc(nint hwnd, uint msg, nint wParam, nint lParam, ref bool handled)
     {
-        if (msg == _buttonCreatedMessage)
+        // Hide() and an Explorer restart destroy the taskbar button with its thumbnail buttons and overlay, and Explorer restarting also drops the old ITaskbarList3.
+        if (msg == _buttonCreatedMessage && CreateTaskbar())
         {
+            _buttonsAdded = false;
             EnsureButtons();
         }
         else if (msg == WmCommand && ((wParam >> 16) & 0xFFFF) == ThbnClicked)
@@ -88,6 +84,23 @@ public sealed class TaskbarMediaControls(INowPlayingService nowPlaying, ILogger<
         }
 
         return 0;
+    }
+
+    private bool CreateTaskbar()
+    {
+        try
+        {
+            var taskbar = (ITaskbarList3)Activator.CreateInstance(Type.GetTypeFromCLSID(new Guid("56FDF344-FD6D-11d0-958A-006097C9A090"))!)!;
+            taskbar.HrInit();
+            _taskbar = taskbar;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Taskbar: ITaskbarList3 unavailable; thumbnail media controls disabled");
+            _taskbar = null;
+            return false;
+        }
     }
 
     private void Rebuild()
