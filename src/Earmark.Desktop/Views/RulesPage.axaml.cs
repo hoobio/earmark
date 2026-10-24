@@ -1,20 +1,21 @@
 using Avalonia;
+using Avalonia.Animation;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Media;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 
 using Earmark.Core.Routing;
+using Earmark.Desktop.Services;
 using Earmark.Desktop.ViewModels.Rules;
 
 namespace Earmark.Desktop.Views;
 
 public sealed partial class RulesPage : UserControl
 {
-    private static readonly DataFormat<object> DragFormat = DataFormat.CreateInProcessFormat<object>("earmark-rules-drag");
-
-    private object? _dragged;
+    private Drag? _drag;
 
     public RulesPage(RulesViewModel viewModel)
     {
@@ -26,10 +27,9 @@ public sealed partial class RulesPage : UserControl
         DetachedFromVisualTree += (_, _) => viewModel.PageVisible = false;
 
         AddHandler(PointerPressedEvent, OnPointerPressed);
-        DragDrop.SetAllowDrop(this, true);
-        AddHandler(DragDrop.DragOverEvent, OnDragOver);
-        AddHandler(DragDrop.DropEvent, OnDrop);
-        AddHandler(DragDrop.DragLeaveEvent, (_, _) => DropIndicator.IsVisible = false);
+        AddHandler(PointerMovedEvent, OnPointerMoved);
+        AddHandler(PointerReleasedEvent, OnPointerReleased);
+        AddHandler(PointerCaptureLostEvent, (_, _) => Cancel());
     }
 
     public RulesViewModel ViewModel { get; }
@@ -52,7 +52,7 @@ public sealed partial class RulesPage : UserControl
 
     private void OnToggleEnabled(object? sender, RoutedEventArgs e)
     {
-        if (Item<RuleRow>(sender) is { } row) row.Enabled = !row.Enabled;
+        if (Item<RuleRow>(sender) is { } row && ViewModel.CanEdit) row.Enabled = !row.Enabled;
     }
 
     private async void OnSave(object? sender, RoutedEventArgs e)
@@ -90,7 +90,8 @@ public sealed partial class RulesPage : UserControl
 
     private void OnRuleHeaderTapped(object? sender, TappedEventArgs e)
     {
-        if (Item<RuleRow>(sender) is { } row && (e.Source as Visual)?.FindAncestorOfType<ToggleSwitch>(includeSelf: true) is null)
+        var source = e.Source as Visual;
+        if (Item<RuleRow>(sender) is { } row && source?.FindAncestorOfType<ToggleSwitch>(includeSelf: true) is null && !IsHandle(source))
         {
             row.IsExpanded = !row.IsExpanded;
         }
@@ -105,57 +106,73 @@ public sealed partial class RulesPage : UserControl
         box.IsDropDownOpen = true;
     }
 
-    private async void OnPointerPressed(object? sender, PointerPressedEventArgs e)
+    private static bool IsHandle(Visual? visual) => visual is TextBlock handle && handle.Classes.Contains("RulesDragHandle");
+
+    private void OnPointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        if (e.Source is not TextBlock handle || !handle.Classes.Contains("DragHandle") || !ViewModel.CanEdit || !e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
-        {
-            return;
-        }
+        if (_drag is not null || !IsHandle(e.Source as Visual) || !ViewModel.CanEdit || !e.GetCurrentPoint(this).Properties.IsLeftButtonPressed) return;
 
-        _dragged = handle.DataContext;
-        var collapsed = _dragged is RuleRow { IsExpanded: true } rule ? rule : null;
-        if (collapsed is not null) collapsed.IsExpanded = false;
+        var handle = (TextBlock)e.Source!;
+        if (handle.FindAncestorOfType<ItemsControl>() is not { } source || source.ContainerFromItem(handle.DataContext!) is not { } row) return;
 
-        var item = new DataTransferItem();
-        item.Set(DragFormat, _dragged!);
-        var data = new DataTransfer();
-        data.Add(item);
-        try
-        {
-            await DragDrop.DoDragDropAsync(e, data, DragDropEffects.Move);
-        }
-        finally
-        {
-            _dragged = null;
-            DropIndicator.IsVisible = false;
-            if (collapsed is not null) collapsed.IsExpanded = true;
-        }
+        _drag = new Drag(handle.DataContext!, row, source, source.IndexFromContainer(row), e.GetPosition(row), e.GetPosition(this));
+        e.Pointer.Capture(this);
+        e.Handled = true;
     }
 
-    private void OnDragOver(object? sender, DragEventArgs e)
+    private void OnPointerMoved(object? sender, PointerEventArgs e)
     {
-        var target = FindTarget(e);
-        e.DragEffects = target is null ? DragDropEffects.None : DragDropEffects.Move;
-        DropIndicator.IsVisible = target is not null;
-        if (target is { } t)
+        if (_drag is not { } drag) return;
+
+        if (!drag.Lifted)
         {
-            ShowIndicator(t.List, t.Index, t.Anchor);
+            var moved = e.GetPosition(this) - drag.Start;
+            if (Math.Abs(moved.X) + Math.Abs(moved.Y) < 6) return;
+            Lift(drag);
         }
 
         var y = e.GetPosition(Scroller).Y;
-        var height = Scroller.Bounds.Height;
-        if (_dragged is not null && y >= 0 && y <= height && (y < 40 || y > height - 40))
+        if (y < 40 || y > Scroller.Bounds.Height - 40)
         {
-            Scroller.Offset = Scroller.Offset.WithY(Scroller.Offset.Y + (y < 40 ? -20 : 20));
+            Scroller.Offset = Scroller.Offset.WithY(Scroller.Offset.Y + (y < 40 ? -12 : 12));
+        }
+
+        if (drag.Row.RenderTransform is TranslateTransform follow && drag.Row.GetVisualParent() is Visual panel)
+        {
+            follow.Y = e.GetPosition(panel).Y - drag.Grab.Y - drag.Row.Bounds.Y;
+        }
+
+        drag.Target = FindTarget(drag, e) ?? new DropTarget(drag.Source, drag.From, string.Empty, null);
+        drag.Touched.Add(drag.Target.List);
+        foreach (var list in drag.Touched)
+        {
+            var from = list == drag.Source ? drag.From : -1;
+            var insertAt = list == drag.Target.List ? drag.Target.Index : -1;
+            for (var i = 0; i < list.ItemCount; i++)
+            {
+                if (i != from && list.ContainerFromIndex(i) is { } row)
+                {
+                    Slide(row, ListReorder.Offset(i, from, insertAt, Slot(drag, drag.Source), Slot(drag, list)));
+                }
+            }
         }
     }
 
-    private async void OnDrop(object? sender, DragEventArgs e)
+    private async void OnPointerReleased(object? sender, PointerReleasedEventArgs e)
     {
-        DropIndicator.IsVisible = false;
-        if (FindTarget(e) is not { } target || !ViewModel.CanEdit) return;
+        if (_drag is not { } drag) return;
+        _drag = null;
+        e.Pointer.Capture(null);
+        if (!drag.Lifted) return;
 
-        switch (_dragged)
+        if (drag.Target is not { Tag.Length: > 0 } target)
+        {
+            Settle(drag);
+            return;
+        }
+
+        Reset(drag);
+        switch (drag.Item)
         {
             case RuleRow rule:
                 await ViewModel.MoveAsync(rule, target.Index);
@@ -169,35 +186,123 @@ public sealed partial class RulesPage : UserControl
         }
     }
 
-    private DropTarget? FindTarget(DragEventArgs e)
+    private void OnDragKeyDown(object? sender, KeyEventArgs e)
     {
-        if (_dragged is null) return null;
+        if (e.Key != Key.Escape || _drag is null) return;
+        e.Handled = true;
+        Cancel();
+    }
 
+    private void Cancel()
+    {
+        if (_drag is not { } drag) return;
+        _drag = null;
+        if (drag.Lifted) Settle(drag);
+    }
+
+    private void Lift(Drag drag)
+    {
+        drag.Lifted = true;
+        if (drag.Item is RuleRow { IsExpanded: true } rule)
+        {
+            rule.IsExpanded = false;
+            drag.Collapsed = rule;
+            RulesList.UpdateLayout();
+        }
+
+        var owner = drag.Item switch { ConditionRow c => c.Owner, ActionRow a => a.Owner, _ => null };
+        drag.Card = owner is null ? null : RulesList.ContainerFromItem(owner);
+        foreach (var raised in new[] { drag.Row, drag.Card })
+        {
+            raised?.SetValue(ZIndexProperty, 1);
+        }
+
+        drag.Row.RenderTransform = new TranslateTransform();
+        drag.Row.IsHitTestVisible = false;
+        drag.Row.Classes.Add("RulesLifted");
+        drag.Touched.Add(drag.Source);
+        TopLevel.GetTopLevel(this)?.AddHandler(KeyDownEvent, OnDragKeyDown, RoutingStrategies.Tunnel);
+    }
+
+    private void Settle(Drag drag)
+    {
+        foreach (var row in drag.Touched.SelectMany(Containers))
+        {
+            if (row != drag.Row) Slide(row, 0);
+        }
+
+        if (drag.Row.RenderTransform is TranslateTransform follow)
+        {
+            Slide(drag.Row, follow.Y);
+            Slide(drag.Row, 0);
+        }
+
+        DispatcherTimer.RunOnce(() => Reset(drag), Motion.Duration + TimeSpan.FromMilliseconds(16));
+    }
+
+    private void Reset(Drag drag)
+    {
+        TopLevel.GetTopLevel(this)?.RemoveHandler(KeyDownEvent, OnDragKeyDown);
+        foreach (var row in drag.Touched.SelectMany(Containers).Append(drag.Row))
+        {
+            row.RenderTransform = null;
+        }
+
+        foreach (var raised in new[] { drag.Row, drag.Card })
+        {
+            raised?.ClearValue(ZIndexProperty);
+        }
+
+        drag.Row.IsHitTestVisible = true;
+        drag.Row.Classes.Remove("RulesLifted");
+        if (drag.Collapsed is { } rule) rule.IsExpanded = true;
+    }
+
+    private static IEnumerable<Control> Containers(ItemsControl list) =>
+        Enumerable.Range(0, list.ItemCount).Select(list.ContainerFromIndex).OfType<Control>();
+
+    private static double Slot(Drag drag, ItemsControl list) => drag.Row.Bounds.Height + ((list.ItemsPanelRoot as StackPanel)?.Spacing ?? 0);
+
+    private static void Slide(Control row, double y)
+    {
+        if (row.RenderTransform is not TranslateTransform { Transitions: not null } slide)
+        {
+            var from = (row.RenderTransform as TranslateTransform)?.Y ?? 0;
+            row.RenderTransform = slide = new TranslateTransform(0, from)
+            {
+                Transitions = [new DoubleTransition { Property = TranslateTransform.YProperty, Duration = Motion.Duration, Easing = Motion.Standard }],
+            };
+        }
+
+        slide.Y = y;
+    }
+
+    private DropTarget? FindTarget(Drag drag, PointerEventArgs e)
+    {
         for (var visual = this.InputHitTest(e.GetPosition(this)) as Visual; visual is not null; visual = visual.GetVisualParent())
         {
-            if (visual is not Control { Tag: string tag } control || !Accepts(tag)) continue;
+            if (visual is not Control { Tag: string tag } control || !Accepts(drag.Item, tag)) continue;
 
             var rule = control.DataContext as RuleRow;
-            if (control is ItemsControl list)
+            if (control is ItemsControl list && list.ItemsPanelRoot is { } panel)
             {
-                var midpoints = Enumerable.Range(0, list.ItemCount)
-                    .Select(list.ContainerFromIndex)
-                    .Select(c => c?.TranslatePoint(new Point(0, c.Bounds.Height / 2), list)?.Y ?? double.MaxValue)
-                    .ToList();
-                return new DropTarget(tag, ListReorder.InsertionIndex(midpoints, e.GetPosition(list).Y), list, control, rule);
+                var rows = Enumerable.Range(0, list.ItemCount).Select(i => list.ContainerFromIndex(i)?.Bounds ?? default).ToList();
+                var from = list == drag.Source ? drag.From : -1;
+                var index = ListReorder.InsertionIndex(rows.Select(r => r.Y).ToList(), rows.Select(r => r.Height).ToList(), from, Slot(drag, list), e.GetPosition(panel).Y);
+                return new DropTarget(list, index, tag, rule);
             }
 
-            if (control.Classes.Contains("DropTop"))
+            if (control.Classes.Contains("RulesDropTop"))
             {
                 var section = tag == "Rules" ? RulesList : (control.Parent as Panel)?.Children.OfType<ItemsControl>().FirstOrDefault(i => Equals(i.Tag, tag));
-                return section is null ? null : new DropTarget(tag, 0, section, control, rule);
+                return section is null ? null : new DropTarget(section, 0, tag, rule);
             }
         }
 
         return null;
     }
 
-    private bool Accepts(string tag) => _dragged switch
+    private static bool Accepts(object item, string tag) => item switch
     {
         RuleRow => tag == "Rules",
         ConditionRow => tag == "Conditions",
@@ -205,23 +310,30 @@ public sealed partial class RulesPage : UserControl
         _ => false,
     };
 
-    private void ShowIndicator(ItemsControl list, int index, Control anchor)
+    private sealed record DropTarget(ItemsControl List, int Index, string Tag, RuleRow? Rule);
+
+    private sealed class Drag(object item, Control row, ItemsControl source, int from, Point grab, Point start)
     {
-        var count = list.ItemCount;
-        var origin = count == 0 ? anchor.TranslatePoint(new Point(0, anchor.Bounds.Height / 2), DropLayer)
-            : index < count && list.ContainerFromIndex(index) is { } next ? next.TranslatePoint(new Point(0, -3), DropLayer)
-            : list.ContainerFromIndex(count - 1) is { } last ? last.TranslatePoint(new Point(0, last.Bounds.Height + 1), DropLayer)
-            : null;
-        if (origin is not { } point)
-        {
-            DropIndicator.IsVisible = false;
-            return;
-        }
+        public object Item { get; } = item;
 
-        Canvas.SetLeft(DropIndicator, point.X);
-        Canvas.SetTop(DropIndicator, point.Y);
-        DropIndicator.Width = count == 0 ? anchor.Bounds.Width : list.Bounds.Width;
+        public Control Row { get; } = row;
+
+        public ItemsControl Source { get; } = source;
+
+        public int From { get; } = from;
+
+        public Point Grab { get; } = grab;
+
+        public Point Start { get; } = start;
+
+        public bool Lifted { get; set; }
+
+        public RuleRow? Collapsed { get; set; }
+
+        public Control? Card { get; set; }
+
+        public DropTarget? Target { get; set; }
+
+        public HashSet<ItemsControl> Touched { get; } = [];
     }
-
-    private sealed record DropTarget(string Tag, int Index, ItemsControl List, Control Anchor, RuleRow? Rule);
 }

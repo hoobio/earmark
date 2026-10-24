@@ -197,38 +197,40 @@ public sealed class RuleRow : Observable
 
     public void Discard() => Load(_saved);
 
-    public async Task AcceptConditionAsync(ConditionRow row, int insertAt)
+    public async Task AcceptConditionAsync(ConditionRow row, int to)
     {
         var source = row.Owner;
         if (source == this)
         {
             var from = Conditions.IndexOf(row);
-            if (from < 0 || ListReorder.IsNoOp(from, insertAt)) return;
-            Conditions.Move(from, ListReorder.MoveTarget(from, insertAt, Conditions.Count));
+            to = Math.Clamp(to, 0, Conditions.Count - 1);
+            if (from < 0 || from == to) return;
+            Conditions.Move(from, to);
         }
         else
         {
             source.Remove(row);
-            Conditions.Insert(Math.Clamp(insertAt, 0, Conditions.Count), new ConditionRow(this, row.ToCondition()));
+            Conditions.Insert(Math.Clamp(to, 0, Conditions.Count), new ConditionRow(this, row.ToCondition()));
         }
 
         await CommitMoveAsync(source);
     }
 
-    public async Task AcceptActionAsync(ActionRow row, bool toElse, int insertAt)
+    public async Task AcceptActionAsync(ActionRow row, bool toElse, int to)
     {
         var source = row.Owner;
         var target = toElse ? ElseActions : Actions;
         var from = target.IndexOf(row);
         if (from >= 0)
         {
-            if (ListReorder.IsNoOp(from, insertAt)) return;
-            target.Move(from, ListReorder.MoveTarget(from, insertAt, target.Count));
+            to = Math.Clamp(to, 0, target.Count - 1);
+            if (from == to) return;
+            target.Move(from, to);
         }
         else
         {
             source.Remove(row);
-            target.Insert(Math.Clamp(insertAt, 0, target.Count), source == this ? row : new ActionRow(this, row.ToAction()));
+            target.Insert(Math.Clamp(to, 0, target.Count), source == this ? row : new ActionRow(this, row.ToAction()));
         }
 
         await CommitMoveAsync(source);

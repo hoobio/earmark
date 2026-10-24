@@ -109,11 +109,12 @@ public sealed class RulesViewModel : Observable
 
     public Task DeleteAsync(RuleRow row) => PersistAsync(r => r.DeleteAsync(row.Id), "delete rule");
 
-    public async Task MoveAsync(RuleRow row, int insertAt)
+    public async Task MoveAsync(RuleRow row, int to)
     {
         var from = Items.IndexOf(row);
-        if (from < 0 || ListReorder.IsNoOp(from, insertAt)) return;
-        Items.Move(from, ListReorder.MoveTarget(from, insertAt, Items.Count));
+        to = Math.Clamp(to, 0, Items.Count - 1);
+        if (from < 0 || from == to) return;
+        Items.Move(from, to);
         var ids = Items.Select(r => r.Id).ToList();
         if (!await PersistAsync(r => r.ReorderAsync(ids), "reorder rules"))
         {

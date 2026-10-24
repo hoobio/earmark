@@ -8,31 +8,53 @@ namespace Earmark.Core.Tests;
 
 public class ListReorderTests
 {
+    private static readonly double[] Tops = [0, 20, 40, 60];
+    private static readonly double[] Heights = [20, 20, 20, 20];
+
     [Theory]
     [InlineData(-5, 0)]
     [InlineData(15, 1)]
-    [InlineData(25, 1)]
+    [InlineData(45, 2)]
+    [InlineData(99, 4)]
+    public void Insertion_into_another_list_counts_rows_whose_midpoint_is_above_the_pointer(double y, int expected) =>
+        ListReorder.InsertionIndex(Tops, Heights, from: -1, slot: 20, y).Should().Be(expected);
+
+    [Theory]
+    [InlineData(5, 0)]
+    [InlineData(15, 1)]
     [InlineData(35, 2)]
     [InlineData(99, 3)]
-    public void Insertion_index_is_the_first_row_whose_midpoint_is_below_the_pointer(double y, int expected) =>
-        ListReorder.InsertionIndex([10, 30, 50], y).Should().Be(expected);
+    public void Insertion_in_the_source_list_skips_the_dragged_row_and_closes_its_slot(double y, int expected) =>
+        ListReorder.InsertionIndex(Tops, Heights, from: 1, slot: 20, y).Should().Be(expected);
 
     [Fact]
-    public void Empty_list_inserts_at_zero() => ListReorder.InsertionIndex([], 42).Should().Be(0);
+    public void Empty_list_inserts_at_zero() => ListReorder.InsertionIndex([], [], -1, 20, 42).Should().Be(0);
 
     [Theory]
-    [InlineData(2, 2, true)]
-    [InlineData(2, 3, true)]
-    [InlineData(2, 1, false)]
-    [InlineData(2, 4, false)]
-    public void Dropping_on_its_own_slot_or_the_next_is_a_no_op(int from, int insertAt, bool expected) =>
-        ListReorder.IsNoOp(from, insertAt).Should().Be(expected);
+    [InlineData(0, 0)]
+    [InlineData(2, -20)]
+    [InlineData(3, -20)]
+    public void Source_list_closes_the_gap_when_the_row_leaves(int index, double expected) =>
+        ListReorder.Offset(index, from: 1, insertAt: -1, closeSlot: 20, openSlot: 20).Should().Be(expected);
 
     [Theory]
-    [InlineData(0, 3, 4, 2)]
-    [InlineData(0, 4, 4, 3)]
-    [InlineData(3, 0, 4, 0)]
-    [InlineData(1, 9, 4, 3)]
-    public void Move_target_accounts_for_the_removed_source(int from, int insertAt, int count, int expected) =>
-        ListReorder.MoveTarget(from, insertAt, count).Should().Be(expected);
+    [InlineData(0, 0)]
+    [InlineData(2, -20)]
+    [InlineData(3, 0)]
+    public void Moving_down_in_the_same_list_opens_the_gap_below(int index, double expected) =>
+        ListReorder.Offset(index, from: 1, insertAt: 2, closeSlot: 20, openSlot: 20).Should().Be(expected);
+
+    [Theory]
+    [InlineData(0, 20)]
+    [InlineData(1, 20)]
+    [InlineData(3, 0)]
+    public void Moving_up_in_the_same_list_pushes_rows_down(int index, double expected) =>
+        ListReorder.Offset(index, from: 3, insertAt: 0, closeSlot: 20, openSlot: 20).Should().Be(expected);
+
+    [Theory]
+    [InlineData(0, 0)]
+    [InlineData(1, 30)]
+    [InlineData(2, 30)]
+    public void Target_list_opens_a_gap_at_the_insertion_point(int index, double expected) =>
+        ListReorder.Offset(index, from: -1, insertAt: 1, closeSlot: 20, openSlot: 30).Should().Be(expected);
 }
