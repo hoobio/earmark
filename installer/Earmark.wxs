@@ -140,6 +140,12 @@
       </Component>
     </StandardDirectory>
 
+    <?if $(var.Channel) = "Release" ?>
+    <Property Id="EXISTINGRUNVALUE">
+      <RegistrySearch Id="ExistingRunValue" Root="HKCU" Key="Software\Microsoft\Windows\CurrentVersion\Run" Name="Earmark" Type="raw" />
+    </Property>
+    <?endif?>
+
     <Feature Id="Main" Title="Earmark$(var.ChannelLabel)" Level="1" AllowAdvertise="no" Display="expand" ConfigurableDirectory="INSTALLFOLDER">
       <ComponentGroupRef Id="EarmarkPayload" />
       <ComponentRef Id="StartMenuShortcut" />
@@ -170,10 +176,10 @@
                   DllEntry="WixShellExec"
                   Impersonate="yes" />
 
-    <!-- A tray-parked Earmark cancels WM_CLOSE, so util:CloseApplication cannot free the files; taskkill ends both the 1.1.0 Earmark.App.exe and Earmark.exe. -->
+    <!-- A tray-parked Earmark cancels WM_CLOSE, so util:CloseApplication cannot free the files; this ends the 1.1.0 Earmark.App.exe and Earmark.exe running from this install folder only. -->
     <SetProperty Id="WixQuietExecCmdLine"
                  Action="SetStopEarmarkCmdLine"
-                 Value='"[SystemFolder]taskkill.exe" /f /im Earmark.App.exe /im Earmark.exe'
+                 Value='"[System64Folder]WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -Command "Get-Process Earmark,Earmark.App -ErrorAction SilentlyContinue | Where-Object { $_.Path -like &apos;[INSTALLFOLDER]*&apos; } | Stop-Process -Force"'
                  Before="StopEarmark"
                  Sequence="execute" />
     <CustomAction Id="StopEarmark"
@@ -226,6 +232,17 @@
               Source="$(var.PayloadDir)\Earmark.exe"
               KeyPath="yes" />
       </Component>
+      <?if $(var.Channel) = "Release" ?>
+      <!-- 1.1.0 registered Earmark.App.exe for login start; repoint an existing value at Earmark.exe so an upgrade keeps starting at login. -->
+      <Component Id="RunAtLoginRepoint" Guid="*" Condition="EXISTINGRUNVALUE">
+        <RegistryValue Root="HKCU"
+                       Key="Software\Microsoft\Windows\CurrentVersion\Run"
+                       Name="Earmark"
+                       Type="string"
+                       Value="&quot;[INSTALLFOLDER]Earmark.exe&quot; --tray"
+                       KeyPath="yes" />
+      </Component>
+      <?endif?>
       <Files Include="$(var.PayloadDir)\**">
         <Exclude Files="$(var.PayloadDir)\Earmark.exe" />
       </Files>
