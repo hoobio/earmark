@@ -189,7 +189,7 @@ public sealed class DeviceCardViewModel : Observable
 
     public NowPlayingViewModel? PrimaryNowPlaying => NowPlaying.Count > 0 ? NowPlaying[0] : null;
 
-    public IImage? BackgroundArt => PrimaryNowPlaying?.Artwork;
+    public IImage? BackgroundArt => PrimaryNowPlaying?.BlurredArtwork;
 
     public bool HasNowPlaying => NowPlaying.Count > 0;
 

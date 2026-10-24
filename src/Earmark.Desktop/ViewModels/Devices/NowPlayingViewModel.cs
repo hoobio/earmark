@@ -55,6 +55,8 @@ public sealed partial class NowPlayingViewModel : Observable
 
     public IImage? Artwork { get => _artwork; private set => Set(ref _artwork, value); }
 
+    public IImage? BlurredArtwork { get; private set; }
+
     public bool CanPrevious => _info.CanPrevious;
 
     public bool CanPlayPause => _info.CanPlayPause;
@@ -165,7 +167,9 @@ public sealed partial class NowPlayingViewModel : Observable
         }
 
         _artworkHash = _info.ThumbnailHash;
-        Artwork = await _owner.Images.ArtworkAsync(_info.Thumbnail, _info.ThumbnailHash).ConfigureAwait(true);
+        var art = await _owner.Images.ArtworkAsync(_info.Thumbnail, _info.ThumbnailHash).ConfigureAwait(true);
+        BlurredArtwork = art?.Blurred;
+        Artwork = art?.Sharp;
         Chip.Owner.RaiseNowPlaying();
     }
 

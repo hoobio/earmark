@@ -10,23 +10,25 @@ using Microsoft.Extensions.Logging;
 
 namespace Earmark.Desktop.Services.Devices;
 
+public sealed record Artwork(IImage Sharp, IImage Blurred);
+
 public sealed class DeviceImages(ILogger<DeviceImages> logger)
 {
     private const int IconSize = 32;
     private const int ArtworkCacheSize = 16;
 
     private readonly ConcurrentDictionary<string, Task<Bitmap?>> _icons = new(StringComparer.OrdinalIgnoreCase);
-    private readonly ConcurrentDictionary<string, Task<IImage?>> _artwork = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, Task<Artwork?>> _artwork = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, Task<(Bitmap? Bitmap, Color? Accent)>> _waveLink = new(StringComparer.Ordinal);
 
     public Task<Bitmap?> AppIconAsync(string path) =>
         string.IsNullOrEmpty(path) ? Task.FromResult<Bitmap?>(null) : _icons.GetOrAdd(path, p => Task.Run(() => ExtractIcon(p)));
 
-    public Task<IImage?> ArtworkAsync(byte[]? bytes, string hash)
+    public Task<Artwork?> ArtworkAsync(byte[]? bytes, string hash)
     {
         if (bytes is not { Length: > 0 })
         {
-            return Task.FromResult<IImage?>(null);
+            return Task.FromResult<Artwork?>(null);
         }
 
         if (_artwork.Count > ArtworkCacheSize)
@@ -107,7 +109,7 @@ public sealed class DeviceImages(ILogger<DeviceImages> logger)
         }
     }
 
-    private IImage? DecodeArtwork(byte[] bytes)
+    private Artwork? DecodeArtwork(byte[] bytes)
     {
         try
         {
@@ -115,12 +117,106 @@ public sealed class DeviceImages(ILogger<DeviceImages> logger)
             var bitmap = new Bitmap(stream);
             var (pixels, w, h) = ReadPixels(bitmap);
             var crop = TrimLetterbox(pixels, w, h);
-            return crop == new PixelRect(0, 0, w, h) ? bitmap : new CroppedBitmap(bitmap, crop);
+            var sharp = crop == new PixelRect(0, 0, w, h) ? (IImage)bitmap : new CroppedBitmap(bitmap, crop);
+            return new Artwork(sharp, Blur(pixels, w, crop, bitmap.Format ?? PixelFormat.Bgra8888));
         }
         catch (Exception ex)
         {
             logger.LogDebug(ex, "Artwork decode failed");
             return null;
+        }
+    }
+
+    private static Bitmap Blur(byte[] src, int stride, PixelRect crop, PixelFormat format)
+    {
+        const int Long = 64;
+        const int Radius = 4;
+        const double Saturate = 1.4;
+        var scale = (double)Long / Math.Max(crop.Width, crop.Height);
+        int w = Math.Max(1, (int)Math.Round(crop.Width * scale)), h = Math.Max(1, (int)Math.Round(crop.Height * scale));
+        var buf = new double[w * h * 4];
+        for (var y = 0; y < h; y++)
+        {
+            for (var x = 0; x < w; x++)
+            {
+                int x0 = crop.X + (x * crop.Width / w), x1 = Math.Max(x0 + 1, crop.X + ((x + 1) * crop.Width / w));
+                int y0 = crop.Y + (y * crop.Height / h), y1 = Math.Max(y0 + 1, crop.Y + ((y + 1) * crop.Height / h));
+                var o = ((y * w) + x) * 4;
+                for (var sy = y0; sy < y1; sy++)
+                {
+                    for (var sx = x0; sx < x1; sx++)
+                    {
+                        var i = ((sy * stride) + sx) * 4;
+                        for (var c = 0; c < 4; c++)
+                        {
+                            buf[o + c] += src[i + c];
+                        }
+                    }
+                }
+
+                var n = (double)((x1 - x0) * (y1 - y0));
+                for (var c = 0; c < 4; c++)
+                {
+                    buf[o + c] /= n;
+                }
+            }
+        }
+
+        for (var pass = 0; pass < 3; pass++)
+        {
+            BoxPass(buf, w, h, Radius, horizontal: true);
+            BoxPass(buf, w, h, Radius, horizontal: false);
+        }
+
+        var dst = new byte[w * h * 4];
+        for (var o = 0; o < dst.Length; o += 4)
+        {
+            var grey = (buf[o] + buf[o + 1] + buf[o + 2]) / 3;
+            for (var c = 0; c < 3; c++)
+            {
+                dst[o + c] = (byte)Math.Clamp(grey + ((buf[o + c] - grey) * Saturate), 0, buf[o + 3]);
+            }
+
+            dst[o + 3] = (byte)buf[o + 3];
+        }
+
+        var handle = GCHandle.Alloc(dst, GCHandleType.Pinned);
+        try
+        {
+            return new Bitmap(format, AlphaFormat.Premul, handle.AddrOfPinnedObject(), new PixelSize(w, h), new Vector(96, 96), w * 4);
+        }
+        finally
+        {
+            handle.Free();
+        }
+    }
+
+    private static void BoxPass(double[] buf, int w, int h, int r, bool horizontal)
+    {
+        int lines = horizontal ? h : w, len = horizontal ? w : h;
+        var line = new double[len * 4];
+        for (var l = 0; l < lines; l++)
+        {
+            int Index(int k) => (horizontal ? (l * w) + k : (k * w) + l) * 4;
+            for (var k = 0; k < len; k++)
+            {
+                Array.Copy(buf, Index(k), line, k * 4, 4);
+            }
+
+            for (var k = 0; k < len; k++)
+            {
+                var o = Index(k);
+                for (var c = 0; c < 4; c++)
+                {
+                    var sum = 0.0;
+                    for (var d = -r; d <= r; d++)
+                    {
+                        sum += line[(Math.Clamp(k + d, 0, len - 1) * 4) + c];
+                    }
+
+                    buf[o + c] = sum / ((2 * r) + 1);
+                }
+            }
         }
     }
 
