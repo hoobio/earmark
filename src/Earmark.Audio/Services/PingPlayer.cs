@@ -29,7 +29,7 @@ internal static class PingPlayer
     public static void Play(string deviceId, MMDeviceEnumerator enumerator, ILogger logger)
     {
         MMDevice? device = null;
-        WasapiOut? output = null;
+        WasapiPlayer? output = null;
         WaveFileReader? reader = null;
         ManualResetEventSlim? finished = null;
         try
@@ -56,7 +56,7 @@ internal static class PingPlayer
             };
 
             finished = new ManualResetEventSlim(false);
-            output = new WasapiOut(device, AudioClientShareMode.Shared, useEventSync: true, latency: 50);
+            output = new WasapiPlayerBuilder().WithDevice(device).WithSharedMode().WithEventSync().WithLatency(50).Build();
             // Event-driven instead of a 20ms busy-poll. Guard the Set: PlaybackStopped can fire
             // again during output.Dispose() in the finally, after `finished` is disposed.
             output.PlaybackStopped += (_, _) => { try { finished.Set(); } catch (ObjectDisposedException) { } };
