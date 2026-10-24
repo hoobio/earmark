@@ -7,7 +7,7 @@
             <Setter Property="Template">
                 <ControlTemplate>
                     <Border Background="{TemplateBinding Background}" CornerRadius="{StaticResource OverlayCornerRadius}" ClipToBounds="True">
-                        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                        <ScrollViewer Classes="NarrowScrollBand" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                             <ContentPresenter Margin="4" Content="{TemplateBinding Content}" />
                         </ScrollViewer>
                     </Border>

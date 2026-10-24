@@ -21,10 +21,42 @@ public sealed class ScrollBarHitAreaTests(AvaloniaSession session)
     [InlineData(1.25, true)]
     [InlineData(1.5, false)]
     [InlineData(1.5, true)]
-    public void The_wider_hit_area_draws_the_same_pixels(double scaling, bool expanded) => session.Run(() =>
+    public void The_wider_hit_area_draws_the_same_pixels(double scaling, bool expanded) => AssertSamePixels(scaling, expanded, null);
+
+    [Theory]
+    [InlineData(1.0, false)]
+    [InlineData(1.0, true)]
+    [InlineData(1.25, false)]
+    [InlineData(1.25, true)]
+    [InlineData(1.5, false)]
+    [InlineData(1.5, true)]
+    public void The_narrow_band_draws_the_same_pixels(double scaling, bool expanded) => AssertSamePixels(scaling, expanded, "NarrowScrollBand");
+
+    [Theory]
+    [InlineData(4, true)]
+    [InlineData(17, true)]
+    [InlineData(19, false)]
+    public void The_narrow_band_takes_clicks_18px_from_the_edge(double fromRight, bool hitsThumb) => session.Run(() =>
     {
-        var narrow = Render(scaling, expanded, hitArea: false);
-        var wide = Render(scaling, expanded, hitArea: true);
+        var (window, viewer) = Show(1.0, expanded: false, "NarrowScrollBand");
+        try
+        {
+            var thumb = VerticalThumb(viewer);
+            var row = thumb.TranslatePoint(new Point(0, thumb.Bounds.Height / 2), window)!.Value.Y;
+            var hit = window.InputHitTest(new Point(viewer.Bounds.Width - fromRight, row)) as Visual;
+
+            Assert.Equal(hitsThumb, hit == thumb || hit?.FindAncestorOfType<Thumb>() == thumb);
+        }
+        finally
+        {
+            window.Close();
+        }
+    });
+
+    private void AssertSamePixels(double scaling, bool expanded, string? viewerClass) => session.Run(() =>
+    {
+        var narrow = Render(scaling, expanded, hitArea: false, viewerClass);
+        var wide = Render(scaling, expanded, hitArea: true, viewerClass);
 
         Assert.Equal(narrow.Length, wide.Length);
         var width = (int)Math.Round(300 * scaling);
@@ -84,7 +116,7 @@ public sealed class ScrollBarHitAreaTests(AvaloniaSession session)
     private static int MaxChannelDifference(uint a, uint b) =>
         Enumerable.Range(0, 4).Max(shift => Math.Abs((int)((a >> (shift * 8)) & 0xFF) - (int)((b >> (shift * 8)) & 0xFF)));
 
-    private static uint[] Render(double scaling, bool expanded, bool hitArea)
+    private static uint[] Render(double scaling, bool expanded, bool hitArea, string? viewerClass)
     {
         var styles = Application.Current!.Styles;
         var include = styles.Single(s => s is Avalonia.Styling.Styles { Resources: var resources } && resources.ContainsKey("WideThumbTemplate"));
@@ -96,7 +128,7 @@ public sealed class ScrollBarHitAreaTests(AvaloniaSession session)
 
         try
         {
-            var (window, _) = Show(scaling, expanded);
+            var (window, _) = Show(scaling, expanded, viewerClass);
             try
             {
                 return Pixels(window);
@@ -115,15 +147,20 @@ public sealed class ScrollBarHitAreaTests(AvaloniaSession session)
         }
     }
 
-    private static (Window Window, ScrollViewer Viewer) Show(double scaling, bool expanded)
+    private static (Window Window, ScrollViewer Viewer) Show(double scaling, bool expanded, string? viewerClass = null)
     {
         var viewer = new ScrollViewer
         {
-            HorizontalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = viewerClass is null ? ScrollBarVisibility.Auto : ScrollBarVisibility.Disabled,
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-            Content = new Border { Width = 1000, Height = 1000, Background = Brushes.Transparent },
+            Content = new Border { Width = viewerClass is null ? 1000 : 200, Height = 1000, Background = Brushes.Transparent },
             Classes = { "ScrollActive" },
         };
+        if (viewerClass is not null)
+        {
+            viewer.Classes.Add(viewerClass);
+        }
+
         var window = new Window { Width = 300, Height = 300, Background = new SolidColorBrush(Color.Parse("#181C26")), Content = viewer };
         window.SetRenderScaling(scaling);
         window.Show();

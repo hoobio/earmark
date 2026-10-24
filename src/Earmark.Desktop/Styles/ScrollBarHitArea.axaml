@@ -64,4 +64,15 @@
     <Style Selector="ScrollViewer /template/ ScrollBar[IsExpanded=true] /template/ Thumb /template/ Rectangle#ThumbVisual">
         <Setter Property="RenderTransform" Value="none" />
     </Style>
+
+    <!-- An 18px band where controls sit 16px from an edge with no room outside it; 4px is the smallest offset that is whole device pixels at 125%, 150% and 175%. -->
+    <Style Selector="ScrollViewer.NarrowScrollBand /template/ ScrollBar:vertical">
+        <Setter Property="Margin" Value="-4,0,0,0" />
+    </Style>
+    <Style Selector="ScrollViewer.NarrowScrollBand /template/ ScrollBar:vertical /template/ Rectangle#TrackRect, ScrollViewer.NarrowScrollBand /template/ ScrollBar:vertical /template/ RepeatButton#PART_LineUpButton, ScrollViewer.NarrowScrollBand /template/ ScrollBar:vertical /template/ RepeatButton#PART_LineDownButton">
+        <Setter Property="Margin" Value="4,0,0,0" />
+    </Style>
+    <Style Selector="ScrollViewer.NarrowScrollBand /template/ ScrollBar:vertical /template/ Thumb">
+        <Setter Property="Padding" Value="5.75,0,-1.75,0" />
+    </Style>
 </Styles>

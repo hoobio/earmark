@@ -94,6 +94,7 @@
                             <Border ClipToBounds="True" CornerRadius="{TemplateBinding CornerRadius}">
                                 <Grid Name="DialogSpace" ClipToBounds="True" RowDefinitions="*,Auto">
                                     <ScrollViewer Name="ContentScrollViewer"
+                                                  Classes="NarrowScrollBand"
                                                   HorizontalScrollBarVisibility="Disabled"
                                                   VerticalScrollBarVisibility="Auto">
                                         <Border Background="{DynamicResource ContentDialogTopOverlay}"
