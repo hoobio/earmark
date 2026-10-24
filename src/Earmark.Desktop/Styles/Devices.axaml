@@ -317,7 +317,7 @@
     </Style>
 
     <Style Selector="Grid.DevicesHeader">
-        <Setter Property="Margin" Value="0,0,0,12" />
+        <Setter Property="Margin" Value="0,0,12,12" />
     </Style>
     <Style Selector="TextBlock.EmptyState">
         <Setter Property="Margin" Value="0,24" />

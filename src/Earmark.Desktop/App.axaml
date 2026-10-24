@@ -16,6 +16,7 @@
     <Application.Styles>
         <sty:FluentAvaloniaTheme PreferSystemTheme="False" PreferUserAccentColor="False" CustomAccentColor="#FF409FFF" UseSystemFontOnWindows="False" />
         <StyleInclude Source="avares://Earmark/Styles/Controls.axaml" />
+        <StyleInclude Source="avares://Earmark/Styles/ScrollBarHitArea.axaml" />
         <StyleInclude Source="avares://Earmark/Styles/Dialogs.axaml" />
         <StyleInclude Source="avares://Earmark/Styles/SettingsCard.axaml" />
         <StyleInclude Source="avares://Earmark/Styles/Devices.axaml" />

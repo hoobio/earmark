@@ -1,0 +1,67 @@
+<Styles
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:aconv="using:Avalonia.Controls.Converters">
+    <Styles.Resources>
+        <aconv:CornerRadiusToDoubleConverter x:Key="ThumbCornerRadiusConverter" Corner="TopLeft" />
+        <ControlTemplate x:Key="WideThumbTemplate" TargetType="Thumb">
+            <Panel Background="Transparent">
+                <Rectangle Name="ThumbVisual"
+                           Margin="{TemplateBinding Padding}"
+                           Fill="{TemplateBinding Background}"
+                           Stroke="{TemplateBinding BorderBrush}"
+                           StrokeThickness="{DynamicResource ScrollBarThumbStrokeThickness}"
+                           RenderTransformOrigin="{TemplateBinding RenderTransformOrigin}"
+                           RadiusX="{Binding CornerRadius, RelativeSource={RelativeSource TemplatedParent}, Converter={StaticResource ThumbCornerRadiusConverter}}"
+                           RadiusY="{Binding CornerRadius, RelativeSource={RelativeSource TemplatedParent}, Converter={StaticResource ThumbCornerRadiusConverter}}">
+                    <Rectangle.Transitions>
+                        <Transitions>
+                            <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.1" />
+                        </Transitions>
+                    </Rectangle.Transitions>
+                </Rectangle>
+            </Panel>
+        </ControlTemplate>
+    </Styles.Resources>
+
+    <Style Selector="ScrollViewer /template/ ScrollBar:vertical">
+        <Setter Property="Margin" Value="-8,0,0,0" />
+    </Style>
+    <Style Selector="ScrollViewer /template/ ScrollBar:vertical /template/ Rectangle#TrackRect, ScrollViewer /template/ ScrollBar:vertical /template/ RepeatButton#PART_LineUpButton, ScrollViewer /template/ ScrollBar:vertical /template/ RepeatButton#PART_LineDownButton">
+        <Setter Property="Margin" Value="8,0,0,0" />
+    </Style>
+    <Style Selector="ScrollViewer /template/ ScrollBar:vertical /template/ Thumb">
+        <Setter Property="Template" Value="{StaticResource WideThumbTemplate}" />
+        <Setter Property="RenderTransform" Value="none" />
+        <Setter Property="Width" Value="NaN" />
+        <Setter Property="Margin" Value="0" />
+        <Setter Property="Padding" Value="9.75,0,-1.75,0" />
+    </Style>
+    <Style Selector="ScrollViewer /template/ ScrollBar:vertical /template/ Thumb /template/ Rectangle#ThumbVisual">
+        <Setter Property="Width" Value="{DynamicResource ScrollBarVerticalThumbMinWidth}" />
+        <Setter Property="HorizontalAlignment" Value="Center" />
+        <Setter Property="RenderTransform" Value="{DynamicResource VerticalSmallScrollThumbScaleTransform}" />
+    </Style>
+
+    <Style Selector="ScrollViewer /template/ ScrollBar:horizontal">
+        <Setter Property="Margin" Value="0,-8,0,0" />
+    </Style>
+    <Style Selector="ScrollViewer /template/ ScrollBar:horizontal /template/ Rectangle#TrackRect, ScrollViewer /template/ ScrollBar:horizontal /template/ RepeatButton#PART_LineUpButton, ScrollViewer /template/ ScrollBar:horizontal /template/ RepeatButton#PART_LineDownButton">
+        <Setter Property="Margin" Value="0,8,0,0" />
+    </Style>
+    <Style Selector="ScrollViewer /template/ ScrollBar:horizontal /template/ Thumb">
+        <Setter Property="Template" Value="{StaticResource WideThumbTemplate}" />
+        <Setter Property="RenderTransform" Value="none" />
+        <Setter Property="Height" Value="NaN" />
+        <Setter Property="Padding" Value="0,8,0,0" />
+    </Style>
+    <Style Selector="ScrollViewer /template/ ScrollBar:horizontal /template/ Thumb /template/ Rectangle#ThumbVisual">
+        <Setter Property="Height" Value="{DynamicResource ScrollBarHorizontalThumbMinHeight}" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="RenderTransform" Value="{DynamicResource HorizontalSmallScrollThumbScaleTransform}" />
+    </Style>
+
+    <Style Selector="ScrollViewer /template/ ScrollBar[IsExpanded=true] /template/ Thumb /template/ Rectangle#ThumbVisual">
+        <Setter Property="RenderTransform" Value="none" />
+    </Style>
+</Styles>
