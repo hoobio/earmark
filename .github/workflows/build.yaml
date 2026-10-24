@@ -36,7 +36,7 @@ jobs:
       tag_name: ${{ steps.rp.outputs.tag_name }}
     steps:
       - id: rp
-        uses: hoobio/pipeline-tools/pipeline/github/step/release-please@v2.2.1
+        uses: hoobio/pipeline-tools/pipeline/github/step/release-please@ba931699d866489a96668f9a00a052794d052902 # v2.2.1
         with:
           app-id: ${{ vars.RELEASE_PLEASE_APP_ID }}
           app-private-key: ${{ secrets.RELEASE_PLEASE_APP_PRIVATE_KEY }}
@@ -45,9 +45,9 @@ jobs:
     name: Lint & Test
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: actions/setup-dotnet@v5
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
         with:
           dotnet-version: ${{ env.DOTNET_SDK_VERSION }}
 
@@ -84,9 +84,9 @@ jobs:
       matrix:
         platform: [x64, ARM64]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: actions/setup-dotnet@v5
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
         with:
           dotnet-version: ${{ env.DOTNET_SDK_VERSION }}
 
@@ -129,7 +129,7 @@ jobs:
 
       - name: Sign MSIX
         if: env.HAS_SIGNING_CERT == 'true'
-        uses: hoobio/pipeline-tools/pipeline/github/step/sign-msix@v2.2.1
+        uses: hoobio/pipeline-tools/pipeline/github/step/sign-msix@ba931699d866489a96668f9a00a052794d052902 # v2.2.1
         with:
           pfx-base64: ${{ secrets.SIGNING_CERTIFICATE }}
           pfx-password: ${{ secrets.SIGNING_CERTIFICATE_PASSWORD }}
@@ -142,7 +142,7 @@ jobs:
         run: echo "::warning::SIGNING_CERTIFICATE / SIGNING_CERT_THUMBPRINT not set; MSIX produced unsigned."
 
       - name: Upload MSIX artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: msix-${{ matrix.platform }}
           path: ${{ github.workspace }}\staging\msix-${{ matrix.platform }}\Earmark-${{ steps.version.outputs.release-version }}-${{ matrix.platform }}.msix
@@ -150,7 +150,7 @@ jobs:
 
       - name: Upload unsigned-namespace test MSIX artifact
         if: github.event_name == 'pull_request'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: msix-${{ matrix.platform }}-unsigned
           path: ${{ github.workspace }}\staging\msix-unsigned-${{ matrix.platform }}\Earmark-${{ steps.version.outputs.release-version }}-${{ matrix.platform }}-unsigned.msix
@@ -162,19 +162,19 @@ jobs:
     if: always() && needs.build-msix.result == 'success'
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           sparse-checkout: scripts
           sparse-checkout-cone-mode: false
 
       - name: Download MSIX (x64)
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: msix-x64
           path: bundle-input
 
       - name: Download MSIX (ARM64)
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: msix-ARM64
           path: bundle-input
@@ -188,7 +188,7 @@ jobs:
           ./scripts/New-MsixBundle.ps1 -MsixDirectory bundle-input -Version $env:VERSION -OutputDirectory staging\msixupload | Format-List
 
       - name: Upload msixupload artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: msixupload
           path: ${{ github.workspace }}\staging\msixupload\Earmark-${{ needs.build-msix.outputs.package-version }}-Store.msixupload
@@ -212,9 +212,9 @@ jobs:
     env:
       HAS_SIGNING_CERT: ${{ secrets.SIGNING_CERTIFICATE != '' && vars.SIGNING_CERT_THUMBPRINT != '' }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: actions/setup-dotnet@v5
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
         with:
           dotnet-version: ${{ env.DOTNET_SDK_VERSION }}
 
@@ -241,7 +241,7 @@ jobs:
           ./scripts/Publish-EarmarkDesktop.ps1 -Platform $env:PLATFORM -Channel $channel -DisplayVersion $display -OutputDirectory $env:PUBLISH_DIR
 
       - name: Build MSI
-        uses: hoobio/pipeline-tools/pipeline/github/step/build-msi-wix@v2.2.1
+        uses: hoobio/pipeline-tools/pipeline/github/step/build-msi-wix@ba931699d866489a96668f9a00a052794d052902 # v2.2.1
         with:
           wix-source-path: ${{ env.WIX_SOURCE_PATH }}
           version: ${{ steps.version.outputs.version }}
@@ -253,7 +253,7 @@ jobs:
 
       - name: Sign MSI
         if: env.HAS_SIGNING_CERT == 'true'
-        uses: hoobio/pipeline-tools/pipeline/github/step/sign-msi@v2.2.1
+        uses: hoobio/pipeline-tools/pipeline/github/step/sign-msi@ba931699d866489a96668f9a00a052794d052902 # v2.2.1
         with:
           pfx-base64: ${{ secrets.SIGNING_CERTIFICATE }}
           pfx-password: ${{ secrets.SIGNING_CERTIFICATE_PASSWORD }}
@@ -266,7 +266,7 @@ jobs:
         run: echo "::warning::SIGNING_CERTIFICATE / SIGNING_CERT_THUMBPRINT not set; MSI produced unsigned."
 
       - name: Upload MSI artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: msi-${{ matrix.platform }}
           path: ${{ github.workspace }}\staging\msi-${{ matrix.platform }}\Earmark-${{ steps.version.outputs.version }}-${{ matrix.platform }}.msi
@@ -290,9 +290,9 @@ jobs:
     env:
       HAS_SIGNING_CERT: ${{ secrets.SIGNING_CERTIFICATE != '' && vars.SIGNING_CERT_THUMBPRINT != '' }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: actions/setup-dotnet@v5
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
         with:
           dotnet-version: ${{ env.DOTNET_SDK_VERSION }}
 
@@ -364,7 +364,7 @@ jobs:
           Compress-Archive -Path staging\Earmark.exe, staging\licences -DestinationPath "staging\zip\$env:ZIP_NAME"
 
       - name: Upload portable artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: portable-${{ matrix.platform }}
           path: ${{ github.workspace }}\staging\zip\Earmark-${{ steps.version.outputs.version }}-win-${{ matrix.platform == 'ARM64' && 'arm64' || 'x64' }}.zip
@@ -381,19 +381,19 @@ jobs:
       matrix:
         platform: [x64, ARM64]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           sparse-checkout: .github/wack-exclusions.json
           sparse-checkout-cone-mode: false
 
       - name: Download MSIX
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: msix-${{ matrix.platform }}
           path: msix
 
       - name: Run WACK
-        uses: hoobio/pipeline-tools/pipeline/github/step/run-wack@v2.2.1
+        uses: hoobio/pipeline-tools/pipeline/github/step/run-wack@ba931699d866489a96668f9a00a052794d052902 # v2.2.1
         with:
           msix-path: msix
           report-path: wack-report-${{ matrix.platform }}.xml
@@ -403,7 +403,7 @@ jobs:
 
       - name: Upload WACK report
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: wack-report-${{ matrix.platform }}
           path: wack-report-${{ matrix.platform }}.xml
@@ -419,9 +419,9 @@ jobs:
       DT_SYSTEM: earmark
       DT_COMPONENT: earmark-app
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - uses: actions/setup-dotnet@v5
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
         with:
           dotnet-version: ${{ env.DOTNET_SDK_VERSION }}
 
@@ -474,13 +474,13 @@ jobs:
           Write-Host "Prune:             $prune"
 
       - name: Generate CycloneDX SBOM
-        uses: hoobio/pipeline-tools/pipeline/github/step/cyclonedx-sbom-dotnet@v2.2.1
+        uses: hoobio/pipeline-tools/pipeline/github/step/cyclonedx-sbom-dotnet@ba931699d866489a96668f9a00a052794d052902 # v2.2.1
         with:
           solution-path: ${{ env.SOLUTION_PATH }}
           output-path: ${{ env.BOM_FILE }}
 
       - name: Upload SBOM artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: sbom
           path: ${{ env.BOM_FILE }}
@@ -488,7 +488,7 @@ jobs:
 
       - name: Upload SBOM to Dependency-Track
         if: env.DT_HOST != '' && env.DT_API_KEY != ''
-        uses: hoobio/pipeline-tools/pipeline/github/job/upload-sbom-to-dependency-track@v2.2.1
+        uses: hoobio/pipeline-tools/pipeline/github/job/upload-sbom-to-dependency-track@ba931699d866489a96668f9a00a052794d052902 # v2.2.1
         with:
           bom-path: ${{ env.BOM_FILE }}
           upload-artifact: 'false'
@@ -531,58 +531,58 @@ jobs:
       contents: write
     steps:
       - name: Download MSIX (x64)
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: msix-x64
           path: release/msix-x64
       - name: Download MSIX (ARM64)
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: msix-ARM64
           path: release/msix-ARM64
       - name: Download msixupload
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: msixupload
           path: release/msixupload
       - name: Download MSI (x64)
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: msi-x64
           path: release/msi-x64
       - name: Download MSI (ARM64)
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: msi-ARM64
           path: release/msi-ARM64
       - name: Download portable zip (x64)
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: portable-x64
           path: release/portable-x64
       - name: Download portable zip (ARM64)
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: portable-ARM64
           path: release/portable-ARM64
       - name: Download SBOM
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: sbom
           path: release/sbom
       - name: Download WACK report (x64)
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: wack-report-x64
           path: release/wack-x64
       - name: Download WACK report (ARM64)
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: wack-report-ARM64
           path: release/wack-ARM64
 
       - name: Attest installer provenance
-        uses: actions/attest-build-provenance@v4
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
         with:
           subject-path: "release/msix-*/*.msix,release/msixupload/*.msixupload,release/msi-*/*.msi,release/portable-*/*.zip"
 
@@ -607,7 +607,7 @@ jobs:
           gh release upload "$TAG" "${RELEASE_FILES[@]}" --clobber --repo "${{ github.repository }}"
 
       - name: Publish draft release
-        uses: hoobio/pipeline-tools/pipeline/github/step/publish-github-release@v2.2.1
+        uses: hoobio/pipeline-tools/pipeline/github/step/publish-github-release@ba931699d866489a96668f9a00a052794d052902 # v2.2.1
         with:
           tag: ${{ needs.release-please.outputs.tag_name }}
           github-token: ${{ github.token }}
@@ -629,7 +629,7 @@ jobs:
       contents: write
       pull-requests: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
           fetch-tags: true
@@ -652,43 +652,43 @@ jobs:
           fi
 
       - name: Download MSIX (x64)
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: msix-x64
           path: release/msix-x64
       - name: Download MSIX (ARM64)
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: msix-ARM64
           path: release/msix-ARM64
       # Pre-release only: `Add-AppxPackage -AllowUnsigned` installs these without trusting a cert.
       - name: Download unsigned test MSIX (x64)
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: msix-x64-unsigned
           path: release/msix-x64-unsigned
       - name: Download unsigned test MSIX (ARM64)
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: msix-ARM64-unsigned
           path: release/msix-ARM64-unsigned
       - name: Download MSI (x64)
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: msi-x64
           path: release/msi-x64
       - name: Download MSI (ARM64)
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: msi-ARM64
           path: release/msi-ARM64
       - name: Download portable zip (x64)
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: portable-x64
           path: release/portable-x64
       - name: Download portable zip (ARM64)
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: portable-ARM64
           path: release/portable-ARM64
@@ -749,22 +749,22 @@ jobs:
       STORE_PRODUCT_ID: 9N27KG5M9W9B
       KEY_VAULT: hbicfgkvtaus01
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Download msixupload
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: msixupload
           path: package
 
-      - uses: azure/login@v3
+      - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           allow-no-subscriptions: true
 
       - name: Setup Microsoft Store CLI
-        uses: microsoft/microsoft-store-apppublisher@v1.4
+        uses: microsoft/microsoft-store-apppublisher@cc9910a8d59f2eb55cbb83df0a3800cf3b5300e0 # v1.4
 
       - name: Find previous published release
         id: previous-release
@@ -870,22 +870,22 @@ jobs:
       STORE_PRODUCT_ID: 9N27KG5M9W9B
       KEY_VAULT: hbicfgkvtaus01
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Download msixupload
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: msixupload
           path: package
 
-      - uses: azure/login@v3
+      - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           allow-no-subscriptions: true
 
       - name: Setup Microsoft Store CLI
-        uses: microsoft/microsoft-store-apppublisher@v1.4
+        uses: microsoft/microsoft-store-apppublisher@cc9910a8d59f2eb55cbb83df0a3800cf3b5300e0 # v1.4
 
       - name: Configure Store credentials from Key Vault
         shell: pwsh
