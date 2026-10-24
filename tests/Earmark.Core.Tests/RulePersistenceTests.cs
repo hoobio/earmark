@@ -85,6 +85,53 @@ public sealed class RulePersistenceTests : IDisposable
     }
 
     [Fact]
+    public async Task Failed_corrupt_copy_still_blocks_saves_and_names_no_file()
+    {
+        await File.WriteAllTextAsync(RulesPath, "not json", Ct);
+        for (var s = -1; s <= 5; s++)
+        {
+            Directory.CreateDirectory(Path.Combine(_dir, $"rules.corrupt-{DateTime.Now.AddSeconds(s):yyyyMMdd-HHmmss}.json"));
+        }
+
+        using var store = new JsonRuleStore(RulesPath);
+        var load = async () => await store.LoadAsync(Ct);
+
+        await load.Should().ThrowAsync<JsonException>();
+        store.IsSaveBlocked.Should().BeTrue();
+        store.CorruptCopyPath.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Corrupt_settings_load_defaults_copy_aside_and_block_saves()
+    {
+        const string garbage = "{\"verboseLogging\": tr";
+        var path = Path.Combine(_dir, "settings.json");
+        await File.WriteAllTextAsync(path, garbage, Ct);
+        using var settings = new SettingsService(path);
+
+        var load = () => settings.LoadAsync(Ct);
+        await load.Should().ThrowAsync<JsonException>();
+
+        settings.IsSaveBlocked.Should().BeTrue();
+        settings.Current.VerboseLogging.Should().BeFalse();
+        Path.GetFileName(settings.CorruptCopyPath!).Should().StartWith("settings.corrupt-").And.EndWith(".json");
+        (await File.ReadAllTextAsync(settings.CorruptCopyPath!, Ct)).Should().Be(garbage);
+
+        settings.Current.VerboseLogging = true;
+        await settings.SaveAsync(Ct);
+        await settings.SaveBackupAsync("backup.v0", Ct);
+        (await File.ReadAllTextAsync(path, Ct)).Should().Be(garbage);
+        File.Exists(Path.Combine(_dir, "settings.backup.v0.json")).Should().BeFalse();
+
+        settings.UnblockSaves();
+        await settings.SaveAsync(Ct);
+        using var reloaded = new SettingsService(path);
+        await reloaded.LoadAsync(Ct);
+        reloaded.Current.VerboseLogging.Should().BeTrue();
+        reloaded.IsSaveBlocked.Should().BeFalse();
+    }
+
+    [Fact]
     public async Task Settings_save_is_atomic_and_reloads()
     {
         var path = Path.Combine(_dir, "settings.json");

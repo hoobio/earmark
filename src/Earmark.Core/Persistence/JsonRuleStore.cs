@@ -59,10 +59,7 @@ public sealed class JsonRuleStore : IRuleStore, IDisposable
             catch (JsonException)
             {
                 _saveBlocked = true;
-                CorruptCopyPath = Path.Combine(
-                    Path.GetDirectoryName(_path)!,
-                    $"{Path.GetFileNameWithoutExtension(_path)}.corrupt-{DateTime.Now:yyyyMMdd-HHmmss}.json");
-                File.Copy(_path, CorruptCopyPath, overwrite: true);
+                CorruptCopyPath = CorruptCopy.TryCreate(_path);
                 throw;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
