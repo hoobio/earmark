@@ -10,6 +10,9 @@ namespace Earmark.Desktop.ViewModels.Devices;
 
 public sealed partial class DevicesViewModel
 {
+    private IReadOnlyList<AudioSession>? _tickSessions;
+    private Dictionary<string, List<uint>> _tickPidsByKey = [];
+
     private TimeSpan Linger => TimeSpan.FromSeconds(Math.Clamp(Settings.AppChipLingerSeconds, 0, 600));
 
     public void MoveChip(AppChipViewModel chip, DeviceCardViewModel target)
@@ -290,7 +293,13 @@ public sealed partial class DevicesViewModel
         _tickCount++;
         var placement = _tickCount % PlacementEveryTicks == 0;
         var sessions = _sessions.GetSessions();
-        var pidsByKey = sessions.Where(ShouldShow).GroupBy(s => s.IdentityKey).ToDictionary(g => g.Key, g => g.Select(s => s.ProcessId).ToList(), StringComparer.Ordinal);
+        if (!ReferenceEquals(sessions, _tickSessions))
+        {
+            _tickSessions = sessions;
+            _tickPidsByKey = sessions.Where(ShouldShow).GroupBy(s => s.IdentityKey).ToDictionary(g => g.Key, g => g.Select(s => s.ProcessId).ToList(), StringComparer.Ordinal);
+        }
+
+        var pidsByKey = _tickPidsByKey;
         foreach (var card in _visibleCards)
         {
             card.UpdatePeaks(Endpoints.GetChannelPeaks(card.Endpoint.Id) ?? new EndpointChannelPeaks(0, 0, 0, card.ChannelCount), MeterClock.Interval);
