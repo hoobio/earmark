@@ -44,6 +44,7 @@ public sealed class AudioSessionService : IAudioSessionService, IAudioSessionMet
     private readonly Timer _peakSampler;
 
     private IReadOnlyList<AudioSession> _snapshot = Array.Empty<AudioSession>();
+    private IReadOnlyList<AudioSession> _captureSnapshot = Array.Empty<AudioSession>();
     private HashSet<uint> _knownPids = new();
     private HashSet<string> _knownInstances = new(StringComparer.Ordinal);
     private volatile Dictionary<(uint Pid, string Endpoint), float> _peakSnapshot = new();
@@ -63,6 +64,7 @@ public sealed class AudioSessionService : IAudioSessionService, IAudioSessionMet
 
         ReattachWatchers();
         Publish(BuildSnapshot(), raiseEvents: false);
+        _captureSnapshot = BuildSnapshot(capture: true);
 
         _endpoints.EndpointsChanged += OnEndpointsChanged;
         _resyncTimer = new Timer(_ => Refresh(), null, ResyncInterval, ResyncInterval);
@@ -75,7 +77,11 @@ public sealed class AudioSessionService : IAudioSessionService, IAudioSessionMet
     public event EventHandler<AudioSessionRemovedEvent>? SessionRemoved;
     public event EventHandler? SessionsChanged;
 
+    public event EventHandler? CaptureSessionsChanged;
+
     public IReadOnlyList<AudioSession> GetSessions() => Volatile.Read(ref _snapshot);
+
+    public IReadOnlyList<AudioSession> GetCaptureSessions() => Volatile.Read(ref _captureSnapshot);
 
     public float? GetPeak(uint processId, string endpointId)
     {
@@ -169,6 +175,17 @@ public sealed class AudioSessionService : IAudioSessionService, IAudioSessionMet
         }
 
         Publish(BuildSnapshot(), raiseEvents: true, forceChanged: reattached);
+        PublishCapture(BuildSnapshot(capture: true));
+    }
+
+    private void PublishCapture(List<AudioSession> fresh)
+    {
+        var previous = Volatile.Read(ref _captureSnapshot);
+        Volatile.Write(ref _captureSnapshot, fresh);
+        if (!previous.SequenceEqual(fresh))
+        {
+            CaptureSessionsChanged?.Invoke(this, EventArgs.Empty);
+        }
     }
 
     private List<SessionWatcher> WatchersSnapshot()
@@ -182,7 +199,7 @@ public sealed class AudioSessionService : IAudioSessionService, IAudioSessionMet
     private void ReattachWatchers()
     {
         var live = new Dictionary<string, MMDevice>(StringComparer.OrdinalIgnoreCase);
-        foreach (var device in _enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active))
+        foreach (var device in _enumerator.EnumerateAudioEndPoints(DataFlow.All, DeviceState.Active))
         {
             live[device.ID] = device;
         }
@@ -233,10 +250,21 @@ public sealed class AudioSessionService : IAudioSessionService, IAudioSessionMet
         }
     }
 
-    private List<AudioSession> BuildSnapshot()
+    private List<AudioSession> BuildSnapshot(bool capture = false)
     {
         var results = new List<AudioSession>();
-        var watchers = WatchersSnapshot();
+        var watchers = WatchersSnapshot().Where(watcher => watcher.IsCapture == capture).ToList();
+        if (capture)
+        {
+            var captured = watchers.SelectMany(watcher => watcher.Tracked().Select(tracked => (watcher, tracked)))
+                .Select(pair => TryMap(pair.tracked.Control, pair.watcher.DeviceId, out var mapped) ? mapped : null)
+                .OfType<AudioSession>()
+                .Where(session => session.State != SessionStateModel.Expired)
+                .ToList();
+            _logger.LogDebug("BuildSnapshot capture: {Count} sessions across {DeviceCount} devices", captured.Count, watchers.Count);
+            return captured;
+        }
+
         var expiredSkipped = 0;
         foreach (var watcher in watchers)
         {
@@ -490,6 +518,7 @@ public sealed class AudioSessionService : IAudioSessionService, IAudioSessionMet
             _device = device;
             Owner = owner;
             DeviceId = device.ID;
+            IsCapture = device.DataFlow == DataFlow.Capture;
             _peakKey = DeviceId.ToLowerInvariant();
             _manager = device.AudioSessionManager;
 
@@ -504,6 +533,8 @@ public sealed class AudioSessionService : IAudioSessionService, IAudioSessionMet
         public AudioSessionService Owner { get; }
 
         public string DeviceId { get; }
+
+        public bool IsCapture { get; }
 
         public List<TrackedSession> Tracked()
         {

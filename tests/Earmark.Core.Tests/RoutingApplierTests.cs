@@ -87,6 +87,23 @@ public sealed class RoutingApplierTests : IDisposable
     }
 
     [Fact]
+    public async Task Capture_sessions_are_ignored_by_application_rules()
+    {
+        _endpoints.Set(Ep("Headset", EndpointFlow.Render), Ep("Speakers", EndpointFlow.Render, isDefault: true));
+        _sessions.CaptureSessions = new[] { Session("discord", 42) };
+        await _rules.UpsertAsync(new RoutingRule
+        {
+            Name = "discord to headset",
+            Enabled = true,
+            Actions = { new RuleAction { Kind = ActionKind.ApplicationDevice, Flow = EndpointFlow.Render, AppPattern = "discord", DevicePattern = "Headset" } },
+        }, Ct);
+
+        await _applier.ApplyAllAsync(force: true);
+
+        _policy.AppRoutes.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task Editing_one_rule_re_fires_only_its_one_shots_and_reapply_re_fires_all()
     {
         _endpoints.Set(Ep("Speakers", EndpointFlow.Render), Ep("Headset", EndpointFlow.Render));
@@ -211,7 +228,10 @@ public sealed class RoutingApplierTests : IDisposable
     private sealed class FakeSessions : IAudioSessionService
     {
         public IReadOnlyList<AudioSession> Sessions { get; set; } = Array.Empty<AudioSession>();
+        public IReadOnlyList<AudioSession> CaptureSessions { get; set; } = Array.Empty<AudioSession>();
         public IReadOnlyList<AudioSession> GetSessions() => Sessions;
+        public IReadOnlyList<AudioSession> GetCaptureSessions() => CaptureSessions;
+        public event EventHandler? CaptureSessionsChanged { add { } remove { } }
         public event EventHandler<AudioSessionEvent>? SessionAdded { add { } remove { } }
         public event EventHandler<AudioSessionRemovedEvent>? SessionRemoved { add { } remove { } }
         public event EventHandler? SessionsChanged { add { } remove { } }

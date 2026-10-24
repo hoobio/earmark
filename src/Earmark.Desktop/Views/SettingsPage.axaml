@@ -39,81 +39,83 @@
             <StackPanel Spacing="4">
                 <TextBlock Classes="PageTitle" Text="Settings" Margin="0,-2,0,12" />
 
-                <TextBlock Text="General" Classes="BodyStrong" Margin="0,0,0,4" />
-                <views:SettingsCard Header="Launch on startup" Description="Start Earmark automatically when you sign in to Windows." HeaderGlyph="{StaticResource Glyph.PowerButton}">
-                    <ToggleSwitch IsChecked="{Binding LaunchOnStartup, Mode=TwoWay}" OnContent="{x:Null}" OffContent="{x:Null}" AutomationProperties.Name="Launch on startup" />
-                </views:SettingsCard>
+                <TextBlock Text="General" Classes="Caption" Margin="0,0,0,4" />
+                <StackPanel Classes="SettingsGroup">
+                    <views:SettingsCard Header="Launch on startup" Description="Start Earmark automatically when you sign in to Windows." HeaderGlyph="{StaticResource Glyph.PowerButton}">
+                        <ToggleSwitch IsChecked="{Binding LaunchOnStartup, Mode=TwoWay}" OnContent="{x:Null}" OffContent="{x:Null}" AutomationProperties.Name="Launch on startup" />
+                    </views:SettingsCard>
+                </StackPanel>
 
                 <ContentControl x:Name="QuickControlsSection" Margin="0,20,0,0" />
 
-                <TextBlock Text="Appearance" Classes="BodyStrong" Margin="0,20,0,4" />
-                <StackPanel Spacing="1">
-                    <views:SettingsCard CornerRadius="{StaticResource GroupTopCornerRadius}" Header="Backdrop" Description="The window's background material. Mica tints the window with a soft gradient and Solid is an opaque surface." HeaderGlyph="{StaticResource Glyph.AppsList}">
+                <TextBlock Text="Appearance" Classes="Caption" Margin="0,20,0,4" />
+                <StackPanel Classes="SettingsGroup">
+                    <views:SettingsCard Header="Backdrop" Description="The window's background material. Mica tints the window with a soft gradient and Solid is an opaque surface." HeaderGlyph="{StaticResource Glyph.AppsList}">
                         <ListBox Theme="{StaticResource SegmentedStyle}" SelectedIndex="{Binding BackdropIndex, Mode=TwoWay}" AutomationProperties.Name="Backdrop">
                             <ListBoxItem Content="Mica" />
                             <ListBoxItem Content="Solid" />
                         </ListBox>
                     </views:SettingsCard>
-                    <views:SettingsCard CornerRadius="{StaticResource GroupBottomCornerRadius}" Header="Title bar text" Description="Show the Earmark title and Audio rules engine subtitle in the title bar." HeaderGlyph="{StaticResource Glyph.Document}">
+                    <views:SettingsCard Header="Title bar text" Description="Show the Earmark title and Audio rules engine subtitle in the title bar." HeaderGlyph="{StaticResource Glyph.Document}">
                         <ToggleSwitch IsChecked="{Binding ShowTitleBarText, Mode=TwoWay}" OnContent="{x:Null}" OffContent="{x:Null}" AutomationProperties.Name="Title bar text" />
                     </views:SettingsCard>
                 </StackPanel>
 
-                <TextBlock Text="Devices" Classes="BodyStrong" Margin="0,20,0,4" />
-                <StackPanel Spacing="1">
-                    <views:SettingsCard CornerRadius="{StaticResource GroupTopCornerRadius}" Header="Card height" Description="Balanced matches every card in a row to the tallest but lets a card with its rules expanded keep its own height. Match row matches expanded cards too. Dynamic sizes each card to its content." HeaderGlyph="{StaticResource Glyph.BulletedList}">
+                <TextBlock Text="Devices" Classes="Caption" Margin="0,20,0,4" />
+                <StackPanel Classes="SettingsGroup">
+                    <views:SettingsCard Header="Card height" Description="Balanced matches every card in a row to the tallest but lets a card with its rules expanded keep its own height. Match row matches expanded cards too. Dynamic sizes each card to its content." HeaderGlyph="{StaticResource Glyph.BulletedList}">
                         <ListBox Theme="{StaticResource SegmentedStyle}" SelectedIndex="{Binding CardHeightIndex, Mode=TwoWay}" AutomationProperties.Name="Card height">
                             <ListBoxItem Content="Balanced" />
                             <ListBoxItem Content="Match row" />
                             <ListBoxItem Content="Dynamic" />
                         </ListBox>
                     </views:SettingsCard>
-                    <views:SettingsCard CornerRadius="{StaticResource GroupMiddleCornerRadius}" Header="Compact cards" Description="Tighter padding and spacing, a smaller icon tile and trimmed now-playing strips. Applies to the Devices page and Quick Controls.">
+                    <views:SettingsCard Header="Compact cards" Description="Tighter padding and spacing, a smaller icon tile and trimmed now-playing strips. Applies to the Devices page and Quick Controls.">
                         <ToggleSwitch IsChecked="{Binding CompactCards, Mode=TwoWay}" OnContent="{x:Null}" OffContent="{x:Null}" AutomationProperties.Name="Compact cards" />
                     </views:SettingsCard>
-                    <views:SettingsCard CornerRadius="{StaticResource GroupMiddleCornerRadius}" Header="Card dividers" Description="Draw a thin line between a card's sections. Off separates them with spacing alone.">
+                    <views:SettingsCard Header="Card dividers" Description="Draw a thin line between a card's sections. Off separates them with spacing alone.">
                         <ToggleSwitch IsChecked="{Binding ShowCardDividers, Mode=TwoWay}" OnContent="{x:Null}" OffContent="{x:Null}" AutomationProperties.Name="Card dividers" />
                     </views:SettingsCard>
-                    <views:SettingsCard CornerRadius="{StaticResource GroupMiddleCornerRadius}" Header="Device badges" Description="Show the Input / Output label and the Default, Communications and Disconnected pills on each card. Override per device in Customise.">
+                    <views:SettingsCard Header="Device badges" Description="Show the Input / Output label and the Default, Communications and Disconnected pills on each card. Override per device in Customise.">
                         <ToggleSwitch IsChecked="{Binding ShowDeviceBadges, Mode=TwoWay}" OnContent="{x:Null}" OffContent="{x:Null}" AutomationProperties.Name="Device badges" />
                     </views:SettingsCard>
-                    <views:SettingsCard CornerRadius="{StaticResource GroupBottomCornerRadius}" Header="Show rules" Description="Show each device card's rules section. Off hides it on every card.">
+                    <views:SettingsCard Header="Show rules" Description="Show each device card's rules section. Off hides it on every card.">
                         <ToggleSwitch IsChecked="{Binding ShowRules, Mode=TwoWay}" OnContent="{x:Null}" OffContent="{x:Null}" AutomationProperties.Name="Show rules" />
                     </views:SettingsCard>
                 </StackPanel>
 
-                <StackPanel Spacing="1" Margin="0,12,0,0">
-                    <views:SettingsCard CornerRadius="{StaticResource GroupTopCornerRadius}" Header="App indicators" Description="Show a chip for each app playing through a device. Drag a chip onto another card to reroute the app." HeaderGlyph="{StaticResource Glyph.Speaker}">
+                <StackPanel Classes="SettingsGroup" Margin="0,12,0,0">
+                    <views:SettingsCard Header="App indicators" Description="Show a chip for each app playing through a device. Drag a chip onto another card to reroute the app." HeaderGlyph="{StaticResource Glyph.Speaker}">
                         <ToggleSwitch IsChecked="{Binding ShowAppIndicators, Mode=TwoWay}" OnContent="{x:Null}" OffContent="{x:Null}" AutomationProperties.Name="App indicators" />
                     </views:SettingsCard>
-                    <views:SettingsCard CornerRadius="{StaticResource GroupMiddleCornerRadius}" Header="Volume meters" Description="Show the thin peak-level bar under each app icon. Off makes the chips a little smaller." IsEnabled="{Binding ShowAppIndicators}">
+                    <views:SettingsCard Header="Volume meters" Description="Show the thin peak-level bar under each app icon. Off makes the chips a little smaller." IsEnabled="{Binding ShowAppIndicators}">
                         <ToggleSwitch IsChecked="{Binding ShowAppPeakMeters, Mode=TwoWay}" OnContent="{x:Null}" OffContent="{x:Null}" AutomationProperties.Name="Volume meters" />
                     </views:SettingsCard>
-                    <views:SettingsCard CornerRadius="{StaticResource GroupMiddleCornerRadius}" Header="Hide audio forwarders" Description="Hide virtual cables and mixers (Wave Link, VB-Cable, Voicemeeter, SteelSeries Sonar) that only relay other apps' audio." IsEnabled="{Binding ShowAppIndicators}">
+                    <views:SettingsCard Header="Hide audio forwarders" Description="Hide virtual cables and mixers (Wave Link, VB-Cable, Voicemeeter, SteelSeries Sonar) that only relay other apps' audio." IsEnabled="{Binding ShowAppIndicators}">
                         <ToggleSwitch IsChecked="{Binding FilterAudioForwarders, Mode=TwoWay}" OnContent="{x:Null}" OffContent="{x:Null}" AutomationProperties.Name="Hide audio forwarders" />
                     </views:SettingsCard>
-                    <views:SettingsCard CornerRadius="{StaticResource GroupMiddleCornerRadius}" Header="Always show pinned apps" Description="Keep a chip, with a padlock badge, for any app a rule pins to a device even while it is silent. Off shows it only while it makes sound." IsEnabled="{Binding ShowAppIndicators}">
+                    <views:SettingsCard Header="Always show pinned apps" Description="Keep a chip, with a padlock badge, for any app a rule pins to a device even while it is silent. Off shows it only while it makes sound." IsEnabled="{Binding ShowAppIndicators}">
                         <ToggleSwitch IsChecked="{Binding AlwaysShowPinnedApps, Mode=TwoWay}" OnContent="{x:Null}" OffContent="{x:Null}" AutomationProperties.Name="Always show pinned apps" />
                     </views:SettingsCard>
-                    <views:SettingsCard CornerRadius="{StaticResource GroupMiddleCornerRadius}" Header="Keep stopped apps visible" Description="A chip dims and stays for this many seconds after its app stops or closes. 0 removes it at once." IsEnabled="{Binding ShowAppIndicators}">
+                    <views:SettingsCard Header="Keep stopped apps visible" Description="A chip dims and stays for this many seconds after its app stops or closes. 0 removes it at once." IsEnabled="{Binding ShowAppIndicators}">
                         <NumericUpDown Value="{Binding AppChipLingerSeconds, Mode=TwoWay}" Minimum="0" Maximum="600" Increment="5" FormatString="0" MinWidth="140" AutomationProperties.Name="Seconds to keep stopped apps" />
                     </views:SettingsCard>
-                    <views:SettingsCard CornerRadius="{StaticResource GroupBottomCornerRadius}" Header="Hidden apps" Description="{Binding HiddenAppsDescription}" IsEnabled="{Binding ShowAppIndicators}">
+                    <views:SettingsCard Header="Hidden apps" Description="{Binding HiddenAppsDescription}" IsEnabled="{Binding ShowAppIndicators}">
                         <Button Content="Manage" Click="OnManageHiddenAppsClick" />
                     </views:SettingsCard>
                 </StackPanel>
 
-                <StackPanel Spacing="1" Margin="0,12,0,0">
-                    <views:SettingsCard CornerRadius="{StaticResource GroupTopCornerRadius}" Header="Now playing" Description="Show a media strip on a device's card when an app playing through it shares track info with Windows. The app's chip moves into the strip." HeaderGlyph="{StaticResource Glyph.Speaker}">
+                <StackPanel Classes="SettingsGroup" Margin="0,12,0,0">
+                    <views:SettingsCard Header="Now playing" Description="Show a media strip on a device's card when an app playing through it shares track info with Windows. The app's chip moves into the strip." HeaderGlyph="{StaticResource Glyph.Speaker}">
                         <ToggleSwitch IsChecked="{Binding ShowNowPlaying, Mode=TwoWay}" OnContent="{x:Null}" OffContent="{x:Null}" AutomationProperties.Name="Now playing" />
                     </views:SettingsCard>
-                    <views:SettingsCard CornerRadius="{StaticResource GroupBottomCornerRadius}" Header="Fill card background" Description="Use the artwork as a dimmed background across the whole card. With several playing apps, the primary one wins." IsEnabled="{Binding ShowNowPlaying}">
+                    <views:SettingsCard Header="Fill card background" Description="Use the artwork as a dimmed background across the whole card. With several playing apps, the primary one wins." IsEnabled="{Binding ShowNowPlaying}">
                         <ToggleSwitch IsChecked="{Binding NowPlayingCardBackground, Mode=TwoWay}" OnContent="{x:Null}" OffContent="{x:Null}" AutomationProperties.Name="Fill card background" />
                     </views:SettingsCard>
                 </StackPanel>
 
-                <StackPanel Spacing="1" Margin="0,12,0,0">
-                    <views:SettingsCard CornerRadius="{StaticResource GroupTopCornerRadius}" Header="Peak meter" Description="The level meter behind each device's volume slider. Off shows a plain slider." HeaderGlyph="{StaticResource Glyph.Routing}">
+                <StackPanel Classes="SettingsGroup" Margin="0,12,0,0">
+                    <views:SettingsCard Header="Peak meter" Description="The level meter behind each device's volume slider. Off shows a plain slider." HeaderGlyph="{StaticResource Glyph.Routing}">
                         <ListBox Theme="{StaticResource SegmentedStyle}" SelectedIndex="{Binding PeakMeterColourModeIndex, Mode=TwoWay}" AutomationProperties.Name="Peak meter style">
                             <ListBoxItem Content="Gradient" />
                             <ListBoxItem Content="Blocks" />
@@ -121,7 +123,7 @@
                             <ListBoxItem Content="Off" />
                         </ListBox>
                     </views:SettingsCard>
-                    <views:SettingsCard CornerRadius="{StaticResource GroupMiddleCornerRadius}" Header="Bar colour" Description="Colour for the Single colour style. Pick a swatch or type a hex value such as #FF6CCB5F." IsEnabled="{Binding IsSingleColourMode}">
+                    <views:SettingsCard Header="Bar colour" Description="Colour for the Single colour style. Pick a swatch or type a hex value such as #FF6CCB5F." IsEnabled="{Binding IsSingleColourMode}">
                         <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                             <ItemsControl ItemsSource="{x:Static vm:SettingsViewModel.MeterSwatches}">
                                 <ItemsControl.ItemsPanel>
@@ -140,13 +142,13 @@
                             <Button Content="Reset" Click="OnResetSwatchClick" />
                         </StackPanel>
                     </views:SettingsCard>
-                    <views:SettingsCard CornerRadius="{StaticResource GroupMiddleCornerRadius}" Header="Channels" Description="Split shows a bar per channel group (L / Centre+LFE / R). Combined shows one bar from the loudest channel." IsEnabled="{Binding IsMeterEnabled}">
+                    <views:SettingsCard Header="Channels" Description="Split shows a bar per channel group (L / Centre+LFE / R). Combined shows one bar from the loudest channel." IsEnabled="{Binding IsMeterEnabled}">
                         <ListBox Theme="{StaticResource SegmentedStyle}" SelectedIndex="{Binding PeakMeterChannelModeIndex, Mode=TwoWay}" AutomationProperties.Name="Peak meter channels">
                             <ListBoxItem Content="Split" />
                             <ListBoxItem Content="Combined" />
                         </ListBox>
                     </views:SettingsCard>
-                    <views:SettingsCard CornerRadius="{StaticResource GroupBottomCornerRadius}" Header="Peak-hold tick" Description="Show the line that marks the recent loudest peak. It turns red on clipping." IsEnabled="{Binding IsMeterEnabled}">
+                    <views:SettingsCard Header="Peak-hold tick" Description="Show the line that marks the recent loudest peak. It turns red on clipping." IsEnabled="{Binding IsMeterEnabled}">
                         <ToggleSwitch IsChecked="{Binding PeakMeterShowHold, Mode=TwoWay}" OnContent="{x:Null}" OffContent="{x:Null}" AutomationProperties.Name="Peak-hold tick" />
                     </views:SettingsCard>
                 </StackPanel>
@@ -154,7 +156,7 @@
                 <ItemsControl ItemsSource="{Binding Overrides}" Margin="0,12,0,0">
                     <ItemsControl.ItemsPanel>
                         <ItemsPanelTemplate>
-                            <StackPanel Spacing="1" />
+                            <StackPanel Classes="SettingsGroup" />
                         </ItemsPanelTemplate>
                     </ItemsControl.ItemsPanel>
                     <ItemsControl.ItemTemplate>
@@ -166,35 +168,37 @@
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
 
-                <views:SettingsCard Margin="0,12,0,0" Header="Reset Devices page" Description="Restore the default device groups, order and visibility, and unhide any hidden app chips. Your rules and other settings do not change." HeaderGlyph="{StaticResource Glyph.UpdateRestore}">
-                    <Button Content="Reset" Click="OnResetDevicesClick" />
-                </views:SettingsCard>
+                <StackPanel Classes="SettingsGroup" Margin="0,12,0,0">
+                    <views:SettingsCard Header="Reset Devices page" Description="Restore the default device groups, order and visibility, and unhide any hidden app chips. Your rules and other settings do not change." HeaderGlyph="{StaticResource Glyph.UpdateRestore}">
+                        <Button Content="Reset" Click="OnResetDevicesClick" />
+                    </views:SettingsCard>
+                </StackPanel>
 
-                <TextBlock Text="System tray" Classes="BodyStrong" Margin="0,20,0,4" />
-                <StackPanel Spacing="1">
-                    <views:SettingsCard CornerRadius="{StaticResource GroupTopCornerRadius}" Header="Show tray icon" Description="Show the Earmark icon in the notification area. The options below need it." HeaderGlyph="{StaticResource Glyph.AppsList}">
+                <TextBlock Text="System tray" Classes="Caption" Margin="0,20,0,4" />
+                <StackPanel Classes="SettingsGroup">
+                    <views:SettingsCard Header="Show tray icon" Description="Show the Earmark icon in the notification area. The options below need it." HeaderGlyph="{StaticResource Glyph.AppsList}">
                         <ToggleSwitch IsChecked="{Binding ShowTrayIcon, Mode=TwoWay}" OnContent="{x:Null}" OffContent="{x:Null}" AutomationProperties.Name="Show tray icon" />
                     </views:SettingsCard>
-                    <views:SettingsCard CornerRadius="{StaticResource GroupMiddleCornerRadius}" Header="Minimise to tray" Description="Minimising the window hides it to the tray instead of the taskbar." IsEnabled="{Binding TrayChildrenEnabled}">
+                    <views:SettingsCard Header="Minimise to tray" Description="Minimising the window hides it to the tray instead of the taskbar." IsEnabled="{Binding TrayChildrenEnabled}">
                         <ToggleSwitch IsChecked="{Binding MinimizeToTray, Mode=TwoWay}" OnContent="{x:Null}" OffContent="{x:Null}" AutomationProperties.Name="Minimise to tray" />
                     </views:SettingsCard>
-                    <views:SettingsCard CornerRadius="{StaticResource GroupMiddleCornerRadius}" Header="Close to tray" Description="Closing the window keeps Earmark running in the tray. Use the tray menu to exit." IsEnabled="{Binding TrayChildrenEnabled}">
+                    <views:SettingsCard Header="Close to tray" Description="Closing the window keeps Earmark running in the tray. Use the tray menu to exit." IsEnabled="{Binding TrayChildrenEnabled}">
                         <ToggleSwitch IsChecked="{Binding CloseToTray, Mode=TwoWay}" OnContent="{x:Null}" OffContent="{x:Null}" AutomationProperties.Name="Close to tray" />
                     </views:SettingsCard>
-                    <views:SettingsCard CornerRadius="{StaticResource GroupBottomCornerRadius}" Header="Launch to tray" Description="Skip showing the window on startup and run silently in the tray." IsEnabled="{Binding TrayChildrenEnabled}">
+                    <views:SettingsCard Header="Launch to tray" Description="Skip showing the window on startup and run silently in the tray." IsEnabled="{Binding TrayChildrenEnabled}">
                         <ToggleSwitch IsChecked="{Binding LaunchToTray, Mode=TwoWay}" OnContent="{x:Null}" OffContent="{x:Null}" AutomationProperties.Name="Launch to tray" />
                     </views:SettingsCard>
                 </StackPanel>
 
-                <TextBlock Text="Wave Link" Classes="BodyStrong" Margin="0,20,0,4" />
-                <StackPanel Spacing="1">
-                    <views:SettingsCard CornerRadius="{StaticResource GroupTopCornerRadius}" Header="Wave Link integration" Description="Route Wave Link mix outputs from rules. Earmark connects to Wave Link's local WebSocket while this is on." HeaderGlyph="{StaticResource Glyph.Routing}">
+                <TextBlock Text="Wave Link" Classes="Caption" Margin="0,20,0,4" />
+                <StackPanel Classes="SettingsGroup">
+                    <views:SettingsCard Header="Wave Link integration" Description="Route Wave Link mix outputs from rules. Earmark connects to Wave Link's local WebSocket while this is on." HeaderGlyph="{StaticResource Glyph.Routing}">
                         <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
                             <TextBlock Classes="Caption" Text="{Binding WaveLinkStatus}" VerticalAlignment="Center" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
                             <ToggleSwitch IsChecked="{Binding EnableWaveLink, Mode=TwoWay}" OnContent="{x:Null}" OffContent="{x:Null}" AutomationProperties.Name="Wave Link integration" />
                         </StackPanel>
                     </views:SettingsCard>
-                    <views:SettingsCard CornerRadius="{StaticResource GroupBottomCornerRadius}" Header="Channel style" Description="Borrow each Wave Link channel's look for its device card. Colours tints the icon tile with the channel accent. Icons swaps in the channel's own artwork." IsEnabled="{Binding EnableWaveLink}">
+                    <views:SettingsCard Header="Channel style" Description="Borrow each Wave Link channel's look for its device card. Colours tints the icon tile with the channel accent. Icons swaps in the channel's own artwork." IsEnabled="{Binding EnableWaveLink}">
                         <ListBox Theme="{StaticResource SegmentedStyle}" SelectedIndex="{Binding WaveLinkChannelStyleIndex, Mode=TwoWay}" AutomationProperties.Name="Wave Link channel style">
                             <ListBoxItem Content="Off" />
                             <ListBoxItem Content="Colours" />
@@ -203,33 +207,33 @@
                     </views:SettingsCard>
                 </StackPanel>
 
-                <TextBlock Text="Diagnostics" Classes="BodyStrong" Margin="0,20,0,4" />
-                <StackPanel Spacing="1">
-                    <views:SettingsCard CornerRadius="{StaticResource GroupTopCornerRadius}" Header="Verbose logging" Description="Write debug-level diagnostics to the log file. Leave off for normal use." HeaderGlyph="{StaticResource Glyph.Diagnostic}">
+                <TextBlock Text="Diagnostics" Classes="Caption" Margin="0,20,0,4" />
+                <StackPanel Classes="SettingsGroup">
+                    <views:SettingsCard Header="Verbose logging" Description="Write debug-level diagnostics to the log file. Leave off for normal use." HeaderGlyph="{StaticResource Glyph.Diagnostic}">
                         <ToggleSwitch IsChecked="{Binding VerboseLogging, Mode=TwoWay}" OnContent="{x:Null}" OffContent="{x:Null}" AutomationProperties.Name="Verbose logging" />
                     </views:SettingsCard>
-                    <views:SettingsCard CornerRadius="{StaticResource GroupBottomCornerRadius}" Header="Logs" Description="Open the folder with Earmark's log files (one per launch). To capture a log for a bug report, turn on verbose logging, reproduce the issue, then attach the latest file." HeaderGlyph="{StaticResource Glyph.Folder}" ActionGlyph="{StaticResource Glyph.OpenInNewWindow}" IsClickEnabled="True" Click="OnOpenLogsClick" />
+                    <views:SettingsCard Header="Logs" Description="Open the folder with Earmark's log files (one per launch). To capture a log for a bug report, turn on verbose logging, reproduce the issue, then attach the latest file." HeaderGlyph="{StaticResource Glyph.Folder}" ActionGlyph="{StaticResource Glyph.OpenInNewWindow}" IsClickEnabled="True" Click="OnOpenLogsClick" />
                 </StackPanel>
 
                 <StackPanel x:Name="AboutSection" DataContext="{Binding About}" x:DataType="vm:AboutViewModel" Spacing="4" Margin="0,20,0,0">
-                    <TextBlock Text="Help and feedback" Classes="BodyStrong" Margin="0,0,0,4" />
-                    <StackPanel Spacing="1">
-                        <views:SettingsCard CornerRadius="{StaticResource GroupTopCornerRadius}" Header="Report a bug" Description="Open a pre-filled bug report on GitHub." HeaderGlyph="{StaticResource Glyph.ErrorBadge}" ActionGlyph="{StaticResource Glyph.OpenInNewWindow}" IsClickEnabled="True" Click="OnReportBugClick" />
-                        <views:SettingsCard CornerRadius="{StaticResource GroupMiddleCornerRadius}" Header="Request a feature" Description="Suggest an improvement or a new rule type." HeaderGlyph="{StaticResource Glyph.Edit}" ActionGlyph="{StaticResource Glyph.OpenInNewWindow}" IsClickEnabled="True" Click="OnRequestFeatureClick" />
-                        <views:SettingsCard CornerRadius="{StaticResource GroupBottomCornerRadius}" Header="Project on GitHub" Description="Source, releases and existing issues." HeaderGlyph="{StaticResource Glyph.Globe}" ActionGlyph="{StaticResource Glyph.OpenInNewWindow}" IsClickEnabled="True" Click="OnGitHubClick" />
+                    <TextBlock Text="Help and feedback" Classes="Caption" Margin="0,0,0,4" />
+                    <StackPanel Classes="SettingsGroup">
+                        <views:SettingsCard Header="Report a bug" Description="Open a pre-filled bug report on GitHub." HeaderGlyph="{StaticResource Glyph.ErrorBadge}" ActionGlyph="{StaticResource Glyph.OpenInNewWindow}" IsClickEnabled="True" Click="OnReportBugClick" />
+                        <views:SettingsCard Header="Request a feature" Description="Suggest an improvement or a new rule type." HeaderGlyph="{StaticResource Glyph.Edit}" ActionGlyph="{StaticResource Glyph.OpenInNewWindow}" IsClickEnabled="True" Click="OnRequestFeatureClick" />
+                        <views:SettingsCard Header="Project on GitHub" Description="Source, releases and existing issues." HeaderGlyph="{StaticResource Glyph.Globe}" ActionGlyph="{StaticResource Glyph.OpenInNewWindow}" IsClickEnabled="True" Click="OnGitHubClick" />
                     </StackPanel>
 
-                    <TextBlock Text="About" Classes="BodyStrong" Margin="0,20,0,4" />
-                    <StackPanel Spacing="1">
-                        <views:SettingsCard CornerRadius="{StaticResource GroupTopCornerRadius}" Header="Earmark" Description="{x:Static vm:AboutViewModel.BuildInfo}" HeaderGlyph="{StaticResource Glyph.Info}" />
-                        <views:SettingsCard CornerRadius="{StaticResource GroupMiddleCornerRadius}" Header="Support Earmark" Description="Earmark is free and open source. If it is useful to you, a donation helps keep it maintained." HeaderGlyph="{StaticResource Glyph.Lock}" ActionGlyph="{StaticResource Glyph.OpenInNewWindow}" IsClickEnabled="True" Click="OnDonateClick" />
-                        <views:SettingsCard CornerRadius="{StaticResource GroupMiddleCornerRadius}" IsVisible="{Binding IsUpdateSupported}" Header="Check for updates" Description="{Binding UpdateStatusText}" HeaderGlyph="{StaticResource Glyph.Download}">
+                    <TextBlock Text="About" Classes="Caption" Margin="0,20,0,4" />
+                    <StackPanel Classes="SettingsGroup">
+                        <views:SettingsCard Header="Earmark" Description="{x:Static vm:AboutViewModel.BuildInfo}" HeaderGlyph="{StaticResource Glyph.Info}" />
+                        <views:SettingsCard Header="Support Earmark" Description="Earmark is free and open source. If it is useful to you, a donation helps keep it maintained." HeaderGlyph="{StaticResource Glyph.Lock}" ActionGlyph="{StaticResource Glyph.OpenInNewWindow}" IsClickEnabled="True" Click="OnDonateClick" />
+                        <views:SettingsCard IsVisible="{Binding IsUpdateSupported}" Header="Check for updates" Description="{Binding UpdateStatusText}" HeaderGlyph="{StaticResource Glyph.Download}">
                             <StackPanel Orientation="Horizontal" Spacing="8">
                                 <Button Content="View release" IsVisible="{Binding UpdateAvailable}" Click="OnViewReleaseClick" />
                                 <Button Content="Check now" IsEnabled="{Binding CanCheck}" Click="OnCheckNowClick" />
                             </StackPanel>
                         </views:SettingsCard>
-                        <views:SettingsCard CornerRadius="{StaticResource GroupBottomCornerRadius}" IsVisible="{Binding IsUpdateSupported}" IsEnabled="{x:Static vm:AboutViewModel.CanAutoCheck}" Header="Check automatically on launch" Description="{x:Static vm:AboutViewModel.AutoCheckDescription}" HeaderGlyph="{StaticResource Glyph.Sync}">
+                        <views:SettingsCard IsVisible="{Binding IsUpdateSupported}" IsEnabled="{x:Static vm:AboutViewModel.CanAutoCheck}" Header="Check automatically on launch" Description="{x:Static vm:AboutViewModel.AutoCheckDescription}" HeaderGlyph="{StaticResource Glyph.Sync}">
                             <ToggleSwitch IsChecked="{Binding AutoCheck, Mode=TwoWay}" OnContent="{x:Null}" OffContent="{x:Null}" AutomationProperties.Name="Check automatically on launch" />
                         </views:SettingsCard>
                     </StackPanel>

@@ -5,6 +5,58 @@
     xmlns:vm="using:Earmark.Desktop.ViewModels"
     x:DataType="vm:SessionsViewModel"
     Padding="{StaticResource PageGutter}">
+    <UserControl.Resources>
+        <DataTemplate x:Key="DeviceRowTemplate" x:DataType="vm:SessionRow">
+            <Border Classes="SessionRow">
+                <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="16">
+                    <Panel Width="10" VerticalAlignment="Center">
+                        <Ellipse Width="10" Height="10" Fill="{DynamicResource SystemFillColorSuccessBrush}" IsVisible="{Binding IsActive}" />
+                    </Panel>
+                    <TextBlock Grid.Column="1" Classes="Body" Text="{Binding Device}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="2" Classes="Caption" Text="{Binding Detail}" VerticalAlignment="Center" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                </Grid>
+            </Border>
+        </DataTemplate>
+
+        <DataTemplate x:Key="AppBlockTemplate" x:DataType="vm:AppBlock">
+            <Border Classes="SessionBlock">
+                <StackPanel Spacing="1">
+                    <Border Classes="SessionRow">
+                        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="16">
+                            <Panel Width="10" VerticalAlignment="Center">
+                                <Ellipse Width="10" Height="10" Fill="{DynamicResource SystemFillColorSuccessBrush}" IsVisible="{Binding IsActive}" />
+                            </Panel>
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                <TextBlock Classes="Body" Text="{Binding Title}" TextTrimming="CharacterEllipsis" />
+                                <TextBlock Classes="Caption" Text="{Binding Detail}" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+                    <Border Classes="SessionRow SessionLabel" IsVisible="{Binding HasOutput}">
+                        <TextBlock Classes="Caption" Text="Output" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                    </Border>
+                    <ItemsControl ItemsSource="{Binding Output}" ItemTemplate="{StaticResource DeviceRowTemplate}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <StackPanel Spacing="1" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                    </ItemsControl>
+                    <Border Classes="SessionRow SessionLabel" IsVisible="{Binding HasInput}">
+                        <TextBlock Classes="Caption" Text="Input" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                    </Border>
+                    <ItemsControl ItemsSource="{Binding Input}" ItemTemplate="{StaticResource DeviceRowTemplate}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <StackPanel Spacing="1" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                    </ItemsControl>
+                </StackPanel>
+            </Border>
+        </DataTemplate>
+    </UserControl.Resources>
+
     <Grid RowDefinitions="Auto,*" RowSpacing="16">
         <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
             <TextBlock Classes="PageTitle" Text="Sessions" VerticalAlignment="Center" />
@@ -22,44 +74,14 @@
             </Button>
         </Grid>
 
-        <StackPanel Grid.Row="1" Classes="Empty" IsVisible="{Binding IsEmpty}" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="420" Spacing="8">
-            <TextBlock Classes="Glyph" Text="{StaticResource Glyph.Speaker}" FontSize="40" HorizontalAlignment="Center" Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-            <TextBlock Classes="BodyStrong" Text="No active sessions" HorizontalAlignment="Center" />
-            <TextBlock
-                Classes="Caption"
-                Text="Open an app that plays or records audio (browser, media player, voice chat) and it will show up here."
-                TextAlignment="Center"
-                TextWrapping="Wrap"
-                Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-        </StackPanel>
-
+        <TextBlock Grid.Row="1" Classes="Caption" IsVisible="{Binding IsEmpty}" Text="No apps are using audio. Open an app that plays or records sound and it will show up here." Foreground="{DynamicResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
         <ScrollViewer Grid.Row="1" IsVisible="{Binding !IsEmpty}">
-            <ItemsControl ItemsSource="{Binding Items}">
+            <ItemsControl ItemsSource="{Binding Apps}" ItemTemplate="{StaticResource AppBlockTemplate}">
                 <ItemsControl.ItemsPanel>
                     <ItemsPanelTemplate>
-                        <StackPanel Spacing="4" />
+                        <StackPanel Spacing="12" />
                     </ItemsPanelTemplate>
                 </ItemsControl.ItemsPanel>
-                <ItemsControl.ItemTemplate>
-                    <DataTemplate x:DataType="vm:SessionRow">
-                        <Border Classes="SessionRow">
-                            <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="16">
-                                <Panel Width="10" VerticalAlignment="Center">
-                                    <Ellipse Width="10" Height="10" Fill="{DynamicResource SystemFillColorSuccessBrush}" IsVisible="{Binding IsActive}" />
-                                </Panel>
-                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                    <TextBlock Classes="BodyStrong" Text="{Binding Title}" TextTrimming="CharacterEllipsis" />
-                                    <TextBlock Classes="Caption" Text="{Binding Subtitle}" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                                </StackPanel>
-                                <StackPanel Grid.Column="2" VerticalAlignment="Center" HorizontalAlignment="Right">
-                                    <TextBlock Classes="Caption" Text="Routed to" HorizontalAlignment="Right" Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                                    <TextBlock Classes="Body" Text="{Binding EndpointName}" HorizontalAlignment="Right" />
-                                    <TextBlock Classes="Caption" Text="{Binding RuleCaption}" IsVisible="{Binding HasRule}" HorizontalAlignment="Right" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                                </StackPanel>
-                            </Grid>
-                        </Border>
-                    </DataTemplate>
-                </ItemsControl.ItemTemplate>
             </ItemsControl>
         </ScrollViewer>
     </Grid>
