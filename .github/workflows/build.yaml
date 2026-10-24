@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       force_build:
-        description: "Build the package without a release-please release (use if release-please misfires)"
+        description: "Build the packages without a release-please release (use if release-please misfires)"
         type: boolean
         default: false
 
@@ -21,14 +21,12 @@ permissions:
 env:
   DOTNET_SDK_VERSION: "10.0.x"
   SOLUTION_PATH: Earmark.slnx
-  PROJECT_PATH: src/Earmark.App/Earmark.App.csproj
-  APPXMANIFEST_PATH: src/Earmark.App/Package.appxmanifest
   WIX_SOURCE_PATH: installer/Earmark.wxs
   BOM_FILE: sbom.cdx.json
-  # NOTE: GitHub Actions does not allow expressions in `uses:` refs, so the
-  # pipeline-tools pin is repeated in each `uses:` line below. Bump in lockstep.
-  # Current pin: hoobio/pipeline-tools @ v2.2.1 (v2 split the Dependency-Track
-  # channel input into channel + sub-channel; see the SBOM job below).
+  AVALONIA_TELEMETRY_OPTOUT: "1"
+  # GitHub Actions does not allow expressions in `uses:` refs, so the pipeline-tools pin is
+  # repeated in each `uses:` line below. Bump in lockstep.
+  # Current pin: hoobio/pipeline-tools @ v2.2.1
 
 jobs:
   release-please:
@@ -55,29 +53,20 @@ jobs:
         with:
           dotnet-version: ${{ env.DOTNET_SDK_VERSION }}
 
-      # The .slnx file is minimal and doesn't define a Configuration|Platform matrix,
-      # so MSBuild's generated metaproj rejects any -p:Configuration=...|Platform=...
-      # combination. Restore/build/test the App and tests projects directly instead
-      # (their references pull in Earmark.Core and Earmark.Audio transitively).
-      - name: Restore
-        run: |
-          dotnet restore src/Earmark.App/Earmark.App.csproj -p:Platform=x64
-          dotnet restore tests/Earmark.Core.Tests/Earmark.Core.Tests.csproj -p:Platform=x64
-
       - name: Build (TreatWarningsAsErrors)
-        run: |
-          dotnet build src/Earmark.App/Earmark.App.csproj -c Release -p:Platform=x64 --no-restore -p:TreatWarningsAsErrors=true
-          dotnet build tests/Earmark.Core.Tests/Earmark.Core.Tests.csproj -c Release -p:Platform=x64 --no-restore
+        run: dotnet build ${{ env.SOLUTION_PATH }} -c Release -p:TreatWarningsAsErrors=true
 
       - name: Test
-        run: dotnet test tests/Earmark.Core.Tests/Earmark.Core.Tests.csproj -c Release -p:Platform=x64 --no-build
+        shell: pwsh
+        run: |
+          foreach ($project in Get-ChildItem tests -Recurse -Filter *.csproj) {
+            dotnet test $project.FullName -c Release --no-build
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
 
   build-msix:
     name: Build MSIX (${{ matrix.platform }})
-    # Building the self-contained package is the expensive part, and its only consumers are the
-    # release / pre-release jobs. So build it on PRs (validation + the prerelease source) and on the
-    # push to main that release-please turns into a release - not on every ordinary push to main,
-    # which would rebuild and discard both packages. force_build overrides if release-please misfires.
+    # Only the release / pre-release / Store jobs consume the packages, so ordinary pushes to main skip the build.
     needs: [release-please]
     if: >-
       always()
@@ -87,12 +76,13 @@ jobs:
         || (github.event_name == 'workflow_dispatch' && inputs.force_build)
       )
     runs-on: windows-latest
+    outputs:
+      package-version: ${{ steps.version.outputs.package-version }}
+      release-version: ${{ steps.version.outputs.release-version }}
     strategy:
       fail-fast: false
       matrix:
         platform: [x64, ARM64]
-    env:
-      HAS_SIGNING_CERT: ${{ secrets.SIGNING_CERTIFICATE != '' && vars.SIGNING_CERT_THUMBPRINT != '' }}
     steps:
       - uses: actions/checkout@v7
 
@@ -100,141 +90,98 @@ jobs:
         with:
           dotnet-version: ${{ env.DOTNET_SDK_VERSION }}
 
-      - name: Read version
+      - name: Resolve version and identity
         id: version
         shell: pwsh
-        run: |
-          $ver = (Get-Content version.txt -Raw).Trim()
-          "version=$ver" | Out-File -Append $env:GITHUB_OUTPUT
-          "APP_VERSION=$ver" | Out-File -Append $env:GITHUB_ENV
-
-      - name: Stamp Package.appxmanifest version
-        uses: hoobio/pipeline-tools/pipeline/github/step/stamp-msix-version@v2.2.1
-        with:
-          manifest-path: ${{ env.APPXMANIFEST_PATH }}
-          version: ${{ steps.version.outputs.version }}
-
-      # The base manifest carries the Dev identity (so local F5 installs as "Earmark (Dev)" side by
-      # side with a Store build). CI rewrites it per channel: a normal push/PR builds Release (the
-      # Partner Center reserved identity), and only the release-please PR builds Prerelease. The
-      # Release branch is guarded so the Store identity / publisher can never drift.
-      - name: Stamp channel identity
-        shell: pwsh
         env:
-          MANIFEST: ${{ env.APPXMANIFEST_PATH }}
           EVENT_NAME: ${{ github.event_name }}
           HEAD_REF: ${{ github.head_ref }}
         run: |
-          $channel = if ($env:EVENT_NAME -eq 'pull_request' -and $env:HEAD_REF -eq 'release-please--branches--main') { 'Prerelease' } else { 'Release' }
-          $id = @{
-            Release    = @{ Name = 'Hoobi.Earmark';            Display = 'Earmark' }
-            Prerelease = @{ Name = 'Hoobi.Earmark.Prerelease'; Display = 'Earmark (Prerelease)' }
-          }[$channel]
-          $xml = Get-Content $env:MANIFEST -Raw
-          $xml = $xml -replace '(<Identity[^>]*\bName=")[^"]*(")', ('${1}' + $id.Name + '${2}')
-          $xml = $xml -replace '(<DisplayName>)[^<]*(</DisplayName>)', ('${1}' + $id.Display + '${2}')
-          $xml = $xml -replace '(<uap:VisualElements[^>]*\bDisplayName=")[^"]*(")', ('${1}' + $id.Display + '${2}')
-          Set-Content -Path $env:MANIFEST -Value $xml -Encoding UTF8 -NoNewline
-          Write-Host "Stamped channel=$channel Name=$($id.Name) DisplayName='$($id.Display)'"
-          if ($channel -eq 'Release') {
-            if ($xml -notmatch '<Identity[^>]*\bName="Hoobi\.Earmark"') { throw 'Release Identity Name was not stamped to Hoobi.Earmark' }
-            if ($xml -notmatch 'Publisher="CN=D74C026B-1081-4787-BDE6-0CFA2F1EDD71"') { throw 'Release Publisher must stay the reserved Store CN' }
-          }
+          $release = (Get-Content version.txt -Raw).Trim()
+          $majorMinor = $release -replace '^(\d+\.\d+)\.\d+$', '$1'
+          $prerelease = $env:EVENT_NAME -eq 'pull_request' -and $env:HEAD_REF -eq 'release-please--branches--main'
+          "release-version=$release" | Out-File -Append $env:GITHUB_OUTPUT
+          # Store never downgrades, so the run number keeps every build above any earlier flight.
+          "package-version=$majorMinor.$($env:GITHUB_RUN_NUMBER).0" | Out-File -Append $env:GITHUB_OUTPUT
+          "identity=$($prerelease ? 'Prerelease' : 'Store')" | Out-File -Append $env:GITHUB_OUTPUT
+          "display-version=$($prerelease ? "$release-pre.$($env:GITHUB_RUN_NUMBER)" : '')" | Out-File -Append $env:GITHUB_OUTPUT
 
       - name: Build MSIX
-        uses: hoobio/pipeline-tools/pipeline/github/step/build-msix-dotnet@v2.2.1
-        with:
-          project-path: ${{ env.PROJECT_PATH }}
-          platform: ${{ matrix.platform }}
-          output-dir: ${{ github.workspace }}\AppPackages
-
-      # `dotnet publish` lands the MSIX nested under
-      # AppPackages\Earmark.App_<v>.<rev>_<plat>_Test\Earmark.App_<v>.<rev>_<plat>.msix.
-      # Stage it to a flat directory under a consistent name so the signing step,
-      # artifact upload, and release attachment all see a clean path.
-      - name: Stage MSIX
         shell: pwsh
         env:
           PLATFORM: ${{ matrix.platform }}
-          VERSION: ${{ steps.version.outputs.version }}
-          STAGE_DIR: ${{ github.workspace }}\staging\msix-${{ matrix.platform }}
+          IDENTITY: ${{ steps.version.outputs.identity }}
+          VERSION: ${{ steps.version.outputs.package-version }}
+          DISPLAY_VERSION: ${{ steps.version.outputs.display-version }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
-          $msix = Get-ChildItem -Path "${{ github.workspace }}\AppPackages" -Recurse -Filter *.msix -ErrorAction Stop |
-            Where-Object { $_.FullName -notmatch '\\Dependencies\\' } |
-            Select-Object -First 1
-          if (-not $msix) { throw "No MSIX produced by dotnet publish" }
-          New-Item -ItemType Directory -Path $env:STAGE_DIR -Force | Out-Null
-          $dest = Join-Path $env:STAGE_DIR ("Earmark-{0}-{1}.msix" -f $env:VERSION, $env:PLATFORM)
-          Copy-Item -LiteralPath $msix.FullName -Destination $dest -Force
-          Write-Host "Staged MSIX: $dest"
-
-      # Produce a side-load test build that installs via `Add-AppxPackage -AllowUnsigned`
-      # without a cert. Repacks the staged MSIX with the reserved "unsigned namespace" OID
-      # appended to Identity/@Publisher (see learn.microsoft.com/windows/msix/package/unsigned-package).
-      # This is TEST-ONLY: the OID must never reach the Store, so it lives in a separate
-      # `*-unsigned.msix` artifact and the canonical package above stays clean.
-      # NOTE: an unsigned package with executable content installs for-all-users only, so the
-      # consumer must run `Add-AppxPackage -AllowUnsigned` from an elevated PowerShell.
-      - name: Build unsigned-namespace test MSIX
-        shell: pwsh
-        env:
-          PLATFORM: ${{ matrix.platform }}
-          VERSION: ${{ steps.version.outputs.version }}
-          STAGE_DIR: ${{ github.workspace }}\staging\msix-${{ matrix.platform }}
-          UNSIGNED_DIR: ${{ github.workspace }}\staging\msix-unsigned-${{ matrix.platform }}
-        run: |
-          $makeappx = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\*\x64\makeappx.exe' |
-            Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
-          if (-not $makeappx) { throw 'makeappx.exe not found in the Windows SDK' }
-          $src = Join-Path $env:STAGE_DIR ("Earmark-{0}-{1}.msix" -f $env:VERSION, $env:PLATFORM)
-          $work = Join-Path $env:RUNNER_TEMP ("unsigned-" + $env:PLATFORM)
-          if (Test-Path $work) { Remove-Item $work -Recurse -Force }
-          & $makeappx unpack /p $src /d $work /o
-          if ($LASTEXITCODE -ne 0) { throw "makeappx unpack failed (exit $LASTEXITCODE)" }
-          $mf = Join-Path $work 'AppxManifest.xml'
-          $oid = 'OID.2.25.311729368913984317654407730594956997722=1'
-          $xml = Get-Content $mf -Raw
-          # Append the marker as the LAST field of the Identity Publisher; it must be last.
-          $xml = $xml -replace '(<Identity[^>]*\bPublisher=")([^"]*)(")', "`$1`$2, $oid`$3"
-          if ($xml -notmatch [regex]::Escape($oid)) { throw 'Failed to inject unsigned-namespace OID into manifest' }
-          Set-Content -Path $mf -Value $xml -Encoding UTF8 -NoNewline
-          New-Item -ItemType Directory -Path $env:UNSIGNED_DIR -Force | Out-Null
-          $out = Join-Path $env:UNSIGNED_DIR ("Earmark-{0}-{1}-unsigned.msix" -f $env:VERSION, $env:PLATFORM)
-          & $makeappx pack /d $work /p $out /o
-          if ($LASTEXITCODE -ne 0) { throw "makeappx pack failed (exit $LASTEXITCODE)" }
-          Write-Host "Unsigned-namespace test MSIX: $out"
-
-      - name: Upload unsigned-namespace test MSIX artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: msix-${{ matrix.platform }}-unsigned
-          path: ${{ github.workspace }}\staging\msix-unsigned-${{ matrix.platform }}\Earmark-${{ steps.version.outputs.version }}-${{ matrix.platform }}-unsigned.msix
-          if-no-files-found: error
-
-      - name: Sign MSIX
-        if: env.HAS_SIGNING_CERT == 'true'
-        uses: hoobio/pipeline-tools/pipeline/github/step/sign-msix@v2.2.1
-        with:
-          pfx-base64: ${{ secrets.SIGNING_CERTIFICATE }}
-          pfx-password: ${{ secrets.SIGNING_CERTIFICATE_PASSWORD }}
-          thumbprint: ${{ vars.SIGNING_CERT_THUMBPRINT }}
-          packages-path: ${{ github.workspace }}\staging\msix-${{ matrix.platform }}
-
-      - name: Skip-sign notice
-        if: env.HAS_SIGNING_CERT != 'true'
-        shell: bash
-        run: echo "::warning::SIGNING_CERTIFICATE / SIGNING_CERT_THUMBPRINT not set; MSIX produced unsigned."
+          $ErrorActionPreference = 'Stop'
+          $package = ./scripts/Build-DesktopMsix.ps1 -Platform $env:PLATFORM -Identity $env:IDENTITY -Version $env:VERSION `
+            -DisplayVersion $env:DISPLAY_VERSION -UnsignedTest:($env:EVENT_NAME -eq 'pull_request') `
+            -OutputDirectory "$env:RUNNER_TEMP\msix-$env:PLATFORM" | Select-Object -Last 1
+          $package | Format-List | Out-String | Write-Host
+          New-Item -ItemType Directory -Path "staging\msix-$env:PLATFORM" -Force | Out-Null
+          Copy-Item $package.Msix "staging\msix-$env:PLATFORM"
+          if ($package.MsixUnsignedTest) {
+            New-Item -ItemType Directory -Path "staging\msix-unsigned-$env:PLATFORM" -Force | Out-Null
+            Copy-Item $package.MsixUnsignedTest "staging\msix-unsigned-$env:PLATFORM"
+          }
 
       - name: Upload MSIX artifact
         uses: actions/upload-artifact@v7
         with:
           name: msix-${{ matrix.platform }}
-          path: ${{ github.workspace }}\staging\msix-${{ matrix.platform }}\Earmark-${{ steps.version.outputs.version }}-${{ matrix.platform }}.msix
+          path: ${{ github.workspace }}\staging\msix-${{ matrix.platform }}\Earmark-${{ steps.version.outputs.release-version }}-${{ matrix.platform }}.msix
+          if-no-files-found: error
+
+      - name: Upload unsigned-namespace test MSIX artifact
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v7
+        with:
+          name: msix-${{ matrix.platform }}-unsigned
+          path: ${{ github.workspace }}\staging\msix-unsigned-${{ matrix.platform }}\Earmark-${{ steps.version.outputs.release-version }}-${{ matrix.platform }}-unsigned.msix
+          if-no-files-found: error
+
+  msix-bundle:
+    name: Bundle MSIX for the Store
+    needs: [build-msix]
+    if: always() && needs.build-msix.result == 'success'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: scripts
+          sparse-checkout-cone-mode: false
+
+      - name: Download MSIX (x64)
+        uses: actions/download-artifact@v8
+        with:
+          name: msix-x64
+          path: bundle-input
+
+      - name: Download MSIX (ARM64)
+        uses: actions/download-artifact@v8
+        with:
+          name: msix-ARM64
+          path: bundle-input
+
+      - name: Build msixupload
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.build-msix.outputs.package-version }}
+        run: |
+          New-Item -ItemType Directory -Path staging\msixupload -Force | Out-Null
+          ./scripts/New-MsixBundle.ps1 -MsixDirectory bundle-input -Version $env:VERSION -OutputDirectory staging\msixupload | Format-List
+
+      - name: Upload msixupload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: msixupload
+          path: ${{ github.workspace }}\staging\msixupload\Earmark-${{ needs.build-msix.outputs.package-version }}-Store.msixupload
           if-no-files-found: error
 
   build-msi:
     name: Build MSI (${{ matrix.platform }})
-    # Same gating as build-msix: skip on ordinary pushes to main (see that job for the rationale).
     needs: [release-please]
     if: >-
       always()
@@ -265,50 +212,19 @@ jobs:
           "version=$ver" | Out-File -Append $env:GITHUB_OUTPUT
           "APP_VERSION=$ver" | Out-File -Append $env:GITHUB_ENV
 
-      - name: Resolve runtime identifier
-        id: rid
-        shell: pwsh
-        run: |
-          $rid = if ($env:PLATFORM -eq 'ARM64') { 'win-arm64' } else { 'win-x64' }
-          "rid=$rid" | Out-File -Append $env:GITHUB_OUTPUT
-        env:
-          PLATFORM: ${{ matrix.platform }}
-
       - name: Publish unpackaged self-contained build
         shell: pwsh
         env:
           PLATFORM: ${{ matrix.platform }}
-          RID: ${{ steps.rid.outputs.rid }}
           PUBLISH_DIR: ${{ github.workspace }}\publish\${{ matrix.platform }}
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_REF: ${{ github.head_ref }}
         run: |
-          New-Item -ItemType Directory -Path $env:PUBLISH_DIR -Force | Out-Null
-          # Stamp the in-app build channel (read by Services/AppInfo for the About box / update UI).
-          # The release-please PR build is the one the pre-release job publishes, so mark it
-          # "Prerelease" and bake its full "<ver>-pre.<run>" identity into InformationalVersion so
-          # the installed build can compare itself against newer pre-release tags. Everything else
-          # CI builds is "Release".
-          $channel = if ('${{ github.event_name }}' -eq 'pull_request' -and '${{ github.head_ref }}' -eq 'release-please--branches--main') { 'Prerelease' } else { 'Release' }
-          # Expose the channel to later steps (the WiX build reads $(env.EARMARK_CHANNEL) to set the
-          # per-channel ARP name, install folder, and UpgradeCode).
+          $channel = if ($env:EVENT_NAME -eq 'pull_request' -and $env:HEAD_REF -eq 'release-please--branches--main') { 'Prerelease' } else { 'Release' }
+          # The WiX build reads $(env.EARMARK_CHANNEL) for the per-channel ARP name, install folder and UpgradeCode.
           "EARMARK_CHANNEL=$channel" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          $extra = @()
-          if ($channel -eq 'Prerelease') {
-            $extra += "-p:InformationalVersion=$($env:APP_VERSION)-pre.$($env:GITHUB_RUN_NUMBER)"
-          }
-          dotnet publish $env:PROJECT_PATH `
-            -c Release `
-            -p:Platform=$env:PLATFORM `
-            -p:RuntimeIdentifier=$env:RID `
-            -p:WindowsPackageType=None `
-            -p:WindowsAppSDKSelfContained=true `
-            -p:SelfContained=true `
-            -p:EarmarkBuildChannel=$channel `
-            $extra `
-            -o $env:PUBLISH_DIR
-          if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed (exit $LASTEXITCODE)" }
-          if (-not (Test-Path "$env:PUBLISH_DIR\Earmark.App.exe")) {
-            throw "Expected Earmark.App.exe in publish output"
-          }
+          $display = if ($channel -eq 'Prerelease') { "$($env:APP_VERSION)-pre.$($env:GITHUB_RUN_NUMBER)" }
+          ./scripts/Publish-EarmarkDesktop.ps1 -Platform $env:PLATFORM -Channel $channel -DisplayVersion $display -OutputDirectory $env:PUBLISH_DIR
 
       - name: Build MSI
         uses: hoobio/pipeline-tools/pipeline/github/step/build-msi-wix@v2.2.1
@@ -318,9 +234,7 @@ jobs:
           platform: ${{ matrix.platform }}
           payload-dir: ${{ github.workspace }}\publish\${{ matrix.platform }}
           output-dir: ${{ github.workspace }}\staging\msi-${{ matrix.platform }}
-          # Pin extensions to 5.x; the unversioned form pulls the latest (currently
-          # 7.0.0), which fails with "Could not find expected package root folder
-          # wixext5. Ensure WixToolset.UI.wixext/7.0.0 is compatible with WiX v5."
+          # Unversioned pulls 7.0.0, which fails: "Could not find expected package root folder wixext5".
           extensions: "WixToolset.UI.wixext/5.0.2,WixToolset.Util.wixext/5.0.2"
 
       - name: Sign MSI
@@ -344,12 +258,108 @@ jobs:
           path: ${{ github.workspace }}\staging\msi-${{ matrix.platform }}\Earmark-${{ steps.version.outputs.version }}-${{ matrix.platform }}.msi
           if-no-files-found: error
 
+  build-portable:
+    name: Build portable exe (${{ matrix.platform }})
+    needs: [release-please]
+    if: >-
+      always()
+      && (
+        github.event_name == 'pull_request'
+        || needs.release-please.outputs.release_created == 'true'
+        || (github.event_name == 'workflow_dispatch' && inputs.force_build)
+      )
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [x64, ARM64]
+    env:
+      HAS_SIGNING_CERT: ${{ secrets.SIGNING_CERTIFICATE != '' && vars.SIGNING_CERT_THUMBPRINT != '' }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ env.DOTNET_SDK_VERSION }}
+
+      - name: Read version
+        id: version
+        shell: pwsh
+        run: |
+          $ver = (Get-Content version.txt -Raw).Trim()
+          "version=$ver" | Out-File -Append $env:GITHUB_OUTPUT
+          "APP_VERSION=$ver" | Out-File -Append $env:GITHUB_ENV
+
+      - name: Publish single-file exe
+        shell: pwsh
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          PUBLISH_DIR: ${{ github.workspace }}\publish
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          $channel = if ($env:EVENT_NAME -eq 'pull_request' -and $env:HEAD_REF -eq 'release-please--branches--main') { 'Prerelease' } else { 'Release' }
+          $display = if ($channel -eq 'Prerelease') { "$($env:APP_VERSION)-pre.$($env:GITHUB_RUN_NUMBER)" }
+          ./scripts/Publish-EarmarkDesktop.ps1 -Platform $env:PLATFORM -Channel $channel -DisplayVersion $display -OutputDirectory $env:PUBLISH_DIR -SingleFile
+          $stray = Get-ChildItem $env:PUBLISH_DIR -File -Filter *.dll
+          if ($stray) { throw "Native libraries left beside the exe: $($stray.Name -join ', ')" }
+          New-Item -ItemType Directory -Path staging\licences -Force | Out-Null
+          Copy-Item (Join-Path $env:PUBLISH_DIR 'Earmark.exe') staging\Earmark.exe
+          Copy-Item LICENSE staging\licences\Earmark-LICENSE.txt
+          # OFL and MIT font licences must ship with each copy.
+          Get-ChildItem -Path (Join-Path $env:PUBLISH_DIR 'Assets\Fonts\*.txt'), 'src\Earmark.Desktop\Assets\Fonts\*.txt' -ErrorAction SilentlyContinue |
+            Copy-Item -Destination staging\licences -Force
+
+      - name: Sign exe
+        if: env.HAS_SIGNING_CERT == 'true'
+        shell: pwsh
+        env:
+          PFX_BASE64: ${{ secrets.SIGNING_CERTIFICATE }}
+          PFX_PASSWORD: ${{ secrets.SIGNING_CERTIFICATE_PASSWORD }}
+          THUMBPRINT: ${{ vars.SIGNING_CERT_THUMBPRINT }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pfx = Join-Path $env:RUNNER_TEMP ([guid]::NewGuid().ToString('N') + '.pfx')
+          try {
+            [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:PFX_BASE64))
+            $secure = ConvertTo-SecureString -String $env:PFX_PASSWORD -AsPlainText -Force
+            Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $secure | Out-Null
+          }
+          finally {
+            Remove-Item -LiteralPath $pfx -Force -ErrorAction SilentlyContinue
+          }
+          $signtool = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin' -Recurse -Filter signtool.exe -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match '\\x64\\signtool\.exe$' } |
+            Sort-Object { [version]($_.FullName -replace '.*\\(\d+\.\d+\.\d+\.\d+)\\.*', '$1') } -Descending |
+            Select-Object -First 1 -ExpandProperty FullName
+          if (-not $signtool) { throw 'Could not locate signtool.exe under the Windows SDK' }
+          & $signtool sign /fd SHA256 /sha1 $env:THUMBPRINT /td SHA256 staging\Earmark.exe
+          if ($LASTEXITCODE -ne 0) { throw "signtool failed for staging\Earmark.exe (exit $LASTEXITCODE)" }
+
+      - name: Skip-sign notice
+        if: env.HAS_SIGNING_CERT != 'true'
+        shell: bash
+        run: echo "::warning::SIGNING_CERTIFICATE / SIGNING_CERT_THUMBPRINT not set; exe produced unsigned."
+
+      - name: Zip the exe and licences
+        shell: pwsh
+        env:
+          ZIP_NAME: Earmark-${{ steps.version.outputs.version }}-win-${{ matrix.platform == 'ARM64' && 'arm64' || 'x64' }}.zip
+        run: |
+          New-Item -ItemType Directory -Path staging\zip -Force | Out-Null
+          Compress-Archive -Path staging\Earmark.exe, staging\licences -DestinationPath "staging\zip\$env:ZIP_NAME"
+
+      - name: Upload portable artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: portable-${{ matrix.platform }}
+          path: ${{ github.workspace }}\staging\zip\Earmark-${{ steps.version.outputs.version }}-win-${{ matrix.platform == 'ARM64' && 'arm64' || 'x64' }}.zip
+          if-no-files-found: error
+
   wack:
     name: WACK (${{ matrix.platform }})
     needs: [build-msix]
-    # build-msix runs via `if: always()` (it overrides the skipped release-please job on PRs). Without
-    # an explicit condition here, that upstream skip propagates through and skips WACK too. Gate on
-    # build-msix's actual result so WACK runs whenever the package was built, and skips with it.
+    # build-msix runs under `always()`, so the skipped release-please job would skip WACK too without this.
     if: always() && needs.build-msix.result == 'success'
     runs-on: windows-latest
     strategy:
@@ -401,10 +411,7 @@ jobs:
         with:
           dotnet-version: ${{ env.DOTNET_SDK_VERSION }}
 
-      # Channel routing for the Backstage hierarchy in Dependency-Track. v2 of
-      # pipeline-tools takes channel + sub-channel as two separate inputs (the
-      # old single `ci/<branch>` string is a v1 shape that the bootstrap now
-      # treats as a legacy and migrates out from under us).
+      # pipeline-tools v2 takes channel + sub-channel as separate inputs:
       #   release event           -> channel=release,        sub-channel='',         mark-latest=true,  no prune
       #   push to default branch  -> channel=main,           sub-channel='',         mark-latest=false, prune
       #   push to feature / PR    -> channel=ci,             sub-channel=<branch>,   mark-latest=false, prune
@@ -429,7 +436,6 @@ jobs:
             $branchSource = if ($env:EVENT_NAME -eq 'pull_request') { $env:HEAD_REF } else { $env:REF_NAME }
             $sanitized = ($branchSource -replace '[^A-Za-z0-9._/-]', '-')
             if ($sanitized -eq $env:DEFAULT_BRANCH) {
-              # Default branch sits at top-level alongside release, not nested under ci.
               $channel = $sanitized
               $subChannel = ''
             }
@@ -442,8 +448,6 @@ jobs:
             $prune = 'true'
           }
 
-          # Effective parent name used by the upload step. Used for the tag value
-          # so DT filters match the new v2 hierarchy.
           $effectiveChannel = if ($subChannel) { $subChannel } else { $channel }
 
           "channel=$channel"                  | Out-File -Append $env:GITHUB_OUTPUT
@@ -499,13 +503,15 @@ jobs:
 
   release:
     name: Publish Release
-    needs: [release-please, lint-and-test, build-msix, build-msi, wack, sbom]
+    needs: [release-please, lint-and-test, build-msix, msix-bundle, build-msi, build-portable, wack, sbom]
     if: >-
       always()
       && needs.release-please.outputs.release_created == 'true'
       && needs.lint-and-test.result == 'success'
       && needs.build-msix.result == 'success'
+      && needs.msix-bundle.result == 'success'
       && needs.build-msi.result == 'success'
+      && needs.build-portable.result == 'success'
       && needs.wack.result == 'success'
       && needs.sbom.result == 'success'
     runs-on: ubuntu-latest
@@ -514,10 +520,6 @@ jobs:
       attestations: write
       contents: write
     steps:
-      # Download every artefact into a single tree under `release/`. Each
-      # artefact's contents already sit at the root of its own folder (the
-      # build/wack/sbom jobs stage to flat dirs first), so the attach step can
-      # just glob across `release/**` for raw files.
       - name: Download MSIX (x64)
         uses: actions/download-artifact@v8
         with:
@@ -528,6 +530,11 @@ jobs:
         with:
           name: msix-ARM64
           path: release/msix-ARM64
+      - name: Download msixupload
+        uses: actions/download-artifact@v8
+        with:
+          name: msixupload
+          path: release/msixupload
       - name: Download MSI (x64)
         uses: actions/download-artifact@v8
         with:
@@ -538,6 +545,16 @@ jobs:
         with:
           name: msi-ARM64
           path: release/msi-ARM64
+      - name: Download portable zip (x64)
+        uses: actions/download-artifact@v8
+        with:
+          name: portable-x64
+          path: release/portable-x64
+      - name: Download portable zip (ARM64)
+        uses: actions/download-artifact@v8
+        with:
+          name: portable-ARM64
+          path: release/portable-ARM64
       - name: Download SBOM
         uses: actions/download-artifact@v8
         with:
@@ -557,7 +574,7 @@ jobs:
       - name: Attest installer provenance
         uses: actions/attest-build-provenance@v4
         with:
-          subject-path: "release/msix-*/*.msix,release/msi-*/*.msi"
+          subject-path: "release/msix-*/*.msix,release/msixupload/*.msixupload,release/msi-*/*.msi,release/portable-*/*.zip"
 
       - name: Attach all artefacts to draft release
         env:
@@ -567,7 +584,9 @@ jobs:
           set -euo pipefail
           mapfile -t RELEASE_FILES < <(find release -type f \( \
             -name '*.msix' -o \
+            -name '*.msixupload' -o \
             -name '*.msi'  -o \
+            -name '*.zip'  -o \
             -name '*.cdx.json' -o \
             -name 'wack-report-*.xml' \))
           if [ "${#RELEASE_FILES[@]}" -eq 0 ]; then
@@ -585,17 +604,17 @@ jobs:
 
   pre-release:
     name: Pre-Release
-    # Runs on the release-please PR (which already carries the bumped version.txt + changelog),
-    # turning each push to that PR into an installable pre-release so the bumped build can be
-    # smoke-tested before the release PR merges. The in-app update check ignores these (it only
-    # compares against releases/latest, which excludes prereleases).
-    needs: [build-msix, build-msi, lint-and-test]
+    # Runs on the release-please PR (already carrying the bumped version.txt and changelog) so the bumped
+    # build can be smoke-tested before it merges. Shipped clients ignore these: the in-app update check
+    # only considers pre-releases on the Prerelease channel.
+    needs: [build-msix, build-msi, build-portable, lint-and-test]
     if: >-
       always()
       && github.event_name == 'pull_request'
       && github.head_ref == 'release-please--branches--main'
       && needs.build-msix.result == 'success'
       && needs.build-msi.result == 'success'
+      && needs.build-portable.result == 'success'
       && needs.lint-and-test.result == 'success'
     runs-on: ubuntu-latest
     permissions:
@@ -616,10 +635,6 @@ jobs:
 
       - name: Generate release notes
         env:
-          # This job runs on the release-please PR, whose body is the cumulative changelog for the
-          # upcoming release (every change since the last stable). That's the right set of notes for
-          # a pre-release; the old git-log diff only covered the delta since the previous pre-release,
-          # so earlier changes in the same release dropped off. Fall back to a short log if absent.
           PR_BODY: ${{ github.event.pull_request.body }}
         run: |
           if [ -n "$PR_BODY" ]; then
@@ -638,9 +653,7 @@ jobs:
         with:
           name: msix-ARM64
           path: release/msix-ARM64
-      # Unsigned-namespace test builds: attached to pre-releases only (the pre-publish
-      # smoke-test path), so `Add-AppxPackage -AllowUnsigned` works without trusting a cert.
-      # The final `release` job deliberately omits these so they never ship on a stable release.
+      # Pre-release only: `Add-AppxPackage -AllowUnsigned` installs these without trusting a cert.
       - name: Download unsigned test MSIX (x64)
         uses: actions/download-artifact@v8
         with:
@@ -661,11 +674,19 @@ jobs:
         with:
           name: msi-ARM64
           path: release/msi-ARM64
+      - name: Download portable zip (x64)
+        uses: actions/download-artifact@v8
+        with:
+          name: portable-x64
+          path: release/portable-x64
+      - name: Download portable zip (ARM64)
+        uses: actions/download-artifact@v8
+        with:
+          name: portable-ARM64
+          path: release/portable-ARM64
 
-      # Create as a draft first so the asset upload completes even on repos with immutable
-      # releases, then flip to a published prerelease.
+      # Created as a draft first so the asset upload completes on repos with immutable releases.
       - name: Create pre-release (draft)
-        # Pinned to a commit SHA (third-party action). Bump via Dependabot/Renovate.
         uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b  # v3.0.1
         with:
           tag_name: v${{ steps.version.outputs.version }}-pre.${{ github.run_number }}
@@ -677,6 +698,7 @@ jobs:
           files: |
             release/**/*.msix
             release/**/*.msi
+            release/**/*.zip
 
       - name: Publish pre-release
         env:
@@ -699,3 +721,211 @@ jobs:
             echo "Deleting old pre-release: $TAG"
             gh release delete "$TAG" --repo ${{ github.repository }} --yes --cleanup-tag
           done
+
+  store-submit:
+    name: Publish to Microsoft Store
+    needs: [release-please, lint-and-test, build-msix, msix-bundle]
+    if: >-
+      always()
+      && needs.release-please.outputs.release_created == 'true'
+      && needs.lint-and-test.result == 'success'
+      && needs.msix-bundle.result == 'success'
+      && vars.AZURE_CLIENT_ID != ''
+    runs-on: windows-latest
+    timeout-minutes: 90
+    permissions:
+      id-token: write
+      contents: read
+      actions: read
+    env:
+      STORE_PRODUCT_ID: 9N27KG5M9W9B
+      KEY_VAULT: hbicfgkvtaus01
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download msixupload
+        uses: actions/download-artifact@v8
+        with:
+          name: msixupload
+          path: package
+
+      - uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+
+      - name: Setup Microsoft Store CLI
+        uses: microsoft/microsoft-store-apppublisher@v1.4
+
+      - name: Find previous published release
+        id: previous-release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.build-msix.outputs.release-version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $releases = gh api repos/${{ github.repository }}/releases --paginate | ConvertFrom-Json
+          $current = [version]$env:VERSION
+          $best = $null
+          foreach ($r in $releases) {
+            if ($r.draft -or $r.prerelease) { continue }
+            if ($r.tag_name -notmatch '^v?(\d+\.\d+\.\d+)$') { continue }
+            $v = [version]$Matches[1]
+            if ($v -ge $current) { continue }
+            if (-not $best -or $v -gt $best) { $best = $v }
+          }
+          if ($best) { "since=$best" | Out-File -Append $env:GITHUB_OUTPUT }
+
+      - name: Configure Store credentials from Key Vault
+        shell: pwsh
+        run: |
+          $store = @{}
+          foreach ($name in 'tenant-id', 'client-id', 'client-secret', 'seller-id') {
+            $value = az keyvault secret show --vault-name $env:KEY_VAULT --name "msstore-$name" --query value -o tsv
+            if ($LASTEXITCODE -ne 0 -or -not $value) { throw "Key Vault secret msstore-$name could not be read" }
+            Write-Host "::add-mask::$value"
+            $store[$name] = $value
+          }
+          msstore reconfigure --tenantId $store['tenant-id'] --sellerId $store['seller-id'] --clientId $store['client-id'] --clientSecret $store['client-secret']
+          if ($LASTEXITCODE -ne 0) { throw "msstore reconfigure failed ($LASTEXITCODE)" }
+
+      - name: Publish package + release notes to Store
+        shell: pwsh
+        env:
+          PRODUCT_ID: ${{ env.STORE_PRODUCT_ID }}
+          VERSION: ${{ needs.build-msix.outputs.release-version }}
+          SINCE_VERSION: ${{ steps.previous-release.outputs.since }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          . "$env:GITHUB_WORKSPACE\scripts\Get-StoreWhatsNew.ps1"
+          . "$env:GITHUB_WORKSPACE\scripts\Wait-StoreSubmissionClear.ps1"
+          $package = (Get-ChildItem package -Filter *.msixupload | Select-Object -First 1).FullName
+          if (-not $package) { throw 'No .msixupload artifact found' }
+
+          $attempt = 0
+          do {
+            $attempt++
+            Wait-StoreSubmissionClear -ProductId $env:PRODUCT_ID
+            $publishOut = msstore publish $package -id $env:PRODUCT_ID --noCommit 2>&1 | Out-String
+            Write-Host $publishOut
+            if ($LASTEXITCODE -eq 0) { break }
+            if ($publishOut -notmatch 'Error while creating submission' -or $attempt -ge 3) {
+              throw "msstore publish failed ($LASTEXITCODE)"
+            }
+            Write-Host "msstore publish failed creating the submission; retrying in 60 seconds (attempt $attempt of 3)."
+            Start-Sleep -Seconds 60
+          } while ($true)
+
+          $whatsNewParams = @{ ChangelogPath = "$env:GITHUB_WORKSPACE\CHANGELOG.md"; Version = $env:VERSION }
+          if ($env:SINCE_VERSION) { $whatsNewParams.SinceVersion = $env:SINCE_VERSION }
+          $whatsNew = Get-StoreWhatsNew @whatsNewParams
+
+          $sub = Get-StorePendingSubmission -ProductId $env:PRODUCT_ID -PackagePath $package
+          Hide-StoreUploadUrl $sub
+
+          foreach ($listing in $sub.Listings.PSObject.Properties) {
+            $listing.Value.BaseListing | Add-Member -NotePropertyName ReleaseNotes -NotePropertyValue $whatsNew -Force
+          }
+          $delivery = $sub.PackageDeliveryOptions ?? [pscustomobject]@{}
+          $delivery | Add-Member IsMandatoryUpdate $true -Force
+          $delivery | Add-Member MandatoryUpdateEffectiveDate ([DateTime]::UtcNow.ToString('o')) -Force
+          $sub | Add-Member PackageDeliveryOptions $delivery -Force
+
+          # submission update, not updateMetadata: updateMetadata drops PackageDeliveryOptions.
+          $sub | ConvertTo-Json -Depth 100 | Set-Content -Path patched.json -Encoding utf8
+          $null = msstore submission update $env:PRODUCT_ID (Get-Content -Raw patched.json) 2>&1
+          if ($LASTEXITCODE -ne 0) { throw "submission update failed ($LASTEXITCODE)" }
+
+          msstore submission publish $env:PRODUCT_ID
+          if ($LASTEXITCODE -ne 0) { throw "submission publish failed ($LASTEXITCODE)" }
+          Write-Host "Submitted $package to the Store (product $env:PRODUCT_ID)."
+
+  store-flight:
+    name: Submit to Store pre-release flight
+    needs: [release-please, build-msix, msix-bundle]
+    if: >-
+      always()
+      && github.event_name != 'pull_request'
+      && needs.msix-bundle.result == 'success'
+      && vars.STORE_FLIGHT_ID != ''
+      && vars.AZURE_CLIENT_ID != ''
+    runs-on: windows-latest
+    timeout-minutes: 90
+    permissions:
+      id-token: write
+      contents: read
+      actions: read
+    env:
+      STORE_PRODUCT_ID: 9N27KG5M9W9B
+      KEY_VAULT: hbicfgkvtaus01
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download msixupload
+        uses: actions/download-artifact@v8
+        with:
+          name: msixupload
+          path: package
+
+      - uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+
+      - name: Setup Microsoft Store CLI
+        uses: microsoft/microsoft-store-apppublisher@v1.4
+
+      - name: Configure Store credentials from Key Vault
+        shell: pwsh
+        run: |
+          $store = @{}
+          foreach ($name in 'tenant-id', 'client-id', 'client-secret', 'seller-id') {
+            $value = az keyvault secret show --vault-name $env:KEY_VAULT --name "msstore-$name" --query value -o tsv
+            if ($LASTEXITCODE -ne 0 -or -not $value) { throw "Key Vault secret msstore-$name could not be read" }
+            Write-Host "::add-mask::$value"
+            $store[$name] = $value
+          }
+          msstore reconfigure --tenantId $store['tenant-id'] --sellerId $store['seller-id'] --clientId $store['client-id'] --clientSecret $store['client-secret']
+          if ($LASTEXITCODE -ne 0) { throw "msstore reconfigure failed ($LASTEXITCODE)" }
+
+      - name: Publish package to the Store flight
+        shell: pwsh
+        env:
+          PRODUCT_ID: ${{ env.STORE_PRODUCT_ID }}
+          FLIGHT_ID: ${{ vars.STORE_FLIGHT_ID }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          . "$env:GITHUB_WORKSPACE\scripts\Wait-StoreSubmissionClear.ps1"
+          $package = (Get-ChildItem package -Filter *.msixupload | Select-Object -First 1).FullName
+          if (-not $package) { throw 'No .msixupload artifact found' }
+
+          $attempt = 0
+          do {
+            $attempt++
+            Wait-StoreSubmissionClear -ProductId $env:PRODUCT_ID -FlightId $env:FLIGHT_ID
+            $publishOut = msstore publish $package -id $env:PRODUCT_ID --flightId $env:FLIGHT_ID --noCommit 2>&1 | Out-String
+            Write-Host $publishOut
+            if ($LASTEXITCODE -eq 0) { break }
+            if ($publishOut -notmatch 'Error while creating flight submission' -or $attempt -ge 3) {
+              throw "msstore publish failed ($LASTEXITCODE)"
+            }
+            Write-Host "msstore publish failed creating the flight submission; retrying in 60 seconds (attempt $attempt of 3)."
+            Start-Sleep -Seconds 60
+          } while ($true)
+
+          $sub = Get-StorePendingSubmission -ProductId $env:PRODUCT_ID -PackagePath $package -FlightId $env:FLIGHT_ID
+          Hide-StoreUploadUrl $sub
+          $delivery = $sub.PackageDeliveryOptions ?? [pscustomobject]@{}
+          $delivery | Add-Member IsMandatoryUpdate $true -Force
+          $delivery | Add-Member MandatoryUpdateEffectiveDate ([DateTime]::UtcNow.ToString('o')) -Force
+          $sub | Add-Member PackageDeliveryOptions $delivery -Force
+          $sub | ConvertTo-Json -Depth 100 | Set-Content -Path patched.json -Encoding utf8
+          $null = msstore flights submission update $env:PRODUCT_ID $env:FLIGHT_ID (Get-Content -Raw patched.json) 2>&1
+          if ($LASTEXITCODE -ne 0) { throw "flights submission update failed ($LASTEXITCODE)" }
+
+          msstore flights submission publish $env:PRODUCT_ID $env:FLIGHT_ID
+          if ($LASTEXITCODE -ne 0) { throw "flights submission publish failed ($LASTEXITCODE)" }
+          Write-Host "Submitted $package to Store flight $env:FLIGHT_ID (product $env:PRODUCT_ID)."

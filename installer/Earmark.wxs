@@ -105,7 +105,7 @@
       stream as an icon resource - without it, ARP and the Start Menu
       shortcut both fall back to the generic placeholder icon.
     -->
-    <Icon Id="EarmarkIcon.ico" SourceFile="$(sys.SOURCEFILEDIR)..\src\Earmark.App\Assets\AppIcon.ico" />
+    <Icon Id="EarmarkIcon.ico" SourceFile="$(sys.SOURCEFILEDIR)Earmark.ico" />
     <Property Id="ARPPRODUCTICON" Value="EarmarkIcon.ico" />
     <Property Id="ARPHELPLINK" Value="https://github.com/hoobio/earmark" />
     <Property Id="ARPURLINFOABOUT" Value="https://github.com/hoobio/earmark" />
@@ -127,7 +127,7 @@
         <Shortcut Id="EarmarkShortcut"
                   Name="Earmark$(var.ChannelLabel)"
                   Description="Per-app audio routing"
-                  Target="[INSTALLFOLDER]Earmark.App.exe"
+                  Target="[INSTALLFOLDER]Earmark.exe"
                   WorkingDirectory="INSTALLFOLDER"
                   Icon="EarmarkIcon.ico"
                   IconIndex="0" />
@@ -180,7 +180,7 @@
       - WixUIDialogBmp  (493x312): full background for the Welcome and Exit
         dialogs; only the left ~164 px strip is visible (the rest is covered
         by the dialog's text panel).
-      Both are generated from src\Earmark.App\Assets\logo.png and checked in
+      Both are generated from the Earmark logo and checked in
       next to this .wxs.
     -->
     <WixVariable Id="WixUIBannerBmp" Value="$(sys.SOURCEFILEDIR)WixUIBannerBmp.bmp" />
@@ -197,7 +197,7 @@
   </Package>
 
   <!--
-    Payload harvest. Earmark.App.exe gets an explicit File Id so WixShellExec can
+    Payload harvest. Earmark.exe gets an explicit File Id so WixShellExec can
     target it via [#EarmarkAppExe]; everything else is auto-harvested by <Files>.
   -->
   <Fragment>
@@ -206,11 +206,11 @@
            unique per channel so the products don't share component reference counts. -->
       <Component Id="EarmarkAppExeComponent" Guid="*">
         <File Id="EarmarkAppExe"
-              Source="$(var.PayloadDir)\Earmark.App.exe"
+              Source="$(var.PayloadDir)\Earmark.exe"
               KeyPath="yes" />
       </Component>
       <Files Include="$(var.PayloadDir)\**">
-        <Exclude Files="$(var.PayloadDir)\Earmark.App.exe" />
+        <Exclude Files="$(var.PayloadDir)\Earmark.exe" />
       </Files>
     </ComponentGroup>
   </Fragment>
