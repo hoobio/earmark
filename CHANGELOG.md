@@ -1,5 +1,19 @@
 # Changelog
 
+## [2.1.0](https://github.com/hoobio/earmark/compare/v2.0.1...v2.1.0) (2026-10-24)
+
+
+### Features
+
+* **startup:** limit launch on startup to release builds ([96200d8](https://github.com/hoobio/earmark/commit/96200d8ab71838a4e3b84e17b0fc5bcd5ca7b43c))
+* Store update check and Store start at sign-in ([#75](https://github.com/hoobio/earmark/issues/75)) ([96200d8](https://github.com/hoobio/earmark/commit/96200d8ab71838a4e3b84e17b0fc5bcd5ca7b43c))
+* **update:** check the Microsoft Store for updates in Store builds ([96200d8](https://github.com/hoobio/earmark/commit/96200d8ab71838a4e3b84e17b0fc5bcd5ca7b43c))
+
+
+### Bug Fixes
+
+* **startup:** start Store builds at sign-in through a startup task ([96200d8](https://github.com/hoobio/earmark/commit/96200d8ab71838a4e3b84e17b0fc5bcd5ca7b43c))
+
 ## [2.0.1](https://github.com/hoobio/earmark/compare/v2.0.0...v2.0.1) (2026-10-24)
 
 
