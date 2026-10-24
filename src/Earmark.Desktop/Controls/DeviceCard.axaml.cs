@@ -4,6 +4,7 @@ using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Media;
 using Avalonia.Styling;
 using Avalonia.VisualTree;
 
@@ -64,6 +65,12 @@ public sealed partial class DeviceCard : UserControl
         Root.AddHandler(DragDrop.DragOverEvent, OnDragOver);
         Root.AddHandler(DragDrop.DragLeaveEvent, (_, _) => SetDropTarget(false));
         Root.AddHandler(DragDrop.DropEvent, OnDrop);
+        // Border.ClipToBounds clips children to a square rect, so the artwork needs its own rounded clip.
+        Art.SizeChanged += (_, e) =>
+        {
+            var radius = Math.Max(0, Root.CornerRadius.TopLeft - Root.BorderThickness.Left);
+            Art.Clip = new RectangleGeometry(new Rect(e.NewSize), radius, radius);
+        };
     }
 
     public DeviceCardViewModel? Card { get => GetValue(CardProperty); set => SetValue(CardProperty, value); }

@@ -17,7 +17,7 @@
         Opacity="{Binding Card.CardOpacity}"
         DragDrop.AllowDrop="True">
         <Panel>
-            <Panel IsHitTestVisible="False">
+            <Panel x:Name="Art" IsHitTestVisible="False">
                 <Panel.IsVisible>
                     <MultiBinding Converter="{x:Static BoolConverters.And}">
                         <Binding Path="Options.ShowNowPlaying" />
