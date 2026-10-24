@@ -103,6 +103,12 @@ public sealed partial class App : Application
             return;
         }
 
+        if (AppInfo.IsDevBuild)
+        {
+            logger.LogInformation("Run at login refresh skipped on a Dev build");
+            return;
+        }
+
         try
         {
             logger.LogInformation("Run at login refreshed: {Command}", StartupRegistration.Register(settings.LaunchToTray));

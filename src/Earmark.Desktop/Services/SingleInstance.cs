@@ -6,8 +6,8 @@ namespace Earmark.Desktop.Services;
 
 public sealed class SingleInstance : IDisposable
 {
-    private static readonly string BaseName = AppInfo.ChannelFolder is { Length: > 0 } channel ? $"Local\\Earmark.{channel}" : "Local\\Earmark";
-    private static readonly string ShowEventName = $"{BaseName}.Show";
+    private const string BaseName = "Local\\Earmark";
+    private const string ShowEventName = $"{BaseName}.Show";
 
     private readonly Mutex _mutex;
     private readonly EventWaitHandle _show;

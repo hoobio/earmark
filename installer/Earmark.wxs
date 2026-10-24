@@ -170,6 +170,23 @@
                   DllEntry="WixShellExec"
                   Impersonate="yes" />
 
+    <!-- A tray-parked Earmark cancels WM_CLOSE, so util:CloseApplication cannot free the files; taskkill ends both the 1.1.0 Earmark.App.exe and Earmark.exe. -->
+    <SetProperty Id="WixQuietExecCmdLine"
+                 Action="SetStopEarmarkCmdLine"
+                 Value='"[SystemFolder]taskkill.exe" /f /im Earmark.App.exe /im Earmark.exe'
+                 Before="StopEarmark"
+                 Sequence="execute" />
+    <CustomAction Id="StopEarmark"
+                  DllEntry="WixQuietExec"
+                  BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)"
+                  Execute="immediate"
+                  Impersonate="yes"
+                  Return="ignore" />
+
+    <InstallExecuteSequence>
+      <Custom Action="StopEarmark" Before="InstallValidate" />
+    </InstallExecuteSequence>
+
     <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
     <WixVariable Id="WixUILicenseRtf" Value="$(sys.SOURCEFILEDIR)License.rtf" />
     <!--
