@@ -1,11 +1,11 @@
 # Feature spec: suppress loopback / listening app chips
 
 Implementation prompt for an agent. Not yet built. Read [AGENTS.md](../../AGENTS.md) first. This is a
-Devices-page metering/placement change in `Earmark.App` plus a small surface in `Earmark.Audio`.
+Devices-page metering/placement change in `Earmark.Desktop` plus a small surface in `Earmark.Audio`.
 
 ## Why
 
-App chips are placed **peak-driven**: in [`HomeViewModel.TickAppMeters`](../../src/Earmark.App/ViewModels/HomeViewModel.cs)
+App chips are placed **peak-driven**: in the Devices view-model's app-meter tick (`HomeViewModel.TickAppMeters` in the WinUI app; the Avalonia equivalent lives under `src/Earmark.Desktop/ViewModels/Devices`)
 (Phase 2) any app whose per-session peak on an endpoint is `>= AppChip.AudibleAmplitudeThreshold`
 gets a chip, and the chip's underbar is driven by that per-session peak (`MaxPeakForApp` ->
 `IAudioSessionMeterService.GetPeak(pid, endpoint)`).
@@ -91,15 +91,14 @@ Why this is reasonably specific:
 - Expose it, e.g. `bool IsLikelyMonitor(uint pid, string endpoint)` on `IAudioSessionMeterService`, or
   carry a flag alongside the peak in the snapshot.
 
-`Earmark.App` - [`HomeViewModel`](../../src/Earmark.App/ViewModels/HomeViewModel.cs):
+`Earmark.Desktop` - the Devices view-model (`src/Earmark.Desktop/ViewModels/Devices`):
 - In `TickAppMeters` Phase 2 (placement) and in `MaxPeakForApp`, treat a monitor-flagged
   `(pid, endpoint)` as **not audible**: do not place a chip and do not drive a meter from it. Respect
   the existing identity grouping (`pidsByAppKey`) - a *different* process of the same app that
   genuinely produces audio on `E` must still chip.
 - This only gates the peak-driven placement; it must not prune a rule-pinned chip.
 
-Setting - [`PeakMeterOptions`](../../src/Earmark.App/ViewModels/PeakMeterOptions.cs) /
-[`AppSettings`](../../src/Earmark.App/Settings/AppSettings.cs): a flag such as
+Setting - [`AppSettings`](../../src/Earmark.Core/Settings/AppSettings.cs): a flag such as
 **"Hide echo-cancellation / monitor chips"**, surfaced in Settings > App indicators.
 
 ## Decisions

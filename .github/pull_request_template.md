@@ -20,9 +20,9 @@
 ## Checklist
 
 - [ ] PR title follows [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `chore:`, etc.) - enforced by CI
-- [ ] Code builds without warnings (`dotnet build src/Earmark.App/Earmark.App.csproj -c Debug -p:Platform=x64`)
+- [ ] Code builds without warnings (`dotnet build src/Earmark.Desktop/Earmark.Desktop.csproj -c Debug -p:Platform=x64`)
 - [ ] No emoji / gitmoji in commit messages or PR title (breaks release-please)
-- [ ] Architecture boundary respected: domain logic in `Earmark.Core`, Windows audio interop in `Earmark.Audio`, UI in `Earmark.App`
+- [ ] Architecture boundary respected: domain logic in `Earmark.Core`, Windows audio interop in `Earmark.Audio`, UI in `Earmark.Desktop`
 - [ ] CLAUDE.md / README / CONTRIBUTING updated if behavior, build steps, or schema changed
 
 <!-- If this PR contains multiple logical changes for the changelog, add

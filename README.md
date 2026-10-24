@@ -72,8 +72,8 @@ No external CLIs, no service install, no admin rights.
 ```powershell
 git clone https://github.com/hoobio/earmark.git
 cd earmark
-dotnet build src/Earmark.App/Earmark.App.csproj -c Debug -p:Platform=x64
-.\src\Earmark.App\bin\x64\Debug\net10.0-windows10.0.26100.0\win-x64\Earmark.App.exe
+dotnet build src/Earmark.Desktop/Earmark.Desktop.csproj -c Debug -p:Platform=x64
+.\src\Earmark.Desktop\bin\x64\Debug\net10.0-windows10.0.26100.0\win-x64\Earmark.exe
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full inner-loop pattern (the app holds open file handles on its own DLLs, so you must kill before rebuilding).
@@ -132,7 +132,7 @@ A rule matcher walks rules top-down. For each rule it checks conditions, then it
 src/
   Earmark.Core/               # Models, rule matcher/evaluator, JSON persistence (no Windows deps in interfaces)
   Earmark.Audio/              # COM interop + NAudio session/endpoint services
-  Earmark.App/                # WinUI 3 UI, hosting, settings, tray, single-instance
+  Earmark.Desktop/            # Avalonia UI, hosting, settings, tray, single-instance
 tests/
   Earmark.Core.Tests/         # xUnit (scaffolding)
 ```
@@ -141,10 +141,10 @@ tests/
 
 ```powershell
 # Debug
-dotnet build src/Earmark.App/Earmark.App.csproj -c Debug -p:Platform=x64
+dotnet build src/Earmark.Desktop/Earmark.Desktop.csproj -c Debug -p:Platform=x64
 
 # Release
-dotnet publish src/Earmark.App/Earmark.App.csproj -c Release -p:Platform=x64
+dotnet publish src/Earmark.Desktop/Earmark.Desktop.csproj -c Release -p:Platform=x64
 ```
 
 The csproj declares `<Platforms>x64;ARM64</Platforms>` only - `AnyCPU` is not configured, so always pass `-p:Platform=x64` (or `ARM64`).

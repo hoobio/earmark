@@ -5,10 +5,6 @@
     <Platform Name="ARM64" />
   </Configurations>
   <Folder Name="/src/">
-    <Project Path="src/Earmark.App/Earmark.App.csproj">
-      <Platform Solution="*|x64" Project="x64" />
-      <Platform Solution="*|ARM64" Project="ARM64" />
-    </Project>
     <Project Path="src/Earmark.Audio/Earmark.Audio.csproj">
       <Platform Solution="*|x64" Project="x64" />
       <Platform Solution="*|ARM64" Project="ARM64" />

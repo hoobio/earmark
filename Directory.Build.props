@@ -17,18 +17,18 @@
   </PropertyGroup>
 
   <!--
-    Build-channel + commit stamping for the App's About box and update check (read at runtime
-    via Services/AppInfo). Scoped to the app heads (Earmark.App, Earmark.Desktop) so the git probe runs once per head, not per project.
+    Build-channel + commit stamping for the About box and update check (read at runtime
+    via AppInfo). Scoped to Earmark.Desktop so the git probe runs once, not per project.
       EarmarkBuildChannel: "Dev" for local builds, "Release" under GitHub Actions. CI passes
       -p:EarmarkBuildChannel=Prerelease for release-please pre-release builds. AppInfo turns the
       channel into the "(Dev)"/"(Pre-release)" marker and gates the update UI.
   -->
-  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'Earmark.App' or '$(MSBuildProjectName)' == 'Earmark.Desktop'">
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'Earmark.Desktop'">
     <EarmarkBuildChannel Condition="'$(EarmarkBuildChannel)' == '' and '$(GITHUB_ACTIONS)' == 'true'">Release</EarmarkBuildChannel>
     <EarmarkBuildChannel Condition="'$(EarmarkBuildChannel)' == ''">Dev</EarmarkBuildChannel>
   </PropertyGroup>
 
-  <ItemGroup Condition="'$(MSBuildProjectName)' == 'Earmark.App' or '$(MSBuildProjectName)' == 'Earmark.Desktop'">
+  <ItemGroup Condition="'$(MSBuildProjectName)' == 'Earmark.Desktop'">
     <AssemblyMetadata Include="BuildChannel" Value="$(EarmarkBuildChannel)" />
   </ItemGroup>
 
@@ -36,7 +36,7 @@
        keeps non-git checkouts (or a missing git) from breaking the build; AppInfo just shows no
        commit then. -->
   <Target Name="EarmarkStampSourceRevision"
-          Condition="('$(MSBuildProjectName)' == 'Earmark.App' or '$(MSBuildProjectName)' == 'Earmark.Desktop') and '$(SourceRevisionId)' == ''"
+          Condition="'$(MSBuildProjectName)' == 'Earmark.Desktop' and '$(SourceRevisionId)' == ''"
           BeforeTargets="GetAssemblyVersion;InitializeSourceControlInformation">
     <Exec Command="git -C &quot;$(MSBuildProjectDirectory)&quot; rev-parse HEAD"
           ConsoleToMSBuild="true"

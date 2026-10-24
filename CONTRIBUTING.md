@@ -15,7 +15,7 @@ Thanks for your interest in contributing! This guide will help you get started.
 ```powershell
 git clone https://github.com/hoobio/earmark.git
 cd earmark
-dotnet build src/Earmark.App/Earmark.App.csproj -c Debug -p:Platform=x64
+dotnet build src/Earmark.Desktop/Earmark.Desktop.csproj -c Debug -p:Platform=x64
 ```
 
 The csproj declares `<Platforms>x64;ARM64</Platforms>` and has no `AnyCPU` configuration, so you must always pass `-p:Platform=x64` (or `ARM64`).
@@ -31,23 +31,23 @@ dotnet test -p:Platform=x64
 The app holds open file handles on its own DLLs while running, so incremental builds fail with `MSB3027` if a previous instance is still alive. The standard inner loop is:
 
 ```bash
-taskkill //F //IM Earmark.App.exe 2>&1 | head -2
+taskkill //F //IM Earmark.exe 2>&1 | head -2
 sleep 1
-dotnet build src/Earmark.App/Earmark.App.csproj -c Debug -p:Platform=x64 --no-restore
-EXE="src/Earmark.App/bin/x64/Debug/net10.0-windows10.0.26100.0/win-x64/Earmark.App.exe"
+dotnet build src/Earmark.Desktop/Earmark.Desktop.csproj -c Debug -p:Platform=x64 --no-restore
+EXE="src/Earmark.Desktop/bin/x64/Debug/net10.0-windows10.0.26100.0/win-x64/Earmark.exe"
 nohup "$EXE" >/dev/null 2>&1 & disown
 ```
 
-Logs are at `%LocalAppData%\Earmark\logs\earmark-{yyyyMMdd-HHmmss}.log`, one file per launch. Tail the latest to verify behavior:
+Logs are at `%LocalAppData%\Earmark\Dev\logs\earmark-{yyyyMMdd-HHmmss}.log`, one file per launch. Tail the latest to verify behavior:
 
 ```powershell
-Get-ChildItem "$env:LocalAppData\Earmark\logs\*.log" |
+Get-ChildItem "$env:LocalAppData\Earmark\Dev\logs\*.log" |
     Sort-Object LastWriteTime -Descending |
     Select-Object -First 1 |
     Get-Content -Tail 50 -Wait
 ```
 
-If you only changed `Earmark.Core` or `Earmark.Audio`, you can build those projects in isolation without killing the app, but the final `Earmark.App` build still needs the kill.
+If you only changed `Earmark.Core` or `Earmark.Audio`, you can build those projects in isolation without killing the app, but the final `Earmark.Desktop` build still needs the kill.
 
 ## How to Contribute
 
@@ -120,7 +120,7 @@ PR titles **must** match Conventional Commits format. CI enforces this via the `
 
 - **Earmark.Core** has no Windows-specific dependencies in its public interfaces. Models, the rule matcher, and the rule evaluator live here. New domain logic generally belongs here.
 - **Earmark.Audio** wraps Windows audio APIs (NAudio + Core Audio + the COM interop for `IAudioPolicyConfigFactory` and `IPolicyConfigVista`). Touch this layer when adding routing capabilities.
-- **Earmark.App** is the WinUI 3 host: pages, view-models, settings, tray, single-instance handling. UI changes go here.
+- **Earmark.Desktop** is the Avalonia host: pages, view-models, settings, tray, single-instance handling. UI changes go here.
 
 If you find yourself reaching from `Earmark.Core` into a Windows API, that's a sign the abstraction needs another seam.
 
@@ -138,9 +138,8 @@ If you change anything in this folder:
 
 ### XAML Gotchas
 
-- **Two-way `x:Bind` on `ComboBox.SelectedItem` against a value-type property** (e.g. an enum) NREs during item-template recycling. Use `Mode=OneWay` plus a `SelectionChanged` handler that updates the source.
-- **`Microsoft.UI.Xaml.UnhandledExceptionEventArgs` is ambiguous** between `Microsoft.UI.Xaml` and `System` namespaces. Always fully-qualify.
-- **`Grid.Padding` wants a `Thickness`**. Don't define an `x:Double` resource and bind it to `Padding`.
+- **Compiled bindings are on.** Every view and template with a binding needs `x:DataType`.
+- **Engine events fire off the UI thread.** Marshal to the UI with `Ui.Post` before touching controls or bound collections.
 
 ### Verifying Behavior
 
@@ -152,9 +151,9 @@ After a change, rebuild and check the log. The interesting lines:
 - `Skip re-apply for ... already pinned` (dedupe cache hit)
 - `Applied default-device rule -> Render = <Endpoint>` (a Default* rule fired)
 
-If you don't see `Skip Set` / `Skip re-apply` lines after the first cycle, the dedupe is broken and the periodic timer will glitch audio every 10 seconds.
+If you don't see `Skip Set` / `Skip re-apply` lines after the first cycle, the dedupe is broken and the periodic pass will glitch audio.
 
-For UI changes, the running app must be killed before rebuilding. There's no useful hot-reload path for unpackaged WinUI 3 apps in this configuration.
+For UI changes, the running app must be killed before rebuilding. There is no hot-reload path in this configuration.
 
 ## Questions?
 

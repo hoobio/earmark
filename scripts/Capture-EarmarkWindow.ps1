@@ -1,9 +1,9 @@
 #Requires -Version 7
 <#
 .SYNOPSIS
-    Captures a PNG screenshot of the running Earmark.App main window.
+    Captures a PNG screenshot of the running Earmark main window.
 .DESCRIPTION
-    Finds the Earmark.App process, restores + foregrounds its main window, waits briefly for
+    Finds the Earmark process, restores + foregrounds its main window, waits briefly for
     the compositor to settle, then captures the window's DWM extended-frame bounds via
     Graphics.CopyFromScreen. A dev/QA aid for before/after UI comparison; not shipped.
 .PARAMETER OutPath
@@ -59,9 +59,9 @@ if (-not ([System.Management.Automation.PSTypeName]'Win32Capture').Type) {
     Add-Type -TypeDefinition $nativeMethods
 }
 
-$proc = Get-Process -Name 'Earmark.App' -ErrorAction SilentlyContinue |
+$proc = Get-Process -Name 'Earmark' -ErrorAction SilentlyContinue |
     Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
-if (-not $proc) { Write-Error 'Earmark.App is not running (or has no main window).'; exit 1 }
+if (-not $proc) { Write-Error 'Earmark is not running (or has no main window).'; exit 1 }
 
 $hwnd = $proc.MainWindowHandle
 if ([Win32Capture]::IsIconic($hwnd)) { [void][Win32Capture]::ShowWindow($hwnd, 9) }  # SW_RESTORE
