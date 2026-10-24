@@ -97,7 +97,7 @@
                                                   HorizontalScrollBarVisibility="Disabled"
                                                   VerticalScrollBarVisibility="Auto">
                                         <Border Background="{DynamicResource ContentDialogTopOverlay}"
-                                                Padding="{DynamicResource ContentDialogPadding}"
+                                                Padding="{StaticResource ContentDialogPadding}"
                                                 BorderThickness="{StaticResource ContentDialogSeparatorThickness}"
                                                 BorderBrush="{DynamicResource ContentDialogSeparatorBorderBrush}">
                                             <Grid RowDefinitions="Auto,*">
@@ -182,7 +182,7 @@
         <Setter Property="BorderThickness" Value="0" />
     </Style>
     <Style Selector="ui|FAContentDialog.Earmark /template/ Grid#DialogSpace > Border">
-        <Setter Property="Padding" Value="24,0,24,24" />
+        <Setter Property="Padding" Value="16,0,16,16" />
     </Style>
     <Style Selector="ui|FAContentDialog.Earmark TextBlock.FieldHeader:disabled">
         <Setter Property="Foreground" Value="{DynamicResource TextControlHeaderForegroundDisabled}" />
