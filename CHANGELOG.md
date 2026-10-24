@@ -1,5 +1,23 @@
 # Changelog
 
+## [2.1.1](https://github.com/hoobio/earmark/compare/v2.1.0...v2.1.1) (2026-10-24)
+
+
+### Bug Fixes
+
+* narrow the scroll band in Quick Controls and dialogs ([#94](https://github.com/hoobio/earmark/issues/94)) ([67eea17](https://github.com/hoobio/earmark/commit/67eea178e544b1d4934d83f2733948d10c64ee7a))
+* narrow the scroll band in Quick Controls and dialogs so controls near the edge keep their clicks ([67eea17](https://github.com/hoobio/earmark/commit/67eea178e544b1d4934d83f2733948d10c64ee7a))
+* widen the scroll bar hit area ([#79](https://github.com/hoobio/earmark/issues/79)) ([52f97ec](https://github.com/hoobio/earmark/commit/52f97ec62eda7ec91071cf7c000f249223229c85))
+* widen the scroll bar hit area so the thin collapsed thumb can be ([52f97ec](https://github.com/hoobio/earmark/commit/52f97ec62eda7ec91071cf7c000f249223229c85))
+
+
+### Miscellaneous Chores
+
+* 🔧 enable Renovate and retire Dependabot version updates ([#77](https://github.com/hoobio/earmark/issues/77)) ([5e3e73b](https://github.com/hoobio/earmark/commit/5e3e73b24b8fbc7089ac7cfd37f3f56b5cd60333))
+* **deps:** apply pending Renovate updates before release ([655ef87](https://github.com/hoobio/earmark/commit/655ef8756fb37dffa19b1dc080b51b61c87f3f0c))
+* **deps:** pin dependencies ([#80](https://github.com/hoobio/earmark/issues/80)) ([6c2fb13](https://github.com/hoobio/earmark/commit/6c2fb1318e9e8cba751c40e83a75761ae8b8dce2))
+* **deps:** update actions/setup-dotnet action to v6 ([#91](https://github.com/hoobio/earmark/issues/91)) ([0ec33bc](https://github.com/hoobio/earmark/commit/0ec33bc931a202a842d38db30d57b5eb008f744a))
+
 ## [2.1.0](https://github.com/hoobio/earmark/compare/v2.0.1...v2.1.0) (2026-10-24)
 
 
