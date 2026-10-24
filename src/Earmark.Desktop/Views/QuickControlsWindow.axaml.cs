@@ -112,6 +112,8 @@ public sealed partial class QuickControlsWindow : Window
 
     public void Open() => Open(Stopwatch.GetTimestamp());
 
+    public void Toggle() => Toggle(Stopwatch.GetTimestamp());
+
     public bool RegisterHotkey(string text, bool toastOnFailure)
     {
         var gesture = HotkeyGesture.Parse(text);

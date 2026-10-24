@@ -45,6 +45,7 @@ public sealed partial class MainWindow : Window
     private bool _renderLogged;
     private DispatcherTimer? _minimizeHideTimer;
     private DispatcherTimer? _trimTimer;
+    private DispatcherTimer? _trayClickTimer;
 
     public MainWindow(IServiceProvider services, SettingsService settings, ILogger<MainWindow> logger)
     {
@@ -181,8 +182,39 @@ public sealed partial class MainWindow : Window
             IsVisible = Settings.ShowTrayIcon,
             Menu = [open, quick, reapply, new NativeMenuItemSeparator(), exit],
         };
-        trayIcon.Clicked += (_, _) => ShowFromTray();
+        trayIcon.Clicked += (_, _) => OnTrayClicked();
         TrayIcon.SetIcons(Application.Current!, [trayIcon]);
+    }
+
+    private void OnTrayClicked()
+    {
+        if (_trayClickTimer is { IsEnabled: true })
+        {
+            _trayClickTimer.Stop();
+            _logger.LogInformation("Tray double-click: main window");
+            ShowFromTray();
+            return;
+        }
+
+        if (!Settings.QuickControlsEnabled)
+        {
+            _logger.LogInformation("Tray click: main window");
+            ShowFromTray();
+            return;
+        }
+
+        _trayClickTimer ??= new DispatcherTimer();
+        _trayClickTimer.Interval = Native.DoubleClickTime;
+        _trayClickTimer.Tick -= OnTrayClickElapsed;
+        _trayClickTimer.Tick += OnTrayClickElapsed;
+        _trayClickTimer.Start();
+    }
+
+    private void OnTrayClickElapsed(object? sender, EventArgs e)
+    {
+        _trayClickTimer!.Stop();
+        _logger.LogInformation("Tray click: Quick Controls");
+        _services.GetRequiredService<QuickControlsWindow>().Toggle();
     }
 
     public void HideToTray()

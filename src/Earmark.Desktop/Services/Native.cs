@@ -89,6 +89,11 @@ internal static class Native
     [DllImport("user32.dll")]
     private static extern short GetAsyncKeyState(int virtualKey);
 
+    [DllImport("user32.dll")]
+    private static extern uint GetDoubleClickTime();
+
+    public static TimeSpan DoubleClickTime => TimeSpan.FromMilliseconds(GetDoubleClickTime());
+
     public static void RepostCaptionButtonMove(nint handle)
     {
         if (!GetCursorPos(out var point))
