@@ -29,16 +29,16 @@ public static class Acrylic
     public const double BlurRadius = (BlurSigma - 0.5) / 0.288675;
 
     public static readonly AttachedProperty<bool> IsEnabledProperty =
-        AvaloniaProperty.RegisterAttached<TemplatedControl, bool>("IsEnabled", typeof(Acrylic));
+        AvaloniaProperty.RegisterAttached<Control, bool>("IsEnabled", typeof(Acrylic));
 
     public static readonly AttachedProperty<AcrylicMode> ModeProperty =
-        AvaloniaProperty.RegisterAttached<TemplatedControl, AcrylicMode>("Mode", typeof(Acrylic));
+        AvaloniaProperty.RegisterAttached<Control, AcrylicMode>("Mode", typeof(Acrylic));
 
-    private static readonly ConditionalWeakTable<TemplatedControl, Surface> Surfaces = [];
+    private static readonly ConditionalWeakTable<Control, Surface> Surfaces = [];
 
     static Acrylic()
     {
-        IsEnabledProperty.Changed.AddClassHandler<TemplatedControl>((presenter, e) =>
+        IsEnabledProperty.Changed.AddClassHandler<Control>((presenter, e) =>
         {
             presenter.AttachedToVisualTree -= OnAttached;
             presenter.DetachedFromVisualTree -= OnDetached;
@@ -54,11 +54,11 @@ public static class Acrylic
         });
     }
 
-    public static bool GetIsEnabled(TemplatedControl presenter) => presenter.GetValue(IsEnabledProperty);
+    public static bool GetIsEnabled(Control presenter) => presenter.GetValue(IsEnabledProperty);
 
-    public static void SetIsEnabled(TemplatedControl presenter, bool value) => presenter.SetValue(IsEnabledProperty, value);
+    public static void SetIsEnabled(Control presenter, bool value) => presenter.SetValue(IsEnabledProperty, value);
 
-    public static AcrylicMode GetMode(TemplatedControl presenter) => presenter.GetValue(ModeProperty);
+    public static AcrylicMode GetMode(Control presenter) => presenter.GetValue(ModeProperty);
 
     public static Color Composite(Color tint, Color? under) => under is { } ground
         ? Color.FromRgb(Mix(tint.R, ground.R), Mix(tint.G, ground.G), Mix(tint.B, ground.B))
@@ -86,11 +86,11 @@ public static class Acrylic
 
     private static byte Byte(double unit) => Clamp(unit * 255);
 
-    private static void OnAttached(object? sender, VisualTreeAttachmentEventArgs e) => Attach((TemplatedControl)sender!);
+    private static void OnAttached(object? sender, VisualTreeAttachmentEventArgs e) => Attach((Control)sender!);
 
     private static void OnDetached(object? sender, VisualTreeAttachmentEventArgs e)
     {
-        var presenter = (TemplatedControl)sender!;
+        var presenter = (Control)sender!;
         if (Surfaces.TryGetValue(presenter, out var surface))
         {
             surface.Dispose();
@@ -98,7 +98,7 @@ public static class Acrylic
         }
     }
 
-    private static void Attach(TemplatedControl presenter)
+    private static void Attach(Control presenter)
     {
         OnDetached(presenter, null!);
         if (TopLevel.GetTopLevel(presenter) is { } top)
@@ -135,13 +135,13 @@ public static class Acrylic
         return layers;
     }
 
-    private static Color Resource(TemplatedControl presenter, string key) =>
+    private static Color Resource(Control presenter, string key) =>
         presenter.TryFindResource(key, presenter.ActualThemeVariant, out var value) && value is Color color ? color : Colors.Transparent;
 
     // hoobi-design's Mirage flyout, drawn here rather than asked of the OS: the page behind is this app's own window, Linux and macOS popups get no tinted blur, and Avalonia has no saturate effect.
     private sealed class Surface : IDisposable
     {
-        private readonly TemplatedControl _presenter;
+        private readonly Control _presenter;
         private readonly TopLevel _top;
         private readonly WindowBase? _owner;
         private readonly IDisposable? _activation;
@@ -149,7 +149,7 @@ public static class Acrylic
         private PixelRect _applied;
         private bool _active;
 
-        public Surface(TemplatedControl presenter, TopLevel top)
+        public Surface(Control presenter, TopLevel top)
         {
             _presenter = presenter;
             _top = top;
@@ -182,9 +182,9 @@ public static class Acrylic
             var fallback = Resource(_presenter, "FlyoutAcrylicFallbackColor");
             var mode = active ? AcrylicMode.Blur : AcrylicMode.Fallback;
             _presenter.SetValue(ModeProperty, mode);
-            _presenter.Background = mode == AcrylicMode.Blur && Snapshot(rect, scale, tint, fallback) is { } snapshot
+            _presenter.SetValue(Border.BackgroundProperty, mode == AcrylicMode.Blur && Snapshot(rect, scale, tint, fallback) is { } snapshot
                 ? new ImageBrush(snapshot) { Stretch = Stretch.Fill }
-                : new SolidColorBrush(mode == AcrylicMode.Blur ? Composite(tint, fallback) : fallback);
+                : new SolidColorBrush(mode == AcrylicMode.Blur ? Composite(tint, fallback) : fallback));
         }
 
         private WriteableBitmap? Snapshot(PixelRect rect, double scale, Color tint, Color fallback)

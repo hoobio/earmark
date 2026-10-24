@@ -159,6 +159,9 @@
     <SolidColorBrush x:Key="ComboBoxItemForegroundSelectedPressed" Color="#FF73D0FF" />
     <SolidColorBrush x:Key="ComboBoxItemPillFillBrush" Color="Transparent" />
     <SolidColorBrush x:Key="ComboBoxDropDownBorderBrush" Color="Transparent" />
+    <Thickness x:Key="ComboBoxDropdownBorderThickness">0</Thickness>
+    <Thickness x:Key="ComboBoxDropdownBorderPadding">4</Thickness>
+    <Thickness x:Key="ComboBoxDropdownContentMargin">0</Thickness>
 
     <SolidColorBrush x:Key="SegmentedBackground" Color="#FF1A1F2B" />
     <SolidColorBrush x:Key="SegmentedBorderBrush" Color="Transparent" />

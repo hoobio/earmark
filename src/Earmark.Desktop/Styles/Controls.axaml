@@ -247,6 +247,33 @@
                 </WindowDrawnDecorationsTemplate>
             </Setter>
         </ControlTheme>
+
+        <!-- FluentAvaloniaUI 3.1.0 ships no ContextMenu theme, so a ContextMenu opened as an empty popup. -->
+        <ControlTheme x:Key="{x:Type ContextMenu}" TargetType="ContextMenu">
+            <Setter Property="Background" Value="{DynamicResource MenuFlyoutPresenterBackground}" />
+            <Setter Property="Foreground" Value="{DynamicResource DefaultTextForegroundThemeBrush}" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="CornerRadius" Value="{StaticResource OverlayCornerRadius}" />
+            <Setter Property="Padding" Value="{DynamicResource MenuFlyoutPresenterThemePadding}" />
+            <Setter Property="MaxWidth" Value="{DynamicResource FlyoutThemeMaxWidth}" />
+            <Setter Property="MinHeight" Value="{DynamicResource MenuFlyoutThemeMinHeight}" />
+            <Setter Property="FontSize" Value="{DynamicResource ControlContentThemeFontSize}" />
+            <Setter Property="FontFamily" Value="{DynamicResource ContentControlThemeFontFamily}" />
+            <Setter Property="WindowManagerAddShadowHint" Value="False" />
+            <Setter Property="styles:Acrylic.IsEnabled" Value="True" />
+            <Setter Property="Template">
+                <ControlTemplate>
+                    <Border Background="{TemplateBinding Background}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="{TemplateBinding CornerRadius}"
+                            Padding="{DynamicResource FlyoutBorderThemePadding}">
+                        <ScrollViewer Margin="{TemplateBinding Padding}" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+                            <ItemsPresenter Name="PART_ItemsPresenter" ItemsPanel="{TemplateBinding ItemsPanel}" KeyboardNavigation.TabNavigation="Continue" Grid.IsSharedSizeScope="True" />
+                        </ScrollViewer>
+                    </Border>
+                </ControlTemplate>
+            </Setter>
+        </ControlTheme>
     </Styles.Resources>
 
     <Style Selector=":is(TopLevel)">
@@ -381,37 +408,16 @@
         <Setter Property="VerticalAlignment" Value="Center" />
     </Style>
     <Style Selector="ComboBox /template/ Border#PopupBorder">
-        <Setter Property="Background" Value="{DynamicResource ComboBoxBackgroundPointerOver}" />
-        <Setter Property="BorderThickness" Value="0" />
-        <Setter Property="Padding" Value="4" />
-        <Setter Property="CornerRadius" Value="{StaticResource OverlayCornerRadius}" />
-        <Setter Property="BoxShadow" Value="0 8 16 0 #47000000, 0 0 2 0 #3D000000" />
+        <Setter Property="styles:Acrylic.IsEnabled" Value="True" />
     </Style>
     <Style Selector="ComboBoxItem">
         <Setter Property="FontSize" Value="{StaticResource BodyTextBlockFontSize}" />
         <Setter Property="Padding" Value="12,6" />
     </Style>
-    <Style Selector="ComboBoxItem /template/ Border#LayoutRoot">
-        <Setter Property="Margin" Value="0" />
-        <Setter Property="CornerRadius" Value="{StaticResource ControlCornerRadius}" />
-    </Style>
-    <Style Selector="ComboBoxItem /template/ Rectangle#Pill">
-        <Setter Property="Opacity" Value="0" />
-    </Style>
-    <Style Selector="ComboBoxItem:pointerover /template/ Border#LayoutRoot, ComboBoxItem:selected:pointerover /template/ Border#LayoutRoot, ComboBoxItem:pressed /template/ Border#LayoutRoot, ComboBoxItem:selected:pressed /template/ Border#LayoutRoot">
-        <Setter Property="Background" Value="{DynamicResource ControlFillColorDefaultBrush}" />
-    </Style>
-    <Style Selector="ComboBoxItem:selected /template/ Border#LayoutRoot">
-        <Setter Property="Background" Value="Transparent" />
-    </Style>
-    <Style Selector="ComboBoxItem:selected:pointerover /template/ Border#LayoutRoot, ComboBoxItem:selected:pressed /template/ Border#LayoutRoot">
-        <Setter Property="Background" Value="{DynamicResource ControlFillColorDefaultBrush}" />
-    </Style>
-    <Style Selector="ComboBoxItem:selected /template/ ContentPresenter#ContentPresenter, ComboBoxItem:selected:pointerover /template/ ContentPresenter#ContentPresenter, ComboBoxItem:selected:pressed /template/ ContentPresenter#ContentPresenter">
-        <Setter Property="Foreground" Value="#FF73D0FF" />
-    </Style>
     <Style Selector="ToolTip">
         <Setter Property="Padding" Value="9,7,9,7" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="styles:Acrylic.IsEnabled" Value="True" />
     </Style>
     <Style Selector="ToggleSwitch /template/ ContentPresenter#PART_ContentPresenter">
         <Setter Property="IsVisible" Value="{Binding $parent[ToggleSwitch].Content, Converter={x:Static ObjectConverters.IsNotNull}}" />
