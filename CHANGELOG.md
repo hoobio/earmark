@@ -1,5 +1,41 @@
 # Changelog
 
+## [2.0.0](https://github.com/hoobio/earmark/compare/v1.1.0...v2.0.0) (2026-10-24)
+
+
+### ⚠ BREAKING CHANGES
+
+* rewrite Earmark in Avalonia and ship Store, portable and MSI builds ([#72](https://github.com/hoobio/earmark/issues/72))
+* the light theme setting is removed and the executable is renamed from Earmark.App.exe to Earmark.exe
+
+### Features
+
+* **desktop:** restart after a render-thread stall and fall back to software rendering ([c02102f](https://github.com/hoobio/earmark/commit/c02102f9c43337d099403578f454c997d371f998))
+* **desktop:** rewrite the UI in Avalonia with the hoobi-design look ([c02102f](https://github.com/hoobio/earmark/commit/c02102f9c43337d099403578f454c997d371f998))
+* **quick-controls:** real acrylic overlay that opens without a black flash ([c02102f](https://github.com/hoobio/earmark/commit/c02102f9c43337d099403578f454c997d371f998))
+* rewrite Earmark in Avalonia and ship Store, portable and MSI builds ([#72](https://github.com/hoobio/earmark/issues/72)) ([c02102f](https://github.com/hoobio/earmark/commit/c02102f9c43337d099403578f454c997d371f998))
+* **sessions:** group sessions by app with output and input devices ([c02102f](https://github.com/hoobio/earmark/commit/c02102f9c43337d099403578f454c997d371f998))
+* **settings:** settings search and middle-click autoscroll ([c02102f](https://github.com/hoobio/earmark/commit/c02102f9c43337d099403578f454c997d371f998))
+
+
+### Bug Fixes
+
+* **routing:** evaluate rule conditions against output and input devices in one pass ([c02102f](https://github.com/hoobio/earmark/commit/c02102f9c43337d099403578f454c997d371f998))
+* **routing:** re-fire one-shot actions for edited rules only and stop Wave Link stalls ([c02102f](https://github.com/hoobio/earmark/commit/c02102f9c43337d099403578f454c997d371f998))
+* **rules:** keep a corrupt rules or settings file and block saves until the user chooses ([c02102f](https://github.com/hoobio/earmark/commit/c02102f9c43337d099403578f454c997d371f998))
+
+
+### Build System
+
+* **deps:** Bump actions/checkout from 6 to 7 ([#67](https://github.com/hoobio/earmark/issues/67)) ([1b94a07](https://github.com/hoobio/earmark/commit/1b94a0748bb4fd70ecd7a6136c049828da19fa87))
+* **deps:** Bump softprops/action-gh-release from 3.0.0 to 3.0.1 ([#66](https://github.com/hoobio/earmark/issues/66)) ([53041ab](https://github.com/hoobio/earmark/commit/53041ab2d3d8fc4a8913cf1cbb29f06966cbbc9a))
+* ship a Store MSIX, a portable exe and an MSI for x64 and ARM64 ([c02102f](https://github.com/hoobio/earmark/commit/c02102f9c43337d099403578f454c997d371f998))
+
+
+### Continuous Integration
+
+* pass the PR title to the title check through an env var ([c02102f](https://github.com/hoobio/earmark/commit/c02102f9c43337d099403578f454c997d371f998))
+
 ## [1.1.0](https://github.com/hoobio/earmark/compare/v1.0.0...v1.1.0) (2026-06-07)
 
 
