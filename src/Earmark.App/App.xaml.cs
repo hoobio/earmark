@@ -1,12 +1,14 @@
 using Earmark.App.Hosting;
 using Earmark.App.Services;
-using Earmark.App.Settings;
 using Earmark.App.ViewModels;
 using Earmark.App.Views;
 using Earmark.Audio;
+using Earmark.Audio.Routing;
+using Earmark.Audio.Services;
 using Earmark.Core;
 using Earmark.Core.Audio;
 using Earmark.Core.Services;
+using Earmark.Core.Settings;
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -50,7 +52,7 @@ public partial class App : Application
 
         try
         {
-            await _host.Services.GetRequiredService<ISettingsService>().LoadAsync();
+            await _host.Services.GetRequiredService<SettingsService>().LoadAsync();
             _logger.LogInformation("Settings loaded");
 
             // Heavy init runs on the thread pool so the UI thread can paint immediately. The first
@@ -97,9 +99,9 @@ public partial class App : Application
                 // rules. A no-op when any rule or Devices-page config already exists, so it never
                 // wipes an existing layout. Wave Link groups seed only if Wave Link is already
                 // connected (off by default on a fresh install).
-                await _host.Services.GetRequiredService<IDeviceDefaultsService>().SeedDefaultsIfEmptyAsync();
+                await _host.Services.GetRequiredService<DeviceDefaultsService>().SeedDefaultsIfEmptyAsync();
 
-                _host.Services.GetRequiredService<IRoutingApplier>().Start();
+                _host.Services.GetRequiredService<RoutingApplier>().Start();
                 _logger.LogInformation("Routing applier started");
             });
 
@@ -123,7 +125,7 @@ public partial class App : Application
             // is deferred to a low-priority dispatch that runs after the first frame, so nothing
             // here blocks the window appearing. The content area shows MainWindow's skeleton until
             // background init completes and the first page navigates.
-            var settings = _host.Services.GetRequiredService<ISettingsService>().Current;
+            var settings = _host.Services.GetRequiredService<SettingsService>().Current;
             var startHidden = LaunchToTrayRequested || settings.LaunchToTray;
             _window.Activate();
             if (startHidden && settings.ShowTrayIcon)
@@ -146,7 +148,7 @@ public partial class App : Application
             {
                 _host.Services.GetRequiredService<INotificationService>().Register();
                 _host.Services.GetRequiredService<IQuickControlsService>().Start();
-                _ = _host.Services.GetRequiredService<IUpdateService>().CheckForUpdatesAsync(manual: false);
+                _ = _host.Services.GetRequiredService<UpdateService>().CheckForUpdatesAsync(manual: false);
             });
         }
         catch (Exception ex)

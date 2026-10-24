@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 
+using Earmark.Audio.Services;
 using Earmark.Core.Audio;
 using Earmark.Core.Models;
 
@@ -168,7 +169,7 @@ internal sealed class TaskbarMediaControlsManager : ITaskbarMediaControls, IDisp
     /// Either way it only shows while the main window has a taskbar button.</summary>
     private void ApplyBadge(BadgeState state)
     {
-        if (AppInfo.IsPackaged)
+        if (PackageIdentity.IsPackaged)
         {
             try
             {
@@ -355,7 +356,7 @@ internal sealed class TaskbarMediaControlsManager : ITaskbarMediaControls, IDisp
 
         // Overlay badge icons (a filled accent disc with a white glyph) only back the unpackaged
         // fallback; a packaged build uses the OS BadgeNotificationManager glyph instead, so skip them.
-        if (!AppInfo.IsPackaged)
+        if (!PackageIdentity.IsPackaged)
         {
             _overlayPlay = RenderOverlayIcon(PlayGlyph, size);
             _overlayPause = RenderOverlayIcon(PauseGlyph, size);
@@ -517,7 +518,7 @@ internal sealed class TaskbarMediaControlsManager : ITaskbarMediaControls, IDisp
 
         _nowPlaying.Changed -= OnNowPlayingChanged;
         StopPauseHideTimer();
-        if (AppInfo.IsPackaged)
+        if (PackageIdentity.IsPackaged)
         {
             try { BadgeNotificationManager.Current.ClearBadge(); } catch { /* platform may be gone */ }
         }

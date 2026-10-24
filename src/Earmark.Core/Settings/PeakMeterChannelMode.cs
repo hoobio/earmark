@@ -1,4 +1,4 @@
-namespace Earmark.App.Settings;
+namespace Earmark.Core.Settings;
 
 /// <summary>How the Devices-page peak meter groups channels into bars.</summary>
 public enum PeakMeterChannelMode

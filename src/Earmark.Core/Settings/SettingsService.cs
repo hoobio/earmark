@@ -1,7 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace Earmark.App.Settings;
+namespace Earmark.Core.Settings;
 
 [JsonSourceGenerationOptions(
     WriteIndented = true,
@@ -11,7 +11,7 @@ namespace Earmark.App.Settings;
 [JsonSerializable(typeof(AppSettings))]
 internal sealed partial class SettingsJsonContext : JsonSerializerContext;
 
-internal sealed class SettingsService : ISettingsService, IDisposable
+public sealed class SettingsService : IDisposable
 {
     private readonly string _path;
     private readonly SemaphoreSlim _gate = new(1, 1);
@@ -89,6 +89,11 @@ internal sealed class SettingsService : ISettingsService, IDisposable
         SettingsChanged?.Invoke(this, EventArgs.Empty);
     }
 
+    /// <summary>
+    /// Writes a one-off copy of the current settings to a sibling file <c>settings.{label}.json</c>
+    /// (best-effort; failures are ignored, not thrown). Used to snapshot the pre-migration state
+    /// before the one-time device-key re-key, so it stays recoverable.
+    /// </summary>
     public async Task SaveBackupAsync(string label, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrEmpty(label);

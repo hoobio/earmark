@@ -1,4 +1,4 @@
-namespace Earmark.App.Settings;
+namespace Earmark.Core.Settings;
 
 /// <summary>The window's background material.</summary>
 public enum BackdropMode

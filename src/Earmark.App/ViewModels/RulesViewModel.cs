@@ -5,6 +5,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
 using Earmark.App.Services;
+using Earmark.Audio.Routing;
 using Earmark.Core.Audio;
 using Earmark.Core.Models;
 using Earmark.Core.Routing;
@@ -18,7 +19,7 @@ public partial class RulesViewModel : ObservableObject, IDisposable
     private static readonly TimeSpan MatchDebounce = TimeSpan.FromMilliseconds(250);
 
     private readonly IRulesService _rules;
-    private readonly IRoutingApplier _applier;
+    private readonly RoutingApplier _applier;
     private readonly IAudioSessionService _sessions;
     private readonly IAudioEndpointService _endpoints;
     private readonly IRuleEvaluator _evaluator;
@@ -32,7 +33,7 @@ public partial class RulesViewModel : ObservableObject, IDisposable
 
     public RulesViewModel(
         IRulesService rules,
-        IRoutingApplier applier,
+        RoutingApplier applier,
         IAudioSessionService sessions,
         IAudioEndpointService endpoints,
         IRuleEvaluator evaluator,

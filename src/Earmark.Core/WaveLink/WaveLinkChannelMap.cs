@@ -1,7 +1,6 @@
 using Earmark.Core.Models;
-using Earmark.Core.WaveLink;
 
-namespace Earmark.App.Services;
+namespace Earmark.Core.WaveLink;
 
 /// <summary>
 /// Correlates Wave Link channels (which carry the coloured artwork) to the Windows endpoints
@@ -9,7 +8,7 @@ namespace Earmark.App.Services;
 /// <see cref="WaveLinkChannelInfo.Id"/>; software channels (Game, Comms, Media, ...) surface
 /// as "Elgato Virtual Audio" render endpoints whose name is the bare channel name.
 /// </summary>
-internal static class WaveLinkChannelMap
+public static class WaveLinkChannelMap
 {
     private const string ElgatoVirtual = "Elgato Virtual Audio";
 

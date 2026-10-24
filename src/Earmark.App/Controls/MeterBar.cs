@@ -1,6 +1,6 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 
-using Earmark.App.Settings;
+using Earmark.Core.Settings;
 
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Media;

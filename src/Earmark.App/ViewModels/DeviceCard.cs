@@ -5,8 +5,9 @@ using CommunityToolkit.Mvvm.Input;
 
 using Earmark.App.Controls;
 using Earmark.App.Services;
-using Earmark.App.Settings;
+using Earmark.Audio.Routing;
 using Earmark.Core.Audio;
+using Earmark.Core.Settings;
 using Earmark.Core.Models;
 
 using Microsoft.UI;
@@ -37,7 +38,7 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
     private static readonly TimeSpan UserVolumeGrace = TimeSpan.FromMilliseconds(600);
 
     private readonly IAudioEndpointService _endpoints;
-    private readonly IEndpointWriter _writer;
+    private readonly EndpointWriter _writer;
     private readonly Action<DeviceCard, VisibilityState> _onVisibilityToggled;
     private readonly Action<DeviceCard> _onQuickPinToggled;
     private readonly Action<DeviceCard> _onCustomisationChanged;
@@ -70,7 +71,7 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
 
     public DeviceCard(
         IAudioEndpointService endpoints,
-        IEndpointWriter writer,
+        EndpointWriter writer,
         PeakMeterOptions meterOptions,
         DeviceCardSnapshot snapshot,
         Action<DeviceCard, VisibilityState> onUserVisibilityToggled,
@@ -1206,7 +1207,7 @@ public partial class DeviceCard : ObservableObject, IBlockLayoutInfo
 
         // User-initiated slider change: keep mute state coherent with the value. Dragging
         // off 0 unmutes, dragging back to 0 auto-mutes. Skipped when an active rule has
-        // pinned the mute state. Both writes route through IEndpointWriter so Wave Link
+        // pinned the mute state. Both writes route through EndpointWriter so Wave Link
         // virtual inputs get setInputConfig instead of metadata-only Windows endpoint ops.
         if (!IsMuteLockedByRule)
         {

@@ -1,10 +1,9 @@
-using Earmark.App.Logging;
 using Earmark.App.Services;
-using Earmark.App.Settings;
 using Earmark.App.ViewModels;
 using Earmark.App.Views;
 using Earmark.Audio;
 using Earmark.Core;
+using Earmark.Core.Logging;
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -55,28 +54,22 @@ internal static class HostBuilderExtensions
 
         builder.Services.AddSingleton(fileLoggerProvider);
 
-        builder.Services.AddEarmarkCore(Path.Combine(DataDirectory, "rules.json"));
+        builder.Services.AddEarmarkCore(
+            Path.Combine(DataDirectory, "rules.json"),
+            Path.Combine(DataDirectory, "settings.json"));
         builder.Services.AddEarmarkInterop();
 
-        builder.Services.AddSingleton<ISettingsService>(
-            _ => new SettingsService(Path.Combine(DataDirectory, "settings.json")));
-        builder.Services.AddSingleton<IRoutingApplier, RoutingApplier>();
         builder.Services.AddSingleton<IDispatcherQueueProvider, DispatcherQueueProvider>();
         builder.Services.AddSingleton<INavigationService, NavigationService>();
         builder.Services.AddSingleton<IWindowChromeManager, WindowChromeManager>();
         builder.Services.AddSingleton<ITaskbarMediaControls, TaskbarMediaControlsManager>();
         builder.Services.AddSingleton<INotificationService, NotificationService>();
         builder.Services.AddSingleton<IInAppNotificationService, InAppNotificationService>();
-        builder.Services.AddSingleton<IProcessControlService, ProcessControlService>();
-        builder.Services.AddSingleton<IUpdateService, UpdateService>();
         builder.Services.AddSingleton<IGlobalHotkeyService, GlobalHotkeyService>();
         builder.Services.AddSingleton<IQuickControlsService, QuickControlsService>();
-        builder.Services.AddSingleton<IEndpointWriter, EndpointWriter>();
         builder.Services.AddSingleton<ISessionIconService, SessionIconService>();
         builder.Services.AddSingleton<IWaveLinkVisualService, WaveLinkVisualService>();
         builder.Services.AddSingleton<INowPlayingArtworkService, NowPlayingArtworkService>();
-        builder.Services.AddSingleton<IDeviceDefaultsService, DeviceDefaultsService>();
-        builder.Services.AddSingleton<StartupSettingsApplier>();
 
         builder.Services.AddSingleton<MainWindow>();
         builder.Services.AddSingleton<ShellViewModel>();

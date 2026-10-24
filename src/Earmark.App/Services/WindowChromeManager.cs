@@ -1,7 +1,8 @@
 using System.Runtime.InteropServices;
 
-using Earmark.App.Settings;
 using Earmark.App.ViewModels;
+using Earmark.Audio.Services;
+using Earmark.Core.Settings;
 
 using H.NotifyIcon;
 
@@ -35,7 +36,7 @@ internal sealed class WindowChromeManager : IWindowChromeManager, IDisposable
         (int)(compact ? PeakMeterOptions.CompactColumnMinWidth : PeakMeterOptions.DefaultColumnMinWidth) + DevicesSidePaddingDip;
     private const int MinWindowHeightDip = 340;
 
-    private readonly ISettingsService _settings;
+    private readonly SettingsService _settings;
     private TaskbarIcon? _trayIcon;
     private Window? _window;
     private AppWindow? _appWindow;
@@ -44,7 +45,7 @@ internal sealed class WindowChromeManager : IWindowChromeManager, IDisposable
     private SUBCLASSPROC? _subclassProc;
     private nint _windowHandle;
 
-    public WindowChromeManager(ISettingsService settings)
+    public WindowChromeManager(SettingsService settings)
     {
         _settings = settings;
         _settings.SettingsChanged += OnSettingsChanged;
@@ -156,7 +157,7 @@ internal sealed class WindowChromeManager : IWindowChromeManager, IDisposable
         {
             // A packaged app can't load a BitmapImage from a file:// path under WindowsApps; ms-appx is
             // the sanctioned scheme there. Unpackaged (MSI) has no ms-appx root, so use the on-disk path.
-            if (AppInfo.IsPackaged)
+            if (PackageIdentity.IsPackaged)
             {
                 icon.IconSource = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri("ms-appx:///Assets/AppIcon.ico"));
             }

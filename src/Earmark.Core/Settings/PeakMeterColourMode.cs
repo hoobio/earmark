@@ -1,4 +1,4 @@
-namespace Earmark.App.Settings;
+namespace Earmark.Core.Settings;
 
 /// <summary>How the Devices-page peak meter paints its level bars.</summary>
 public enum PeakMeterColourMode

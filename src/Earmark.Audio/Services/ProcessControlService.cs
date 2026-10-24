@@ -4,7 +4,7 @@ using System.Runtime.InteropServices;
 
 using Microsoft.Extensions.Logging;
 
-namespace Earmark.App.Services;
+namespace Earmark.Audio.Services;
 
 /// <summary>Outcome of a close / terminate attempt against an external process.</summary>
 public enum ProcessActionResult
@@ -28,41 +28,11 @@ public enum ProcessActionResult
 }
 
 /// <summary>Closes or force-terminates an external process by pid, and pre-detects whether we're
-/// allowed to. Keeps the Win32 probe and <see cref="Process"/> calls out of the view-models.</summary>
-public interface IProcessControlService
-{
-    /// <summary>True when we can force-terminate this process: probes for <c>PROCESS_TERMINATE</c>
-    /// access. Drives the Terminate item. Note this is a DIFFERENT permission from a graceful close -
-    /// on some setups <c>PROCESS_TERMINATE</c> succeeds against an elevated target even though a
-    /// <c>WM_CLOSE</c> to its window is UIPI-blocked (see <see cref="CanClose"/>).</summary>
-    bool CanControl(uint pid);
-
-    /// <summary>True when a graceful <c>WM_CLOSE</c> would reach this process's windows: its integrity
-    /// level is at or below Earmark's. UI Privilege Isolation silently drops window messages sent to a
-    /// HIGHER-integrity window, so an elevated target is un-closeable from a medium Earmark even when
-    /// <see cref="CanControl"/> (terminate) is true. Drives the Close item's enabled state.</summary>
-    bool CanClose(uint pid);
-
-    /// <summary>True when the process runs at High integrity or above - i.e. it's running elevated / as
-    /// administrator. Drives the shield badge on the chip (absolute, independent of Earmark's own
-    /// elevation), matching the Windows UAC-shield convention.</summary>
-    bool IsElevated(uint pid);
-
-    /// <summary>Politely asks the app to close (posts <c>WM_CLOSE</c> to the top-level windows across
-    /// <paramref name="pids"/>), giving it the chance to run its own shutdown / save-prompt path. The
-    /// Windows equivalent of SIGTERM. A multi-process app (a browser's renderer / audio children) only
-    /// owns its main window on the browser process, which is usually NOT the pid that holds the audio
-    /// session - so the whole identity's pid set is passed, not just the chip's representative.</summary>
-    ProcessActionResult Close(IReadOnlyCollection<uint> pids);
-
-    /// <summary>Force-terminates the app (<c>TerminateProcess</c> on every pid in <paramref name="pids"/>)
-    /// with no chance to save. The Windows equivalent of SIGKILL. Multi-process apps spawn a process
-    /// tree (a browser's GPU / renderer / audio children); killing only the chip's pid leaves the rest
-    /// running, so the whole identity's pid set is killed.</summary>
-    ProcessActionResult Kill(IReadOnlyCollection<uint> pids);
-}
-
-internal sealed class ProcessControlService : IProcessControlService
+/// allowed to. <see cref="CanControl"/> probes PROCESS_TERMINATE; <see cref="CanClose"/> checks the
+/// integrity level, because UIPI drops a WM_CLOSE sent to a higher-integrity window even when
+/// terminate access is granted. Close and Kill take every pid of an app identity, since a
+/// multi-process app owns its main window on a different pid than its audio session.</summary>
+public sealed class ProcessControlService
 {
     private const uint PROCESS_TERMINATE = 0x0001;
     private const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
@@ -125,7 +95,7 @@ internal sealed class ProcessControlService : IProcessControlService
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
-    public bool CanControl(uint pid) => Probe(pid) == ProcessActionResult.Success;
+    public static bool CanControl(uint pid) => Probe(pid) == ProcessActionResult.Success;
 
     public bool CanClose(uint pid)
     {
@@ -136,7 +106,7 @@ internal sealed class ProcessControlService : IProcessControlService
         return target <= own;   // WM_CLOSE only reaches same-or-lower integrity windows
     }
 
-    public bool IsElevated(uint pid) => TargetIntegrityRid(pid) >= SECURITY_MANDATORY_HIGH_RID;
+    public static bool IsElevated(uint pid) => TargetIntegrityRid(pid) >= SECURITY_MANDATORY_HIGH_RID;
 
     private int? _ownIntegrity;
 

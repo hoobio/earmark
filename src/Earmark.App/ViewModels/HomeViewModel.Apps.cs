@@ -4,10 +4,11 @@ using System.IO;
 using System.Linq;
 
 using Earmark.App.Services;
-using Earmark.App.Settings;
+using Earmark.Audio.Services;
 using Earmark.Core.Audio;
 using Earmark.Core.Models;
 using Earmark.Core.Routing;
+using Earmark.Core.Settings;
 
 using Microsoft.Extensions.Logging;
 
@@ -86,7 +87,7 @@ public partial class HomeViewModel
             {
                 // App reopened with a live audio session - re-adopt it (and its rule match).
                 routeByPid.TryGetValue(live.ProcessId, out var liveMatch);
-                chip.Revive(live, liveMatch?.Rule, _processControl.CanControl(live.ProcessId), _processControl.CanClose(live.ProcessId), _processControl.IsElevated(live.ProcessId));
+                chip.Revive(live, liveMatch?.Rule, ProcessControlService.CanControl(live.ProcessId), _processControl.CanClose(live.ProcessId), ProcessControlService.IsElevated(live.ProcessId));
             }
 
             // Never prune a chip that's audible right now: the run state can be stale here (the
@@ -177,7 +178,7 @@ public partial class HomeViewModel
         foreach (var add in additions.Values
             .OrderBy(a => a.Session.IsSystemSounds ? "System Sounds" : a.Session.DisplayName, StringComparer.OrdinalIgnoreCase))
         {
-            var chip = new AppChip(add.Session, card.Endpoint.Id, _iconService, card.MeterOptions, add.Rule, startsActive: add.Audible, ownerCard: card, onHide: HideApp, onHideOnDevice: HideAppOnDevice, onClose: CloseApp, onTerminate: TerminateApp, canControlProcess: _processControl.CanControl(add.Session.ProcessId), canCloseProcess: _processControl.CanClose(add.Session.ProcessId), isElevated: _processControl.IsElevated(add.Session.ProcessId))
+            var chip = new AppChip(add.Session, card.Endpoint.Id, _iconService, card.MeterOptions, add.Rule, startsActive: add.Audible, ownerCard: card, onHide: HideApp, onHideOnDevice: HideAppOnDevice, onClose: CloseApp, onTerminate: TerminateApp, canControlProcess: ProcessControlService.CanControl(add.Session.ProcessId), canCloseProcess: _processControl.CanClose(add.Session.ProcessId), isElevated: ProcessControlService.IsElevated(add.Session.ProcessId))
             {
                 RulePinnedHere = add.PinnedHere,
             };

@@ -4,11 +4,13 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
 using Earmark.App.Services;
-using Earmark.App.Settings;
+using Earmark.Audio.Routing;
+using Earmark.Audio.Services;
 using Earmark.Core.Audio;
 using Earmark.Core.Models;
 using Earmark.Core.Routing;
 using Earmark.Core.Services;
+using Earmark.Core.Settings;
 using Earmark.Core.WaveLink;
 
 using Microsoft.Extensions.Logging;
@@ -43,20 +45,20 @@ public partial class HomeViewModel : ObservableObject, IDisposable
 
     private readonly IRulesService _rules;
     private readonly IAudioEndpointService _endpoints;
-    private readonly IEndpointWriter _writer;
+    private readonly EndpointWriter _writer;
     private readonly IAudioSessionService _sessions;
     private readonly IAudioSessionMeterService _sessionMeters;
     private readonly IRunningProcessProvider _processes;
     private readonly IAudioPolicyService _policy;
-    private readonly IRoutingApplier _routingApplier;
+    private readonly RoutingApplier _routingApplier;
     private readonly ISessionIconService _iconService;
     private readonly IRuleMatcher _matcher;
     private readonly IRuleEvaluator _evaluator;
-    private readonly ISettingsService _settings;
+    private readonly SettingsService _settings;
     private readonly IWaveLinkService _waveLink;
     private readonly IWaveLinkVisualService _waveLinkVisuals;
     private readonly IDispatcherQueueProvider _dispatcher;
-    private readonly IDeviceDefaultsService _deviceDefaults;
+    private readonly DeviceDefaultsService _deviceDefaults;
     private readonly IBluetoothAudioControl _bluetoothControl;
     private readonly INowPlayingService _nowPlaying;
     private readonly INowPlayingArtworkService _nowPlayingArtwork;
@@ -76,7 +78,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     private readonly HashSet<string> _hiddenAppOnDeviceKeys = new(StringComparer.OrdinalIgnoreCase);
     private readonly INotificationService _notifications;
     private readonly IInAppNotificationService _inAppNotifications;
-    private readonly IProcessControlService _processControl;
+    private readonly ProcessControlService _processControl;
     private readonly ILogger<HomeViewModel> _logger;
     private readonly Dictionary<string, DateTime> _lastReconcileToast = new(StringComparer.OrdinalIgnoreCase);
     private static readonly TimeSpan ToastRateLimit = TimeSpan.FromSeconds(15);
@@ -126,23 +128,23 @@ public partial class HomeViewModel : ObservableObject, IDisposable
     public HomeViewModel(
         IRulesService rules,
         IAudioEndpointService endpoints,
-        IEndpointWriter writer,
+        EndpointWriter writer,
         IAudioSessionService sessions,
         IAudioSessionMeterService sessionMeters,
         IRunningProcessProvider processes,
         IAudioPolicyService policy,
-        IRoutingApplier routingApplier,
+        RoutingApplier routingApplier,
         ISessionIconService iconService,
         IRuleMatcher matcher,
         IRuleEvaluator evaluator,
-        ISettingsService settings,
+        SettingsService settings,
         IWaveLinkService waveLink,
         IWaveLinkVisualService waveLinkVisuals,
         INotificationService notifications,
         IInAppNotificationService inAppNotifications,
-        IProcessControlService processControl,
+        ProcessControlService processControl,
         IDispatcherQueueProvider dispatcher,
-        IDeviceDefaultsService deviceDefaults,
+        DeviceDefaultsService deviceDefaults,
         IBluetoothAudioControl bluetoothControl,
         INowPlayingService nowPlaying,
         INowPlayingArtworkService nowPlayingArtwork,
@@ -592,7 +594,7 @@ public partial class HomeViewModel : ObservableObject, IDisposable
                         .Concat(_endpoints.GetEndpoints(EndpointFlow.Capture))
                         .ToList();
                     var match = _matcher.FindAppRoute(session, EndpointFlow.Render, rulesSnapshot, combinedEndpointsCache, sessionsSnapshot);
-                    var revivedChip = new AppChip(session, card.Endpoint.Id, _iconService, card.MeterOptions, match?.Rule, ownerCard: card, onHide: HideApp, onHideOnDevice: HideAppOnDevice, onClose: CloseApp, onTerminate: TerminateApp, canControlProcess: _processControl.CanControl(session.ProcessId), canCloseProcess: _processControl.CanClose(session.ProcessId), isElevated: _processControl.IsElevated(session.ProcessId))
+                    var revivedChip = new AppChip(session, card.Endpoint.Id, _iconService, card.MeterOptions, match?.Rule, ownerCard: card, onHide: HideApp, onHideOnDevice: HideAppOnDevice, onClose: CloseApp, onTerminate: TerminateApp, canControlProcess: ProcessControlService.CanControl(session.ProcessId), canCloseProcess: _processControl.CanClose(session.ProcessId), isElevated: ProcessControlService.IsElevated(session.ProcessId))
                     {
                         RulePinnedHere = match is not null &&
                             string.Equals(match.Endpoint.Id, card.Endpoint.Id, StringComparison.OrdinalIgnoreCase),

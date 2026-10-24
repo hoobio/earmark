@@ -1,6 +1,8 @@
 using Earmark.App.Services;
-using Earmark.App.Settings;
 using Earmark.App.Views;
+using Earmark.Core;
+using Earmark.Core.Services;
+using Earmark.Core.Settings;
 
 using Microsoft.UI;
 using Microsoft.UI.Composition;
@@ -21,8 +23,8 @@ public sealed partial class MainWindow : Window, IDisposable
 {
     private readonly INavigationService _navigation;
     private readonly IDispatcherQueueProvider _dispatcher;
-    private readonly ISettingsService _settings;
-    private readonly IUpdateService _update;
+    private readonly SettingsService _settings;
+    private readonly UpdateService _update;
     private readonly IInAppNotificationService _inAppNotifications;
     private ISystemBackdropControllerWithTargets? _backdropController;
     private SystemBackdropConfiguration? _backdropConfig;
@@ -33,7 +35,7 @@ public sealed partial class MainWindow : Window, IDisposable
     private string _defaultTitleBarSubtitle = "";
     private TextBlock? _titleBarSubtitleTextBlock;
 
-    public MainWindow(INavigationService navigation, IDispatcherQueueProvider dispatcher, ISettingsService settings, IUpdateService update, IInAppNotificationService inAppNotifications)
+    public MainWindow(INavigationService navigation, IDispatcherQueueProvider dispatcher, SettingsService settings, UpdateService update, IInAppNotificationService inAppNotifications)
     {
         _navigation = navigation;
         _dispatcher = dispatcher;

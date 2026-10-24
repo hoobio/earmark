@@ -4,7 +4,7 @@ using Earmark.Core.WaveLink;
 
 using Microsoft.Extensions.Logging;
 
-namespace Earmark.App.Services;
+namespace Earmark.Audio.Routing;
 
 /// <summary>
 /// Single entry point for "set state on this endpoint" that picks the right transport. Wave
@@ -12,16 +12,10 @@ namespace Earmark.App.Services;
 /// (the properties flip but WL reads upstream and keeps its own values), so the writer
 /// resolves the matching WL input and routes through Wave Link's setInputConfig when there's
 /// a hit; everything else (and the fallback path when WL refuses) takes the standard Windows
-/// endpoint route. <see cref="DeviceCard"/> (user toggles / slider) and the rule engine
+/// endpoint route. The device cards (user toggles / slider) and the rule engine
 /// both call through here so the WL-vs-Windows decision lives in one place.
 /// </summary>
-public interface IEndpointWriter
-{
-    Task<bool> SetMutedAsync(AudioEndpoint endpoint, bool muted, CancellationToken ct = default);
-    Task<bool> SetVolumeAsync(AudioEndpoint endpoint, float level, CancellationToken ct = default);
-}
-
-internal sealed class EndpointWriter : IEndpointWriter
+public sealed class EndpointWriter
 {
     private readonly IAudioEndpointService _endpoints;
     private readonly IWaveLinkService _waveLink;

@@ -1,4 +1,4 @@
-namespace Earmark.App.Settings;
+namespace Earmark.Core.Settings;
 
 /// <summary>
 /// How a device card that maps to a Wave Link channel renders its icon tile. Mutually

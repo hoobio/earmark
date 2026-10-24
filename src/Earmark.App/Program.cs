@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-using Earmark.App.Settings;
+using Earmark.Audio.Services;
 
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;

@@ -4,7 +4,8 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
 using Earmark.App.Services;
-using Earmark.App.Settings;
+using Earmark.Core.Services;
+using Earmark.Core.Settings;
 using Earmark.Core.WaveLink;
 
 using Windows.UI;
@@ -13,18 +14,18 @@ namespace Earmark.App.ViewModels;
 
 public partial class SettingsViewModel : ObservableObject, IDisposable
 {
-    private readonly ISettingsService _settings;
+    private readonly SettingsService _settings;
     private readonly IWaveLinkService _waveLink;
     private readonly IDispatcherQueueProvider _dispatcher;
-    private readonly IDeviceDefaultsService _defaults;
+    private readonly DeviceDefaultsService _defaults;
     private readonly IGlobalHotkeyService _hotkey;
     private bool _suppress;
 
     public SettingsViewModel(
-        ISettingsService settings,
+        SettingsService settings,
         IWaveLinkService waveLink,
         IDispatcherQueueProvider dispatcher,
-        IDeviceDefaultsService defaults,
+        DeviceDefaultsService defaults,
         IGlobalHotkeyService hotkey)
     {
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));

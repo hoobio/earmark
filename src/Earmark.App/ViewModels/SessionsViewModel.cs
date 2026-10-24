@@ -4,6 +4,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
 using Earmark.App.Services;
+using Earmark.Audio.Routing;
 using Earmark.Core.Audio;
 using Earmark.Core.Models;
 
@@ -15,7 +16,7 @@ public partial class SessionsViewModel : ObservableObject, IDisposable
 
     private readonly IAudioSessionService _sessions;
     private readonly IAudioEndpointService _endpoints;
-    private readonly IRoutingApplier _applier;
+    private readonly RoutingApplier _applier;
     private readonly IDispatcherQueueProvider _dispatcher;
     private readonly Lock _gate = new();
 
@@ -24,7 +25,7 @@ public partial class SessionsViewModel : ObservableObject, IDisposable
     public SessionsViewModel(
         IAudioSessionService sessions,
         IAudioEndpointService endpoints,
-        IRoutingApplier applier,
+        RoutingApplier applier,
         IDispatcherQueueProvider dispatcher)
     {
         _sessions = sessions;

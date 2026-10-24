@@ -1,17 +1,20 @@
 using System.Text.RegularExpressions;
 
-using Earmark.App.Settings;
 using Earmark.Core.Audio;
 using Earmark.Core.Models;
-using Earmark.Core.Services;
+using Earmark.Core.Settings;
 using Earmark.Core.WaveLink;
 
 using Microsoft.Extensions.Logging;
 
-namespace Earmark.App.Services;
+namespace Earmark.Core.Services;
 
-/// <inheritdoc cref="IDeviceDefaultsService"/>
-public sealed class DeviceDefaultsService : IDeviceDefaultsService
+/// <summary>
+/// Owns the Devices-page "defaults": the starter groups + visibility seeded on a fresh install, and
+/// the user-invoked reset that restores them. Mutates the shared <see cref="AppSettings"/>
+/// in place and raises <see cref="DefaultsApplied"/> so the Devices page rebuilds.
+/// </summary>
+public sealed class DeviceDefaultsService
 {
     private const string DefaultDevicesGroupTitle = "Default Devices";
     private const string WaveLinkChannelsGroupTitle = "Wave Link Channels";
@@ -24,14 +27,14 @@ public sealed class DeviceDefaultsService : IDeviceDefaultsService
     private const string AppOutputAppPattern = @"(ms-teams|Teams|[Dd]iscord(Canary|PTB)?|slack)\.exe";
     private const string AppOutputDevicePattern = "Comm";
 
-    private readonly ISettingsService _settings;
+    private readonly SettingsService _settings;
     private readonly IAudioEndpointService _endpoints;
     private readonly IWaveLinkService _waveLink;
     private readonly IRulesService _rules;
     private readonly ILogger<DeviceDefaultsService> _logger;
 
     public DeviceDefaultsService(
-        ISettingsService settings,
+        SettingsService settings,
         IAudioEndpointService endpoints,
         IWaveLinkService waveLink,
         IRulesService rules,

@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-using Earmark.App.Settings;
+using Earmark.Core.Settings;
 using Earmark.App.ViewModels;
 
 using Microsoft.Extensions.Logging;
@@ -29,7 +29,7 @@ public sealed partial class QuickControlsWindow : Window
     private const int ScrollOverflowTolerance = 16;
     private const int OverlayWidth = OverlayContentWidth + (OverlayPadding * 2);
     private readonly ILogger<QuickControlsWindow> _logger;
-    private readonly ISettingsService _settings;
+    private readonly SettingsService _settings;
     private readonly nint _hwnd;
     private ISystemBackdropControllerWithTargets? _backdropController;
     // Overlay windows render as a stack and are shown one after another, so all but the
@@ -39,7 +39,7 @@ public sealed partial class QuickControlsWindow : Window
     private readonly SystemBackdropConfiguration _backdropConfig = new() { IsInputActive = true };
     private BackdropMode? _appliedBackdrop;
 
-    public QuickControlsWindow(HomeViewModel viewModel, ISettingsService settings, ILogger<QuickControlsWindow> logger)
+    public QuickControlsWindow(HomeViewModel viewModel, SettingsService settings, ILogger<QuickControlsWindow> logger)
     {
         ViewModel = viewModel;
         _settings = settings;

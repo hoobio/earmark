@@ -2,7 +2,7 @@ using System.Text.Json.Serialization;
 
 using Earmark.Core.Models;
 
-namespace Earmark.App.Settings;
+namespace Earmark.Core.Settings;
 
 public sealed class AppSettings
 {

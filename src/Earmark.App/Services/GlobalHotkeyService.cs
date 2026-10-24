@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-using Earmark.App.Settings;
+using Earmark.Core.Settings;
 
 using Microsoft.Extensions.Logging;
 
@@ -129,7 +129,7 @@ internal sealed class GlobalHotkeyService : IGlobalHotkeyService
     private const int HWND_MESSAGE = -3;
     private const string ClassName = "EarmarkQuickControlsHotkey";
 
-    private readonly ISettingsService _settings;
+    private readonly SettingsService _settings;
     private readonly IInAppNotificationService _notifications;
     private readonly ILogger<GlobalHotkeyService> _logger;
     private WndProc? _wndProc;
@@ -138,7 +138,7 @@ internal sealed class GlobalHotkeyService : IGlobalHotkeyService
     private string? _registeredHotkey;
     private bool _started;
 
-    public GlobalHotkeyService(ISettingsService settings, IInAppNotificationService notifications, ILogger<GlobalHotkeyService> logger)
+    public GlobalHotkeyService(SettingsService settings, IInAppNotificationService notifications, ILogger<GlobalHotkeyService> logger)
     {
         _settings = settings;
         _notifications = notifications;

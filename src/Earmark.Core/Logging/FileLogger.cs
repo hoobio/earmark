@@ -3,9 +3,9 @@ using System.Text;
 
 using Microsoft.Extensions.Logging;
 
-namespace Earmark.App.Logging;
+namespace Earmark.Core.Logging;
 
-internal sealed class FileLoggerProvider : ILoggerProvider
+public sealed class FileLoggerProvider : ILoggerProvider
 {
     private readonly string _path;
     private readonly Lock _gate = new();

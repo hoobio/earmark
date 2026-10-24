@@ -1,12 +1,11 @@
-using System.Net.Http;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-using Earmark.App.Settings;
+using Earmark.Core.Settings;
 
 using Microsoft.Extensions.Logging;
 
-namespace Earmark.App.Services;
+namespace Earmark.Core.Services;
 
 public enum UpdateStatus
 {
@@ -21,45 +20,18 @@ public enum UpdateStatus
     NotSupported,
 }
 
-public interface IUpdateService
+public sealed class UpdateService : IDisposable
 {
-    UpdateStatus Status { get; }
-
-    /// <summary>Display name of the latest release once a check has found one (e.g. "v0.1.9").</summary>
-    string? LatestVersion { get; }
-
-    /// <summary>Browser URL of the latest release, set once a check completes.</summary>
-    string? LatestReleaseUrl { get; }
-
-    /// <summary>False for packaged builds, which update through the Microsoft Store.</summary>
-    bool IsSupported { get; }
-
-    event EventHandler? StatusChanged;
-
-    /// <summary>
-    /// Checks the latest stable GitHub release. <paramref name="manual"/> checks run even when the
-    /// auto-check setting is off (the user asked); auto checks respect it. No-op on packaged builds.
-    /// Never throws - failures land as <see cref="UpdateStatus.Failed"/>.
-    /// </summary>
-    Task CheckForUpdatesAsync(bool manual, CancellationToken ct = default);
-}
-
-internal sealed class UpdateService : IUpdateService, IDisposable
-{
-    private readonly ISettingsService _settings;
-    private readonly IDispatcherQueueProvider _dispatcher;
+    private readonly SettingsService _settings;
     private readonly ILogger<UpdateService> _logger;
     private readonly HttpClient _http;
     private readonly SemaphoreSlim _gate = new(1, 1);
 
-    public UpdateService(
-        ISettingsService settings,
-        IDispatcherQueueProvider dispatcher,
-        ILogger<UpdateService> logger)
+    public UpdateService(SettingsService settings, bool isPackaged, ILogger<UpdateService> logger)
     {
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
-        _dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        IsSupported = !isPackaged;
 
         _http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
         // GitHub's API rejects requests without a User-Agent; the Accept header opts into the
@@ -67,19 +39,26 @@ internal sealed class UpdateService : IUpdateService, IDisposable
         _http.DefaultRequestHeaders.UserAgent.ParseAdd($"Earmark/{AppInfo.Version}");
         _http.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
 
-        Status = AppInfo.IsPackaged ? UpdateStatus.NotSupported : UpdateStatus.Unknown;
+        Status = isPackaged ? UpdateStatus.NotSupported : UpdateStatus.Unknown;
     }
 
     public UpdateStatus Status { get; private set; }
 
+    /// <summary>Display name of the latest release once a check has found one (e.g. "v0.1.9").</summary>
     public string? LatestVersion { get; private set; }
 
     public string? LatestReleaseUrl { get; private set; }
 
-    public bool IsSupported => !AppInfo.IsPackaged;
+    /// <summary>False for packaged builds, which update through the Microsoft Store.</summary>
+    public bool IsSupported { get; }
 
+    /// <summary>Raised on a thread-pool thread; UI subscribers marshal to their own thread.</summary>
     public event EventHandler? StatusChanged;
 
+    /// <summary>
+    /// <paramref name="manual"/> checks run even when the auto-check setting is off; auto checks
+    /// respect it. No-op on packaged builds. Never throws: failures land as <see cref="UpdateStatus.Failed"/>.
+    /// </summary>
     public async Task CheckForUpdatesAsync(bool manual, CancellationToken ct = default)
     {
         if (!IsSupported)
@@ -178,7 +157,7 @@ internal sealed class UpdateService : IUpdateService, IDisposable
     private void SetStatus(UpdateStatus status)
     {
         Status = status;
-        _dispatcher.Enqueue(() => StatusChanged?.Invoke(this, EventArgs.Empty));
+        StatusChanged?.Invoke(this, EventArgs.Empty);
     }
 
     public void Dispose()

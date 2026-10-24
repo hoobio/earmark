@@ -1,4 +1,4 @@
-namespace Earmark.App.Settings;
+namespace Earmark.Core.Settings;
 
 /// <summary>How device cards on the Devices page decide their height within a row of equal-width
 /// columns. Width is always driven by the column grid; only the vertical sizing differs. The two

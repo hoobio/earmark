@@ -1,6 +1,6 @@
 using System.Collections.ObjectModel;
 
-using Earmark.App.Settings;
+using Earmark.Core.Settings;
 
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;

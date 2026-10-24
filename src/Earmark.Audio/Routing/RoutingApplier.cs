@@ -1,6 +1,3 @@
-using System.Text.RegularExpressions;
-
-using Earmark.App.Settings;
 using Earmark.Core.Audio;
 using Earmark.Core.Models;
 using Earmark.Core.Routing;
@@ -9,17 +6,9 @@ using Earmark.Core.WaveLink;
 
 using Microsoft.Extensions.Logging;
 
-namespace Earmark.App.Services;
+namespace Earmark.Audio.Routing;
 
-public interface IRoutingApplier
-{
-    void Start();
-    Task ApplyAllAsync(bool force = false);
-    Task<AppliedRoute?> ApplyAsync(AudioSession session);
-    event EventHandler<AppliedRoute>? RouteApplied;
-}
-
-internal sealed class RoutingApplier : IRoutingApplier, IDisposable
+public sealed class RoutingApplier : IDisposable
 {
     // Drift-guard only. The real triggers are SessionAdded / SessionRemoved /
     // RulesChanged / DefaultsChanged. Keep this slow enough to not show up on idle CPU.
@@ -43,7 +32,7 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
     private readonly IRulesService _rules;
     private readonly IAudioSessionService _sessions;
     private readonly IAudioEndpointService _endpoints;
-    private readonly IEndpointWriter _writer;
+    private readonly EndpointWriter _writer;
     private readonly IAudioPolicyService _policy;
     private readonly IRuleMatcher _matcher;
     private readonly IWaveLinkService _waveLink;
@@ -69,7 +58,7 @@ internal sealed class RoutingApplier : IRoutingApplier, IDisposable
         IRulesService rules,
         IAudioSessionService sessions,
         IAudioEndpointService endpoints,
-        IEndpointWriter writer,
+        EndpointWriter writer,
         IAudioPolicyService policy,
         IRuleMatcher matcher,
         IWaveLinkService waveLink,

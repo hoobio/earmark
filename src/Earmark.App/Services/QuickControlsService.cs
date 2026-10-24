@@ -1,6 +1,6 @@
 using Earmark.App.Views;
 using Earmark.App.ViewModels;
-using Earmark.App.Settings;
+using Earmark.Core.Settings;
 
 using Microsoft.Extensions.Logging;
 using Microsoft.UI.Windowing;
@@ -28,7 +28,7 @@ internal sealed class QuickControlsService : IQuickControlsService
 
     private readonly IGlobalHotkeyService _hotkey;
     private readonly HomeViewModel _viewModel;
-    private readonly ISettingsService _settings;
+    private readonly SettingsService _settings;
     private readonly ILoggerFactory _loggerFactory;
     private readonly IDispatcherQueueProvider _dispatcher;
     private readonly List<QuickControlsWindow> _windows = new();
@@ -41,7 +41,7 @@ internal sealed class QuickControlsService : IQuickControlsService
     public QuickControlsService(
         IGlobalHotkeyService hotkey,
         HomeViewModel viewModel,
-        ISettingsService settings,
+        SettingsService settings,
         ILoggerFactory loggerFactory,
         IDispatcherQueueProvider dispatcher)
     {

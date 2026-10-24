@@ -2,9 +2,9 @@ using System.Diagnostics.CodeAnalysis;
 
 using Microsoft.Win32;
 
-namespace Earmark.App.Settings;
+namespace Earmark.Audio.Services;
 
-internal static class StartupRegistration
+public static class StartupRegistration
 {
     private const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
     private const string ValueName = "Earmark";

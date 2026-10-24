@@ -4,7 +4,9 @@ using CommunityToolkit.Mvvm.ComponentModel;
 
 using Earmark.App.Hosting;
 using Earmark.App.Services;
-using Earmark.App.Settings;
+using Earmark.Core;
+using Earmark.Core.Services;
+using Earmark.Core.Settings;
 
 using Microsoft.Extensions.Logging;
 
@@ -17,15 +19,17 @@ namespace Earmark.App.ViewModels;
 /// </summary>
 public partial class AboutViewModel : ObservableObject, IDisposable
 {
-    private readonly ISettingsService _settings;
-    private readonly IUpdateService _update;
+    private readonly SettingsService _settings;
+    private readonly UpdateService _update;
+    private readonly IDispatcherQueueProvider _dispatcher;
     private readonly ILogger<AboutViewModel> _logger;
     private bool _suppress;
 
-    public AboutViewModel(ISettingsService settings, IUpdateService update, ILogger<AboutViewModel> logger)
+    public AboutViewModel(SettingsService settings, UpdateService update, IDispatcherQueueProvider dispatcher, ILogger<AboutViewModel> logger)
     {
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
         _update = update ?? throw new ArgumentNullException(nameof(update));
+        _dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
         _suppress = true;
@@ -152,13 +156,13 @@ public partial class AboutViewModel : ObservableObject, IDisposable
         }
     }
 
-    private void OnUpdateStatusChanged(object? sender, EventArgs e)
+    private void OnUpdateStatusChanged(object? sender, EventArgs e) => _dispatcher.Enqueue(() =>
     {
         OnPropertyChanged(nameof(IsChecking));
         OnPropertyChanged(nameof(UpdateAvailable));
         OnPropertyChanged(nameof(UpdateStatusText));
         OnPropertyChanged(nameof(CanCheck));
-    }
+    });
 
     public void Dispose() => _update.StatusChanged -= OnUpdateStatusChanged;
 }

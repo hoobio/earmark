@@ -1,22 +1,21 @@
 using System.Reflection;
-using System.Runtime.InteropServices;
 
-namespace Earmark.App.Services;
+namespace Earmark.Core;
 
 /// <summary>
 /// Static facts about the running build: the release-please-managed version (baked into the
-/// assembly via <c>version.txt</c> -&gt; <c>&lt;Version&gt;</c>), the build channel, the source
-/// commit, and whether we're running packaged (MSIX). Drives the About section and gates the
-/// update check (packaged builds update through the Store, so the check is hidden there).
+/// assembly via <c>version.txt</c> -&gt; <c>&lt;Version&gt;</c>), the build channel and the source
+/// commit. Drives the About section, the data paths and the update check.
 /// </summary>
-internal static class AppInfo
+public static class AppInfo
 {
     private const string Owner = "hoobio";
     private const string Repo = "earmark";
 
     static AppInfo()
     {
-        var assembly = Assembly.GetExecutingAssembly();
+        // BuildChannel and the commit are stamped onto the head exe only, not onto this library.
+        var assembly = Assembly.GetEntryAssembly() ?? Assembly.GetExecutingAssembly();
 
         var informational = assembly
             .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
@@ -91,31 +90,4 @@ internal static class AppInfo
     /// pre-release build can find the newest pre-release; stable builds just filter prereleases out.
     /// </summary>
     public static string ReleasesApiUrl => $"https://api.github.com/repos/{Owner}/{Repo}/releases?per_page=30";
-
-    /// <summary>
-    /// True when running as a packaged (MSIX) app. Such builds update through the Microsoft Store,
-    /// so the in-app update check is hidden for them. Resolved once via the Win32 packaging API
-    /// (returns <c>APPMODEL_ERROR_NO_PACKAGE</c> when unpackaged) rather than catching an exception.
-    /// </summary>
-    public static bool IsPackaged { get; } = ResolveIsPackaged();
-
-    private const int AppModelErrorNoPackage = 15700;
-
-    // Querying with a null buffer returns APPMODEL_ERROR_NO_PACKAGE when unpackaged, or
-    // ERROR_INSUFFICIENT_BUFFER when packaged - either way the return code alone tells us which.
-    [DllImport("kernel32.dll")]
-    private static extern int GetCurrentPackageFullName(ref int packageFullNameLength, IntPtr packageFullName);
-
-    private static bool ResolveIsPackaged()
-    {
-        try
-        {
-            var length = 0;
-            return GetCurrentPackageFullName(ref length, IntPtr.Zero) != AppModelErrorNoPackage;
-        }
-        catch
-        {
-            return false;
-        }
-    }
 }

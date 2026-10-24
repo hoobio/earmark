@@ -1,21 +1,21 @@
-using Earmark.App.Logging;
-using Earmark.App.Settings;
+using Earmark.Core.Logging;
+using Earmark.Core.Settings;
 using Earmark.Core.WaveLink;
 
 using Microsoft.Extensions.Logging;
 
-namespace Earmark.App.Services;
+namespace Earmark.Audio.Services;
 
-internal sealed class StartupSettingsApplier : IDisposable
+public sealed class StartupSettingsApplier : IDisposable
 {
-    private readonly ISettingsService _settings;
+    private readonly SettingsService _settings;
     private readonly FileLoggerProvider _fileLogger;
     private readonly IWaveLinkService _waveLink;
     private readonly ILogger<StartupSettingsApplier> _logger;
     private bool _started;
 
     public StartupSettingsApplier(
-        ISettingsService settings,
+        SettingsService settings,
         FileLoggerProvider fileLogger,
         IWaveLinkService waveLink,
         ILogger<StartupSettingsApplier> logger)
