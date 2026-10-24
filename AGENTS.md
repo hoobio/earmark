@@ -21,6 +21,7 @@ src/
   Earmark.Desktop/            # the single Avalonia head: shell, pages, view-models, tray, Quick Controls, watchdog
 tests/
   Earmark.Core.Tests/         # xUnit
+  Earmark.Desktop.Tests/      # xUnit + Avalonia.Headless: UI guards over sample audio services
 ```
 
 `Earmark.Desktop` builds `Earmark.exe` (`AssemblyName` `Earmark`, root namespace `Earmark.Desktop`). It is self-contained and unpackaged for the MSI and portable zip; the same publish output is wrapped as MSIX for the Store. There is no second head and no UI abstraction layer.
@@ -174,6 +175,7 @@ Earmark follows the Steward companion's hard-won Avalonia practice:
 - **Resource name clashes**: FluentAvalonia defines resources with the same names as Earmark's tokens (for example `ContentDialogPadding`). Read Earmark's own tokens with `StaticResource`.
 - **DataContext**: do not set an inner `DataContext` from a `StyledProperty` changed callback. The callback can fire during `DataContext` propagation and the inner compiled bindings keep a null source (the blank `DeviceGroupView`). Rely on inheritance.
 - **Animations**: animate the control's `RenderTransform` property, not the `TranslateTransform` object. Avalonia 12 throws `InvalidCastException` on the latter.
+- **Hover fades and white flashes**: `BrushTransition` interpolates straight, not premultiplied, alpha. A fade between a clear brush and an opaque brush of a different RGB passes through a lighter colour, which shows as a white flash on hover. A clear rest brush carries the RGB of the brush it fades to (`#002B3140` against `#FF2B3140`, `#00FFFFFF` against `#0FFFFFFF`). An opaque rest against a translucent hover uses an opaque hover (`Button.RuleChip` uses `DefaultButtonStyle`, not `SubtleButtonStyle`). A user-coloured background (device tile, colour swatch) has no fade. `HoverTransitionTests.No_hover_or_press_fade_passes_through_a_lighter_colour` (`tests/Earmark.Desktop.Tests`) walks the shell, every page, the Devices menus, Quick Controls and a control gallery, applies `:pointerover` and `:pressed`, and fails on any such pair. Add new control types and button themes to its gallery.
 - **Dev launch flags**: `Earmark.exe --open=<Page> --no-activate --monitor=rightmost` opens the named page on the rightmost monitor without taking focus.
 - **Parallel agents**: each agent builds with its own `--artifacts-path` so builds do not lock each other's files.
 - **Render checks**: `PrintWindow` capture of the app window is acceptable for render checks.
