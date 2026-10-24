@@ -695,7 +695,7 @@ jobs:
 
       # Created as a draft first so the asset upload completes on repos with immutable releases.
       - name: Create pre-release (draft)
-        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b  # v3.0.1
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64  # v3.0.3
         with:
           tag_name: v${{ steps.version.outputs.version }}-pre.${{ github.run_number }}
           name: v${{ steps.version.outputs.version }}-pre.${{ github.run_number }}
