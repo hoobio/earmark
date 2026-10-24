@@ -13,11 +13,12 @@ jobs:
     steps:
       - name: Validate PR title
         id: validate
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
-          PR_TITLE="${{ github.event.pull_request.title }}"
-          echo "Validating PR title: $PR_TITLE"
+          printf 'Validating PR title: %s\n' "$PR_TITLE"
 
-          if echo "$PR_TITLE" | grep -qE '^(feat|fix|chore|docs|style|refactor|perf|test|build|ci|revert)(\([^)]+\))?!?: .+'; then
+          if printf '%s' "$PR_TITLE" | grep -qE '^(feat|fix|chore|docs|style|refactor|perf|test|build|ci|revert)(\([^)]+\))?!?: .+'; then
             echo "valid=true" >> $GITHUB_OUTPUT
             echo "PR title is valid"
           else
