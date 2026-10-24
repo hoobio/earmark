@@ -8,12 +8,12 @@
     Padding="12,4,12,12"
     Focusable="True">
     <Grid RowDefinitions="Auto,*" Background="Transparent">
-        <Grid Classes="DevicesHeader" ColumnDefinitions="*,Auto">
-            <TextBlock Classes="PageTitle" Text="Devices" IsVisible="{Binding ShowHeader}" />
-            <Button x:Name="OptionsButton" Grid.Column="1" Classes="CardIcon" ToolTip.Tip="Page options" Click="OnOptionsClick">
-                <TextBlock Classes="Glyph" Text="{StaticResource Glyph.More}" />
-            </Button>
+        <Grid Classes="DevicesHeader" IsVisible="{Binding ShowHeader}">
+            <TextBlock Classes="PageTitle" Text="Devices" />
         </Grid>
+        <Button x:Name="OptionsButton" Grid.RowSpan="2" ZIndex="1" HorizontalAlignment="Right" VerticalAlignment="Top" Classes="CardIcon" ToolTip.Tip="Page options" Click="OnOptionsClick">
+            <TextBlock Classes="Glyph" Text="{StaticResource Glyph.More}" />
+        </Button>
         <ScrollViewer x:Name="Scroller" Grid.Row="1" Classes="DevicesScroller" ctl:AutoScroll.IsEnabled="True">
             <Panel>
                 <TextBlock Classes="Body Secondary EmptyState" Text="Loading devices..." IsVisible="{Binding IsInitializing}" />
