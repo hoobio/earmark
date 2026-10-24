@@ -24,6 +24,8 @@ public sealed class RulesService : IRulesService, IDisposable
 
     public bool IsSaveBlocked => _store.IsSaveBlocked;
 
+    public string? CorruptCopyPath => _store.CorruptCopyPath;
+
     public event EventHandler? RulesChanged;
 
     public async Task LoadAsync(CancellationToken ct = default)

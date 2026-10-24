@@ -30,7 +30,6 @@ public sealed class JsonRuleStore : IRuleStore, IDisposable
 
     public bool IsSaveBlocked => _saveBlocked;
 
-    /// <summary>Where the last unparseable rules file was copied to, or null.</summary>
     public string? CorruptCopyPath { get; private set; }
 
     public async ValueTask<IReadOnlyList<RoutingRule>> LoadAsync(CancellationToken ct = default)

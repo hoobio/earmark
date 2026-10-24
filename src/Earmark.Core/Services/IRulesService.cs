@@ -12,6 +12,8 @@ public interface IRulesService
     /// rules.corrupt-&lt;timestamp&gt;.json.</summary>
     bool IsSaveBlocked { get; }
 
+    string? CorruptCopyPath { get; }
+
     void UnblockSaves();
 
     Task LoadAsync(CancellationToken ct = default);

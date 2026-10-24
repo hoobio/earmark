@@ -222,14 +222,17 @@ public sealed class RoutingApplier : IDisposable
 
         RearmChangedRules(rules);
 
-        var snapshot = TakeSnapshot(rules);
-        var edges = ComputeActivationEdges(snapshot);
+        // Drained before the snapshot: the session service publishes before it raises SessionAdded,
+        // so every pid taken here is in the snapshot read next.
         HashSet<uint> newPids;
         lock (_newSessionGate)
         {
             newPids = new HashSet<uint>(_newSessionPids);
             _newSessionPids.Clear();
         }
+
+        var snapshot = TakeSnapshot(rules);
+        var edges = ComputeActivationEdges(snapshot);
 
         ApplyDefaultDevices(snapshot, edges);
         ApplyApplicationsToSessions(snapshot, edges, newPids);
@@ -521,6 +524,8 @@ public sealed class RoutingApplier : IDisposable
             {
                 _applyGate.Release();
             }
+
+            await DrainPendingAsync().ConfigureAwait(false);
         }
         catch (Exception ex)
         {

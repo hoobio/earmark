@@ -53,7 +53,7 @@ public sealed class RulePersistenceTests : IDisposable
         await load.Should().ThrowAsync<JsonException>();
 
         rules.IsSaveBlocked.Should().BeTrue();
-        store.CorruptCopyPath.Should().NotBeNull();
+        rules.CorruptCopyPath.Should().Be(store.CorruptCopyPath).And.NotBeNull();
         Path.GetFileName(store.CorruptCopyPath!).Should().StartWith("rules.corrupt-").And.EndWith(".json");
         (await File.ReadAllTextAsync(store.CorruptCopyPath!, Ct)).Should().Be(garbage);
 
