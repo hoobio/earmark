@@ -1,0 +1,499 @@
+<Styles
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ui="using:FluentAvalonia.UI.Controls"
+    xmlns:uip="using:FluentAvalonia.UI.Controls.Primitives"
+    xmlns:chrome="using:Avalonia.Controls.Chrome"
+    xmlns:styles="using:Earmark.Desktop.Styles"
+    xmlns:views="using:Earmark.Desktop.Views">
+    <Styles.Resources>
+        <ControlTheme x:Key="DefaultButtonStyle" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="MinHeight" Value="32" />
+            <Setter Property="CornerRadius" Value="{StaticResource ControlCornerRadius}" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="FontSize" Value="{StaticResource ControlContentThemeFontSize}" />
+            <Setter Property="Padding" Value="{StaticResource ButtonPadding}" />
+        </ControlTheme>
+
+        <ControlTheme x:Key="AccentButtonStyle" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Background" Value="{DynamicResource AccentButtonBackground}" />
+            <Setter Property="Foreground" Value="{DynamicResource AccentButtonForeground}" />
+            <Style Selector="^:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+                <Setter Property="Background" Value="{DynamicResource AccentButtonBackgroundPointerOver}" />
+                <Setter Property="Foreground" Value="{DynamicResource AccentButtonForegroundPointerOver}" />
+            </Style>
+            <Style Selector="^:pressed /template/ ContentPresenter#PART_ContentPresenter">
+                <Setter Property="Background" Value="{DynamicResource AccentButtonBackgroundPressed}" />
+                <Setter Property="Foreground" Value="{DynamicResource AccentButtonForegroundPressed}" />
+            </Style>
+            <Style Selector="^:disabled /template/ ContentPresenter#PART_ContentPresenter">
+                <Setter Property="Background" Value="{DynamicResource AccentButtonBackgroundDisabled}" />
+                <Setter Property="Foreground" Value="{DynamicResource AccentButtonForegroundDisabled}" />
+            </Style>
+        </ControlTheme>
+
+        <ControlTheme x:Key="CriticalButtonStyle" TargetType="Button" BasedOn="{StaticResource AccentButtonStyle}">
+            <Setter Property="Background" Value="{DynamicResource CriticalButtonBackground}" />
+            <Setter Property="Foreground" Value="{DynamicResource CriticalButtonForeground}" />
+            <Style Selector="^:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+                <Setter Property="Background" Value="{DynamicResource CriticalButtonBackgroundPointerOver}" />
+                <Setter Property="Foreground" Value="{DynamicResource CriticalButtonForeground}" />
+            </Style>
+            <Style Selector="^:pressed /template/ ContentPresenter#PART_ContentPresenter">
+                <Setter Property="Background" Value="{DynamicResource CriticalButtonBackgroundPressed}" />
+                <Setter Property="Foreground" Value="{DynamicResource CriticalButtonForeground}" />
+            </Style>
+        </ControlTheme>
+
+        <ControlTheme x:Key="CautionButtonStyle" TargetType="Button" BasedOn="{StaticResource AccentButtonStyle}">
+            <Setter Property="Background" Value="{DynamicResource CautionButtonBackground}" />
+            <Setter Property="Foreground" Value="{DynamicResource CautionButtonForeground}" />
+            <Style Selector="^:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+                <Setter Property="Background" Value="{DynamicResource CautionButtonBackgroundPointerOver}" />
+                <Setter Property="Foreground" Value="{DynamicResource CautionButtonForeground}" />
+            </Style>
+            <Style Selector="^:pressed /template/ ContentPresenter#PART_ContentPresenter">
+                <Setter Property="Background" Value="{DynamicResource CautionButtonBackgroundPressed}" />
+                <Setter Property="Foreground" Value="{DynamicResource CautionButtonForeground}" />
+            </Style>
+        </ControlTheme>
+
+        <ControlTheme x:Key="SubtleButtonStyle" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
+            <Setter Property="Background" Value="{DynamicResource SubtleFillColorTransparentBrush}" />
+            <Style Selector="^:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+                <Setter Property="Background" Value="{DynamicResource SubtleFillColorSecondaryBrush}" />
+            </Style>
+            <Style Selector="^:pressed /template/ ContentPresenter#PART_ContentPresenter">
+                <Setter Property="Background" Value="{DynamicResource SubtleFillColorTertiaryBrush}" />
+            </Style>
+            <Style Selector="^:disabled /template/ ContentPresenter#PART_ContentPresenter">
+                <Setter Property="Background" Value="{DynamicResource SubtleFillColorTransparentBrush}" />
+            </Style>
+        </ControlTheme>
+
+        <ControlTheme x:Key="MenuRowButtonStyle" TargetType="Button" BasedOn="{StaticResource SubtleButtonStyle}">
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="FontWeight" Value="Normal" />
+        </ControlTheme>
+
+        <ControlTheme x:Key="SegmentedItemTheme" TargetType="ListBoxItem">
+            <Setter Property="Background" Value="{DynamicResource ControlFillColorTransparentBrush}" />
+            <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+            <Setter Property="FontSize" Value="{StaticResource ControlContentThemeFontSize}" />
+            <Setter Property="FontWeight" Value="Normal" />
+            <Setter Property="Height" Value="29" />
+            <Setter Property="Padding" Value="11,0" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="CornerRadius" Value="{StaticResource ControlCornerRadius}" />
+            <Setter Property="Template">
+                <ControlTemplate>
+                    <Panel>
+                        <Border Name="PART_Fill" Background="{TemplateBinding Background}" CornerRadius="{TemplateBinding CornerRadius}">
+                            <Border.Transitions>
+                                <Transitions>
+                                    <BrushTransition Property="Background" Duration="0:0:0.083" />
+                                </Transitions>
+                            </Border.Transitions>
+                        </Border>
+                        <Border Name="PART_Hover" Margin="1,3" Background="{DynamicResource SubtleFillColorTransparentBrush}" CornerRadius="{TemplateBinding CornerRadius}">
+                            <Border.Transitions>
+                                <Transitions>
+                                    <BrushTransition Property="Background" Duration="0:0:0.083" />
+                                    <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.167" />
+                                </Transitions>
+                            </Border.Transitions>
+                        </Border>
+                        <ContentPresenter
+                            Name="PART_ContentPresenter"
+                            Padding="{TemplateBinding Padding}"
+                            HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                            VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"
+                            Content="{TemplateBinding Content}"
+                            ContentTemplate="{TemplateBinding ContentTemplate}"
+                            Foreground="{TemplateBinding Foreground}" />
+                        <Border
+                            Name="PART_Pill"
+                            Width="16"
+                            Height="3"
+                            CornerRadius="1.5"
+                            VerticalAlignment="Bottom"
+                            HorizontalAlignment="Center"
+                            Opacity="0"
+                            Background="{DynamicResource AccentFillColorDefaultBrush}" />
+                    </Panel>
+                </ControlTemplate>
+            </Setter>
+            <Style Selector="^:nth-child(1) /template/ Border#PART_Hover">
+                <Setter Property="Margin" Value="3,3,1,3" />
+            </Style>
+            <Style Selector="^:nth-last-child(1) /template/ Border#PART_Hover">
+                <Setter Property="Margin" Value="1,3,3,3" />
+            </Style>
+            <Style Selector="^:pointerover /template/ Border#PART_Hover">
+                <Setter Property="Background" Value="{DynamicResource SubtleFillColorSecondaryBrush}" />
+            </Style>
+            <Style Selector="^:pressed /template/ Border#PART_Hover">
+                <Setter Property="Background" Value="{DynamicResource SubtleFillColorTertiaryBrush}" />
+                <Setter Property="RenderTransform" Value="scale(0.96)" />
+            </Style>
+            <Style Selector="^:pressed /template/ ContentPresenter#PART_ContentPresenter">
+                <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+            </Style>
+            <Style Selector="^:selected">
+                <Setter Property="Background" Value="{DynamicResource ControlFillColorDefaultBrush}" />
+            </Style>
+            <Style Selector="^:selected /template/ Border#PART_Hover">
+                <Setter Property="Background" Value="{DynamicResource SubtleFillColorTransparentBrush}" />
+                <Setter Property="RenderTransform" Value="none" />
+            </Style>
+            <Style Selector="^:selected /template/ ContentPresenter#PART_ContentPresenter">
+                <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+            </Style>
+            <Style Selector="^:selected /template/ Border#PART_Pill">
+                <Setter Property="Opacity" Value="1" />
+            </Style>
+            <Style Selector="^:selected:pointerover /template/ Border#PART_Pill">
+                <Setter Property="Background" Value="{DynamicResource AccentFillColorSecondaryBrush}" />
+            </Style>
+            <Style Selector="^:selected:pressed /template/ Border#PART_Pill">
+                <Setter Property="Width" Value="8" />
+                <Setter Property="Background" Value="{DynamicResource AccentFillColorTertiaryBrush}" />
+            </Style>
+        </ControlTheme>
+
+        <ControlTheme x:Key="SegmentedStyle" TargetType="ListBox" BasedOn="{StaticResource {x:Type ListBox}}">
+            <Setter Property="Background" Value="{DynamicResource SegmentedTrackBrush}" />
+            <Setter Property="CornerRadius" Value="{StaticResource ControlCornerRadius}" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="ClipToBounds" Value="True" />
+            <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
+            <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Disabled" />
+            <Setter Property="ItemContainerTheme" Value="{StaticResource SegmentedItemTheme}" />
+            <Setter Property="styles:SegmentedSelection.SelectsOnRelease" Value="True" />
+            <Setter Property="ItemsPanel">
+                <ItemsPanelTemplate>
+                    <UniformGrid Rows="1" />
+                </ItemsPanelTemplate>
+            </Setter>
+        </ControlTheme>
+
+        <ControlTheme x:Key="CaptionButtonTheme" TargetType="Button" BasedOn="{StaticResource FluentDrawnCaptionButton}">
+            <Setter Property="Width" Value="{StaticResource CaptionButtonWidth}" />
+            <Style Selector="^.Close:pointerover /template/ Border">
+                <Setter Property="Background" Value="{DynamicResource CaptionCloseBackgroundPointerOver}" />
+            </Style>
+            <Style Selector="^.Close:pressed /template/ Border">
+                <Setter Property="Background" Value="{DynamicResource CaptionCloseBackgroundPressed}" />
+            </Style>
+        </ControlTheme>
+
+        <ControlTheme x:Key="EarmarkWindowDecorations" TargetType="chrome:WindowDrawnDecorations" BasedOn="{StaticResource {x:Type chrome:WindowDrawnDecorations}}">
+            <Setter Property="Template">
+                <WindowDrawnDecorationsTemplate>
+                    <chrome:WindowDrawnDecorationsContent>
+                        <chrome:WindowDrawnDecorationsContent.Underlay>
+                            <Panel Name="PART_UnderlayWrapper">
+                                <Border
+                                    Name="PART_WindowBorder"
+                                    Background="Transparent"
+                                    BorderThickness="{TemplateBinding FrameThickness}"
+                                    BorderBrush="{DynamicResource AccentFillColorDefaultBrush}"
+                                    IsHitTestVisible="False" />
+                                <Panel
+                                    Name="PART_TitleBar"
+                                    VerticalAlignment="Top"
+                                    Height="{TemplateBinding TitleBarHeight}"
+                                    Background="Transparent"
+                                    IsVisible="{TemplateBinding HasTitleBar}"
+                                    chrome:WindowDecorationProperties.ElementRole="TitleBar" />
+                            </Panel>
+                        </chrome:WindowDrawnDecorationsContent.Underlay>
+                        <chrome:WindowDrawnDecorationsContent.Overlay>
+                            <Panel Name="PART_OverlayWrapper">
+                                <StackPanel
+                                    Name="PART_OverlayPanel"
+                                    Orientation="Horizontal"
+                                    HorizontalAlignment="Right"
+                                    VerticalAlignment="Top"
+                                    Height="{TemplateBinding TitleBarHeight}"
+                                    IsVisible="{TemplateBinding HasTitleBar}">
+                                    <Button
+                                        Name="PART_MinimizeButton"
+                                        Classes="CaptionButton"
+                                        Theme="{StaticResource CaptionButtonTheme}"
+                                        Content="&#xE738;"
+                                        chrome:WindowDecorationProperties.ElementRole="MinimizeButton" />
+                                    <Button
+                                        Name="PART_MaximizeButton"
+                                        Classes="CaptionButton"
+                                        Theme="{StaticResource CaptionButtonTheme}"
+                                        Content="&#xE739;"
+                                        chrome:WindowDecorationProperties.ElementRole="MaximizeButton" />
+                                    <Button
+                                        Name="PART_CloseButton"
+                                        Classes="CaptionButton Close"
+                                        Theme="{StaticResource CaptionButtonTheme}"
+                                        FontSize="16"
+                                        Content="&#xE711;"
+                                        chrome:WindowDecorationProperties.ElementRole="CloseButton" />
+                                </StackPanel>
+                            </Panel>
+                        </chrome:WindowDrawnDecorationsContent.Overlay>
+                    </chrome:WindowDrawnDecorationsContent>
+                </WindowDrawnDecorationsTemplate>
+            </Setter>
+        </ControlTheme>
+    </Styles.Resources>
+
+    <Style Selector=":is(TopLevel)">
+        <Setter Property="FontFamily" Value="{StaticResource ContentControlThemeFontFamily}" />
+        <Setter Property="FontSize" Value="{StaticResource BodyTextBlockFontSize}" />
+        <Setter Property="Foreground" Value="{DynamicResource DefaultTextForegroundThemeBrush}" />
+    </Style>
+
+    <Style Selector="RadioButton, CheckBox, ToggleSwitch, ToggleButton, ComboBox, MenuItem">
+        <Setter Property="FontSize" Value="{StaticResource ControlContentThemeFontSize}" />
+    </Style>
+
+    <Style Selector="Button">
+        <Setter Property="MinHeight" Value="32" />
+        <Setter Property="CornerRadius" Value="{StaticResource ControlCornerRadius}" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="FontSize" Value="{StaticResource ControlContentThemeFontSize}" />
+    </Style>
+
+    <Style Selector="ScrollViewer">
+        <Setter Property="styles:SmoothScroll.IsEnabled" Value="True" />
+    </Style>
+    <Style Selector="ScrollViewer /template/ ScrollBar">
+        <Setter Property="Opacity" Value="0" />
+        <Setter Property="Transitions">
+            <Transitions>
+                <DoubleTransition Property="Opacity" Duration="0:0:0.1" />
+            </Transitions>
+        </Setter>
+    </Style>
+    <Style Selector="ScrollViewer.ScrollActive /template/ ScrollBar, ScrollViewer /template/ ScrollBar:pointerover">
+        <Setter Property="Opacity" Value="1" />
+    </Style>
+    <Style Selector="ScrollBar:vertical /template/ Thumb">
+        <Setter Property="Margin" Value="1.75,0,-1.75,0" />
+    </Style>
+
+    <Style Selector="Button.CaptionButton">
+        <Setter Property="CornerRadius" Value="0" />
+    </Style>
+
+    <Style Selector="HyperlinkButton /template/ ContentPresenter#ContentPresenter">
+        <Setter Property="Transitions">
+            <Transitions>
+                <BrushTransition Property="Background" Duration="0:0:0.083" />
+            </Transitions>
+        </Setter>
+    </Style>
+    <Style Selector="ToggleSwitch:not(:pointerover) /template/ Border#OuterBorder, ToggleSwitch:checked /template/ Border#OuterBorder, ToggleSwitch:not(:disabled) /template/ Border#SwitchKnobBounds">
+        <Setter Property="Transitions">
+            <Transitions />
+        </Setter>
+    </Style>
+    <Style Selector="ToggleSwitch:pointerover:unchecked /template/ Border#OuterBorder, ToggleSwitch:pressed:unchecked /template/ Border#OuterBorder">
+        <Setter Property="Transitions">
+            <Transitions>
+                <BrushTransition Property="Background" Duration="0:0:0.083" />
+                <BrushTransition Property="BorderBrush" Duration="0:0:0.083" />
+            </Transitions>
+        </Setter>
+    </Style>
+
+    <Style Selector="HyperlinkButton /template/ ContentPresenter > TextBlock:not(.Underlined)">
+        <Setter Property="TextDecorations" Value="{x:Null}" />
+    </Style>
+
+    <Style Selector="Path.CloseGlyph">
+        <Setter Property="Width" Value="12" />
+        <Setter Property="Height" Value="12" />
+        <Setter Property="Data" Value="M1.5,1.5 L11.5,11.5 M11.5,1.5 L1.5,11.5" />
+        <Setter Property="StrokeThickness" Value="1.4" />
+        <Setter Property="StrokeLineCap" Value="Square" />
+        <Setter Property="Stroke" Value="{Binding $self.(TextElement.Foreground)}" />
+        <Setter Property="HorizontalAlignment" Value="Center" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="CheckBox:checked /template/ ui|FAFontIcon#CheckGlyph">
+        <Setter Property="IsVisible" Value="False" />
+    </Style>
+    <Style Selector="CheckBox /template/ Border#NormalRectangle">
+        <Setter Property="Child">
+            <Template>
+                <Path
+                    Classes="CheckTick"
+                    Data="M4.2,9.2 L7.5,12.5 L13.8,6.2"
+                    StrokeThickness="1.3"
+                    StrokeJoin="Miter" />
+            </Template>
+        </Setter>
+    </Style>
+    <Style Selector="CheckBox Path.CheckTick">
+        <Setter Property="Opacity" Value="0" />
+        <Setter Property="Stroke" Value="{DynamicResource CheckBoxCheckGlyphForegroundChecked}" />
+    </Style>
+    <Style Selector="CheckBox:checked Path.CheckTick">
+        <Setter Property="Opacity" Value="1" />
+    </Style>
+    <Style Selector="CheckBox:checked:pointerover Path.CheckTick">
+        <Setter Property="Stroke" Value="{DynamicResource CheckBoxCheckGlyphForegroundCheckedPointerOver}" />
+    </Style>
+    <Style Selector="CheckBox:checked:pressed Path.CheckTick">
+        <Setter Property="Stroke" Value="{DynamicResource CheckBoxCheckGlyphForegroundCheckedPressed}" />
+    </Style>
+    <Style Selector="CheckBox:checked:disabled Path.CheckTick">
+        <Setter Property="Stroke" Value="{DynamicResource CheckBoxCheckGlyphForegroundCheckedDisabled}" />
+    </Style>
+
+    <Style Selector="RadioButton:pressed /template/ Ellipse#CheckGlyph">
+        <Setter Property="RenderTransform" Value="scale(0.8333)" />
+    </Style>
+
+    <Style Selector="TextBox">
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Button.accent">
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="ComboBox">
+        <Setter Property="Padding" Value="12,6,0,6" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+    <Style Selector="ComboBox /template/ ContentPresenter#ContentPresenter">
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="ComboBoxItem">
+        <Setter Property="FontSize" Value="{StaticResource BodyTextBlockFontSize}" />
+        <Setter Property="Padding" Value="11,7,11,6" />
+    </Style>
+    <Style Selector="ToolTip">
+        <Setter Property="Padding" Value="9,7,9,7" />
+    </Style>
+    <Style Selector="ToggleSwitch /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="IsVisible" Value="{Binding $parent[ToggleSwitch].Content, Converter={x:Static ObjectConverters.IsNotNull}}" />
+    </Style>
+    <Style Selector="CheckBox, RadioButton">
+        <Setter Property="Padding" Value="8,7,8,0" />
+        <Setter Property="VerticalContentAlignment" Value="Top" />
+    </Style>
+    <Style Selector="ui|FAInfoBar[IsOpen=True] /template/ uip|FAInfoBarPanel">
+        <Setter Property="VerticalOrientationPadding" Value="0,15,0,17" />
+    </Style>
+    <Style Selector="ui|FAInfoBar[IsOpen=True] /template/ TextBlock#Title">
+        <Setter Property="uip:FAInfoBarPanel.HorizontalOrientationMargin" Value="0,15,0,0" />
+    </Style>
+    <Style Selector="ui|FAInfoBar[IsOpen=True] /template/ TextBlock#Message">
+        <Setter Property="uip:FAInfoBarPanel.HorizontalOrientationMargin" Value="12,15,0,0" />
+    </Style>
+    <Style Selector="TextBlock.Caption">
+        <Setter Property="FontSize" Value="{StaticResource CaptionTextBlockFontSize}" />
+        <Setter Property="FontWeight" Value="Normal" />
+    </Style>
+    <Style Selector="TextBlock.Body">
+        <Setter Property="FontSize" Value="{StaticResource BodyTextBlockFontSize}" />
+        <Setter Property="FontWeight" Value="Normal" />
+    </Style>
+    <Style Selector="TextBlock.BodyStrong">
+        <Setter Property="FontSize" Value="{StaticResource BodyTextBlockFontSize}" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="TextBlock.PageTitle">
+        <Setter Property="FontSize" Value="28" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Margin" Value="{StaticResource PageTitleMargin}" />
+    </Style>
+    <Style Selector="TextBlock.FieldHeader">
+        <Setter Property="FontSize" Value="{StaticResource ControlContentThemeFontSize}" />
+        <Setter Property="FontWeight" Value="Normal" />
+        <Setter Property="Foreground" Value="{DynamicResource TextControlHeaderForeground}" />
+        <Setter Property="Margin" Value="0,0,0,8" />
+    </Style>
+    <Style Selector="TextBlock.FieldHeader.ComboBox">
+        <Setter Property="Foreground" Value="{DynamicResource ComboBoxHeaderForeground}" />
+    </Style>
+    <Style Selector="TextBlock.Glyph">
+        <Setter Property="FontFamily" Value="{StaticResource IconFontFamily}" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="HorizontalAlignment" Value="Center" />
+    </Style>
+
+    <Style Selector="FlyoutPresenter.Tinted">
+        <Setter Property="Padding" Value="4" />
+        <Setter Property="Background" Value="{DynamicResource FlyoutPresenterBackground}" />
+        <Setter Property="styles:Acrylic.IsEnabled" Value="True" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="CornerRadius" Value="{StaticResource OverlayCornerRadius}" />
+    </Style>
+    <Style Selector="FlyoutPresenter.Flush">
+        <Setter Property="Padding" Value="0" />
+    </Style>
+    <Style Selector="MenuFlyoutPresenter, FlyoutPresenter.Below">
+        <Setter Property="Margin" Value="0,0,0,4" />
+        <Setter Property="RenderTransform" Value="translateY(4px)" />
+    </Style>
+    <Style Selector="MenuFlyoutPresenter">
+        <Setter Property="Background" Value="{DynamicResource MenuFlyoutPresenterBackground}" />
+        <Setter Property="styles:Acrylic.IsEnabled" Value="True" />
+        <Setter Property="Foreground" Value="{DynamicResource DefaultTextForegroundThemeBrush}" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="CornerRadius" Value="{StaticResource OverlayCornerRadius}" />
+    </Style>
+    <Style Selector="MenuItem /template/ TextBlock#PART_InputGestureText">
+        <Setter Property="IsVisible" Value="{Binding $self.Text, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+    </Style>
+    <Style Selector="MenuItem:selected:not(:pointerover):not(:focus-visible) /template/ Border#PART_LayoutRoot">
+        <Setter Property="Background" Value="{DynamicResource MenuFlyoutItemBackground}" />
+    </Style>
+
+    <Style Selector="ui|FAInfoBar">
+        <Setter Property="CornerRadius" Value="{StaticResource OverlayCornerRadius}" />
+        <Setter Property="BorderThickness" Value="0" />
+    </Style>
+
+    <Style Selector="ui|FAContentDialog.Earmark">
+        <Setter Property="CornerRadius" Value="{StaticResource OverlayCornerRadius}" />
+        <Setter Property="Background" Value="{DynamicResource ContentDialogBackground}" />
+        <Setter Property="BorderThickness" Value="0" />
+    </Style>
+    <Style Selector="ui|FAContentDialog.Earmark:primary:secondary /template/ Button#PrimaryButton, ui|FAContentDialog.Earmark:primary:close /template/ Button#PrimaryButton">
+        <Setter Property="Margin" Value="0,0,6,0" />
+    </Style>
+    <Style Selector="ui|FAContentDialog.Earmark:primary:close /template/ Button#CloseButton, ui|FAContentDialog.Earmark:secondary:close /template/ Button#CloseButton">
+        <Setter Property="Margin" Value="6,0,0,0" />
+    </Style>
+    <Style Selector="ui|FAContentDialog.Earmark:primary:secondary /template/ Button#SecondaryButton">
+        <Setter Property="Margin" Value="6,0,0,0" />
+    </Style>
+    <Style Selector="ui|FAContentDialog.Earmark:secondary:close /template/ Button#SecondaryButton">
+        <Setter Property="Margin" Value="0,0,6,0" />
+    </Style>
+    <Style Selector="ui|FAContentDialog.Earmark:primary:secondary:close /template/ Button#SecondaryButton">
+        <Setter Property="Margin" Value="6,0,6,0" />
+    </Style>
+
+    <Style Selector="Border.Toast">
+        <Setter Property="Margin" Value="24" />
+        <Setter Property="Padding" Value="16,12" />
+        <Setter Property="HorizontalAlignment" Value="Center" />
+        <Setter Property="VerticalAlignment" Value="Bottom" />
+        <Setter Property="CornerRadius" Value="{StaticResource OverlayCornerRadius}" />
+        <Setter Property="Background" Value="{DynamicResource SolidBackgroundFillColorTertiaryBrush}" />
+        <Setter Property="BoxShadow" Value="0 8 16 0 #42000000" />
+        <Setter Property="IsHitTestVisible" Value="False" />
+        <Setter Property="Transitions">
+            <Transitions>
+                <DoubleTransition Property="Opacity" Duration="0:0:0.167" />
+                <TransformOperationsTransition Property="RenderTransform" Duration="0:0:0.167" />
+            </Transitions>
+        </Setter>
+    </Style>
+</Styles>

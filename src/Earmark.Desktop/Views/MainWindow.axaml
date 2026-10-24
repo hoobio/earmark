@@ -1,0 +1,148 @@
+<Window
+    x:Class="Earmark.Desktop.Views.MainWindow"
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:chrome="using:Avalonia.Controls.Chrome"
+    xmlns:views="using:Earmark.Desktop.Views"
+    Title="Earmark"
+    Width="980"
+    Height="720"
+    MinWidth="560"
+    MinHeight="400"
+    WindowStartupLocation="CenterScreen"
+    ExtendClientAreaToDecorationsHint="True"
+    ExtendClientAreaTitleBarHeightHint="{StaticResource TitleBarHeight}"
+    WindowDecorationsTheme="{StaticResource EarmarkWindowDecorations}"
+    Background="{DynamicResource WindowGroundBrush}"
+    Icon="avares://Earmark/Assets/Earmark.ico">
+    <Window.Styles>
+        <Style Selector="Button.Nav">
+            <Setter Property="Theme" Value="{StaticResource SubtleButtonStyle}" />
+            <Setter Property="Height" Value="36" />
+            <Setter Property="MinHeight" Value="36" />
+            <Setter Property="Margin" Value="4,2" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="HorizontalAlignment" Value="Stretch" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="VerticalContentAlignment" Value="Stretch" />
+            <Setter Property="Background" Value="{DynamicResource NavigationViewItemBackground}" />
+            <Setter Property="Foreground" Value="{DynamicResource NavigationViewItemForeground}" />
+        </Style>
+        <Style Selector="Button.Nav /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Transitions">
+                <Transitions />
+            </Setter>
+        </Style>
+        <Style Selector="Button.Nav:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource NavigationViewItemBackgroundPointerOver}" />
+            <Setter Property="Foreground" Value="{DynamicResource NavigationViewItemForeground}" />
+        </Style>
+        <Style Selector="Button.Nav:pressed /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource NavigationViewItemBackgroundPressed}" />
+            <Setter Property="Foreground" Value="{DynamicResource NavigationViewItemForeground}" />
+        </Style>
+        <Style Selector="Button.Nav.Selected">
+            <Setter Property="Background" Value="{DynamicResource NavigationViewItemBackgroundSelected}" />
+        </Style>
+        <Style Selector="Button.Nav.Selected:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource NavigationViewItemBackgroundSelectedPointerOver}" />
+        </Style>
+        <Style Selector="Button.Nav.Selected:pressed /template/ ContentPresenter#PART_ContentPresenter">
+            <Setter Property="Background" Value="{DynamicResource NavigationViewItemBackgroundSelectedPressed}" />
+        </Style>
+        <Style Selector="Button.Nav Border.Indicator">
+            <Setter Property="IsVisible" Value="False" />
+            <Setter Property="Width" Value="3" />
+            <Setter Property="Height" Value="16" />
+            <Setter Property="CornerRadius" Value="2" />
+            <Setter Property="HorizontalAlignment" Value="Left" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Background" Value="{DynamicResource NavigationViewSelectionIndicatorForeground}" />
+        </Style>
+        <Style Selector="Button.Nav.Selected Border.Indicator">
+            <Setter Property="IsVisible" Value="True" />
+        </Style>
+        <Style Selector="Button.Nav TextBlock.Glyph">
+            <Setter Property="FontSize" Value="16" />
+            <Setter Property="Width" Value="40" />
+            <Setter Property="TextAlignment" Value="Center" />
+            <Setter Property="HorizontalAlignment" Value="Left" />
+        </Style>
+    </Window.Styles>
+
+    <Grid x:Name="Root" RowDefinitions="48,*">
+        <Grid x:Name="GroundGlow" Grid.RowSpan="2" IsHitTestVisible="False">
+            <views:DitheredRadialGradient Fill="{DynamicResource GroundGlowTopLeft}" />
+            <views:DitheredRadialGradient Fill="{DynamicResource GroundGlowTopRight}" />
+        </Grid>
+
+        <Grid
+            x:Name="AppTitleBar"
+            Grid.Row="0"
+            ZIndex="1"
+            Background="Transparent"
+            ColumnDefinitions="Auto,*,Auto,144"
+            chrome:WindowDecorationProperties.ElementRole="TitleBar">
+            <StackPanel Orientation="Horizontal" Spacing="15" Margin="14,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False">
+                <Image Source="avares://Earmark/Assets/Earmark.png" Width="16" Height="16" VerticalAlignment="Center" />
+                <TextBlock x:Name="TitleText" FontSize="12" VerticalAlignment="Center" />
+            </StackPanel>
+            <Button
+                x:Name="UpdatePill"
+                Grid.Column="2"
+                Theme="{StaticResource AccentButtonStyle}"
+                Height="28"
+                MinHeight="28"
+                Padding="12,0"
+                Margin="0,0,8,0"
+                VerticalAlignment="Center"
+                Content="Update available"
+                IsVisible="False"
+                chrome:WindowDecorationProperties.ElementRole="User" />
+        </Grid>
+
+        <Grid Grid.Row="1" ColumnDefinitions="48,*">
+            <DockPanel Margin="0,4,0,3">
+                <StackPanel DockPanel.Dock="Bottom">
+                    <Button x:Name="SettingsItem" Classes="Nav" Tag="Settings" ToolTip.Tip="Settings" AutomationProperties.Name="Settings" Click="OnNavItemClick">
+                        <Grid>
+                            <Border Classes="Indicator" />
+                            <TextBlock Classes="Glyph" Text="{StaticResource Glyph.Setting}" />
+                        </Grid>
+                    </Button>
+                </StackPanel>
+                <StackPanel DockPanel.Dock="Top">
+                    <Button x:Name="DevicesItem" Classes="Nav" Tag="Devices" ToolTip.Tip="Devices" AutomationProperties.Name="Devices" Click="OnNavItemClick">
+                        <Grid>
+                            <Border Classes="Indicator" />
+                            <TextBlock Classes="Glyph" Text="{StaticResource Glyph.Speaker}" />
+                        </Grid>
+                    </Button>
+                    <Button x:Name="RulesItem" Classes="Nav" Tag="Rules" ToolTip.Tip="Rules" AutomationProperties.Name="Rules" Click="OnNavItemClick">
+                        <Grid>
+                            <Border Classes="Indicator" />
+                            <TextBlock Classes="Glyph" Text="{StaticResource Glyph.Routing}" />
+                        </Grid>
+                    </Button>
+                    <Button x:Name="SessionsItem" Classes="Nav" Tag="Sessions" ToolTip.Tip="Sessions" AutomationProperties.Name="Sessions" Click="OnNavItemClick">
+                        <Grid>
+                            <Border Classes="Indicator" />
+                            <TextBlock Classes="Glyph" Text="{StaticResource Glyph.AppsList}" />
+                        </Grid>
+                    </Button>
+                </StackPanel>
+                <Panel />
+            </DockPanel>
+
+            <Panel Grid.Column="1">
+                <ContentControl x:Name="PageHost" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
+                <Border x:Name="ToastHost" Classes="Toast" Opacity="0" RenderTransform="translateY(16px)">
+                    <StackPanel Orientation="Horizontal" Spacing="12">
+                        <TextBlock Classes="Glyph" Text="{StaticResource Glyph.Info}" FontSize="16" Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}" />
+                        <TextBlock x:Name="ToastText" MaxWidth="480" VerticalAlignment="Center" TextWrapping="Wrap" />
+                    </StackPanel>
+                </Border>
+            </Panel>
+        </Grid>
+    </Grid>
+</Window>

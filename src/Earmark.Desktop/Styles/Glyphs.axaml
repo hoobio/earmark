@@ -1,0 +1,35 @@
+<ResourceDictionary
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <FontFamily x:Key="IconFontFamily">avares://Earmark/Assets/Fonts#FluentSystemIcons-Resizable</FontFamily>
+
+    <x:String x:Key="Glyph.ChevronDown">&#xE488;</x:String>
+    <x:String x:Key="Glyph.ChevronUp">&#xE490;</x:String>
+    <x:String x:Key="Glyph.ChevronRight">&#xE48E;</x:String>
+    <x:String x:Key="Glyph.Edit">&#xE837;</x:String>
+    <x:String x:Key="Glyph.Add">&#xE00D;</x:String>
+    <x:String x:Key="Glyph.More">&#xEC72;</x:String>
+    <x:String x:Key="Glyph.Setting">&#xF00F;</x:String>
+    <x:String x:Key="Glyph.Search">&#xEFD7;</x:String>
+    <x:String x:Key="Glyph.Refresh">&#xE0BF;</x:String>
+    <x:String x:Key="Glyph.Lock">&#xEBAC;</x:String>
+    <x:String x:Key="Glyph.CheckMark">&#xE460;</x:String>
+    <x:String x:Key="Glyph.Globe">&#xE99B;</x:String>
+    <x:String x:Key="Glyph.UpdateRestore">&#xE175;</x:String>
+    <x:String x:Key="Glyph.Error">&#xE877;</x:String>
+    <x:String x:Key="Glyph.Warning">&#xF561;</x:String>
+    <x:String x:Key="Glyph.PowerButton">&#xEEBD;</x:String>
+    <x:String x:Key="Glyph.FolderOpen">&#xE90B;</x:String>
+    <x:String x:Key="Glyph.Sync">&#xE171;</x:String>
+    <x:String x:Key="Glyph.Download">&#xE0DD;</x:String>
+    <x:String x:Key="Glyph.Document">&#xE7BB;</x:String>
+    <x:String x:Key="Glyph.OpenInNewWindow">&#xECF4;</x:String>
+    <x:String x:Key="Glyph.Folder">&#xE8EB;</x:String>
+    <x:String x:Key="Glyph.BulletedList">&#xF318;</x:String>
+    <x:String x:Key="Glyph.Info">&#xEA88;</x:String>
+    <x:String x:Key="Glyph.Diagnostic">&#xEEF7;</x:String>
+    <x:String x:Key="Glyph.ErrorBadge">&#xE6D5;</x:String>
+    <x:String x:Key="Glyph.Speaker">&#xF109;</x:String>
+    <x:String x:Key="Glyph.Routing">&#xE147;</x:String>
+    <x:String x:Key="Glyph.AppsList">&#xE07D;</x:String>
+</ResourceDictionary>

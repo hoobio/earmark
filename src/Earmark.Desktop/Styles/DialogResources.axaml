@@ -1,0 +1,33 @@
+<ResourceDictionary
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <SolidColorBrush x:Key="AccentButtonBackgroundPointerOver" Color="#E673D0FF" />
+    <SolidColorBrush x:Key="AccentButtonBackgroundPressed" Color="#CC73D0FF" />
+    <SolidColorBrush x:Key="AccentButtonForegroundPointerOver" Color="#FF000000" />
+    <SolidColorBrush x:Key="AccentButtonForegroundPressed" Color="#80000000" />
+    <SolidColorBrush x:Key="AccentButtonBackgroundDisabled" Color="#28FFFFFF" />
+    <SolidColorBrush x:Key="AccentButtonForegroundDisabled" Color="#87FFFFFF" />
+    <SolidColorBrush x:Key="ButtonBackgroundDisabled" Color="#0BFFFFFF" />
+    <SolidColorBrush x:Key="ButtonForegroundDisabled" Color="#5DFFFFFF" />
+
+    <SolidColorBrush x:Key="CheckBoxCheckBackgroundFillUnchecked" Color="#19000000" />
+    <SolidColorBrush x:Key="CheckBoxCheckBackgroundFillUncheckedPointerOver" Color="#0BFFFFFF" />
+    <SolidColorBrush x:Key="CheckBoxCheckBackgroundFillUncheckedPressed" Color="#12FFFFFF" />
+    <SolidColorBrush x:Key="CheckBoxCheckBackgroundFillUncheckedDisabled" Color="#00FFFFFF" />
+    <SolidColorBrush x:Key="CheckBoxCheckBackgroundStrokeUnchecked" Color="#8BFFFFFF" />
+    <SolidColorBrush x:Key="CheckBoxCheckBackgroundStrokeUncheckedPointerOver" Color="#8BFFFFFF" />
+    <SolidColorBrush x:Key="CheckBoxCheckBackgroundStrokeUncheckedPressed" Color="#28FFFFFF" />
+    <SolidColorBrush x:Key="CheckBoxCheckBackgroundStrokeUncheckedDisabled" Color="#28FFFFFF" />
+    <SolidColorBrush x:Key="CheckBoxCheckBackgroundFillChecked" Color="#FF73D0FF" />
+    <SolidColorBrush x:Key="CheckBoxCheckBackgroundFillCheckedPointerOver" Color="#E673D0FF" />
+    <SolidColorBrush x:Key="CheckBoxCheckBackgroundFillCheckedPressed" Color="#CC73D0FF" />
+    <SolidColorBrush x:Key="CheckBoxCheckBackgroundFillCheckedDisabled" Color="#28FFFFFF" />
+    <SolidColorBrush x:Key="CheckBoxCheckBackgroundStrokeChecked" Color="#FF73D0FF" />
+    <SolidColorBrush x:Key="CheckBoxCheckBackgroundStrokeCheckedPointerOver" Color="#E673D0FF" />
+    <SolidColorBrush x:Key="CheckBoxCheckBackgroundStrokeCheckedPressed" Color="#CC73D0FF" />
+    <SolidColorBrush x:Key="CheckBoxCheckBackgroundStrokeCheckedDisabled" Color="#28FFFFFF" />
+    <SolidColorBrush x:Key="CheckBoxCheckGlyphForegroundChecked" Color="#FF000000" />
+    <SolidColorBrush x:Key="CheckBoxCheckGlyphForegroundCheckedPointerOver" Color="#FF000000" />
+    <SolidColorBrush x:Key="CheckBoxCheckGlyphForegroundCheckedPressed" Color="#80000000" />
+    <SolidColorBrush x:Key="CheckBoxCheckGlyphForegroundCheckedDisabled" Color="#87FFFFFF" />
+</ResourceDictionary>

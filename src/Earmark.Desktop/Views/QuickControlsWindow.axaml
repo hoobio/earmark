@@ -1,0 +1,26 @@
+<Window
+    x:Class="Earmark.Desktop.Views.QuickControlsWindow"
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:views="using:Earmark.Desktop.Views"
+    Title="Earmark Quick Controls"
+    Width="360"
+    Height="240"
+    WindowDecorations="None"
+    CanResize="False"
+    ShowInTaskbar="False"
+    Topmost="True"
+    WindowStartupLocation="Manual"
+    Background="{DynamicResource WindowGroundBrush}"
+    Icon="avares://Earmark/Assets/Earmark.ico">
+    <Grid>
+        <Grid x:Name="GroundGlow" IsHitTestVisible="False">
+            <views:DitheredRadialGradient Fill="{DynamicResource GroundGlowTopLeft}" />
+            <views:DitheredRadialGradient Fill="{DynamicResource GroundGlowTopRight}" />
+        </Grid>
+        <StackPanel Margin="16" Spacing="8">
+            <TextBlock Classes="BodyStrong" Text="Quick Controls" />
+            <TextBlock Classes="Caption" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Text="Pinned devices appear here." TextWrapping="Wrap" />
+        </StackPanel>
+    </Grid>
+</Window>

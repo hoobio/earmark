@@ -1,0 +1,22 @@
+<Application
+    x:Class="Earmark.Desktop.App"
+    Name="Earmark"
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:sty="using:FluentAvalonia.Styling"
+    RequestedThemeVariant="Dark">
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceInclude Source="avares://Earmark/Styles/Resources.axaml" />
+                <ResourceInclude Source="avares://Earmark/Styles/Glyphs.axaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Application.Resources>
+    <Application.Styles>
+        <sty:FluentAvaloniaTheme PreferSystemTheme="False" PreferUserAccentColor="False" CustomAccentColor="#FF409FFF" UseSystemFontOnWindows="False" />
+        <StyleInclude Source="avares://Earmark/Styles/Controls.axaml" />
+        <StyleInclude Source="avares://Earmark/Styles/Dialogs.axaml" />
+        <StyleInclude Source="avares://Earmark/Styles/SettingsCard.axaml" />
+    </Application.Styles>
+</Application>
