@@ -2,11 +2,11 @@ namespace Earmark.Core.Persistence;
 
 internal static class CorruptCopy
 {
-    public static string? TryCreate(string path)
+    public static string? TryCreate(string path, TimeProvider clock)
     {
         var copy = Path.Combine(
             Path.GetDirectoryName(path)!,
-            $"{Path.GetFileNameWithoutExtension(path)}.corrupt-{DateTime.Now:yyyyMMdd-HHmmss}.json");
+            $"{Path.GetFileNameWithoutExtension(path)}.corrupt-{clock.GetLocalNow():yyyyMMdd-HHmmss}.json");
         try
         {
             File.Copy(path, copy, overwrite: true);

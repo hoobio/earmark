@@ -28,6 +28,13 @@ public sealed class RulePersistenceTests : IDisposable
 
     private static RoutingRule Rule(string name) => new() { Name = name };
 
+    private sealed class FixedClock(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
+
+        public override TimeZoneInfo LocalTimeZone => TimeZoneInfo.Utc;
+    }
+
     [Fact]
     public async Task Save_round_trips_and_leaves_no_temp_file()
     {
@@ -89,12 +96,10 @@ public sealed class RulePersistenceTests : IDisposable
     public async Task Failed_corrupt_copy_still_blocks_saves_and_names_no_file()
     {
         await File.WriteAllTextAsync(RulesPath, "not json", Ct);
-        for (var s = -1; s <= 5; s++)
-        {
-            Directory.CreateDirectory(Path.Combine(_dir, $"rules.corrupt-{DateTime.Now.AddSeconds(s):yyyyMMdd-HHmmss}.json"));
-        }
+        var clock = new FixedClock(new DateTimeOffset(2026, 1, 2, 3, 4, 5, TimeSpan.Zero));
+        Directory.CreateDirectory(Path.Combine(_dir, "rules.corrupt-20260102-030405.json"));
 
-        using var store = new JsonRuleStore(RulesPath);
+        using var store = new JsonRuleStore(RulesPath, clock: clock);
         var load = async () => await store.LoadAsync(Ct);
 
         await load.Should().ThrowAsync<JsonException>();

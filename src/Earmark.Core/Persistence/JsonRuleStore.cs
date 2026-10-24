@@ -23,13 +23,15 @@ public sealed class JsonRuleStore : IRuleStore, IDisposable
     private readonly string _path;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly BlockedSaveLog _blockedLog;
+    private readonly TimeProvider _clock;
     private volatile bool _saveBlocked;
 
-    public JsonRuleStore(string path, ILogger<JsonRuleStore>? logger = null)
+    public JsonRuleStore(string path, ILogger<JsonRuleStore>? logger = null, TimeProvider? clock = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         _path = path;
         _blockedLog = new BlockedSaveLog(logger);
+        _clock = clock ?? TimeProvider.System;
     }
 
     public bool IsSaveBlocked => _saveBlocked;
@@ -59,7 +61,7 @@ public sealed class JsonRuleStore : IRuleStore, IDisposable
             catch (JsonException)
             {
                 (_saveBlocked, IsCorrupt) = (true, true);
-                CorruptCopyPath = CorruptCopy.TryCreate(_path);
+                CorruptCopyPath = CorruptCopy.TryCreate(_path, _clock);
                 throw;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)

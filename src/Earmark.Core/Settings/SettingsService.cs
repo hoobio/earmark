@@ -61,7 +61,7 @@ public sealed class SettingsService : IDisposable
             {
                 Current = new AppSettings();
                 (_saveBlocked, IsCorrupt) = (true, true);
-                CorruptCopyPath = CorruptCopy.TryCreate(_path);
+                CorruptCopyPath = CorruptCopy.TryCreate(_path, TimeProvider.System);
                 throw;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
