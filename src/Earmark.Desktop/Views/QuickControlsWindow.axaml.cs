@@ -17,6 +17,7 @@ using Earmark.Desktop.Services;
 
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Win32;
 
 namespace Earmark.Desktop.Views;
 
@@ -40,6 +41,10 @@ public sealed partial class QuickControlsWindow : Window
     private PixelRect _workArea;
     private (string, bool)? _appliedSetting;
     private int _generation;
+    private bool _acrylic;
+    private bool _backdropApplied;
+    private double _regionScale;
+    private List<Rect> _regionRects = [];
 
     public QuickControlsWindow(IServiceProvider services, SettingsService settings, QuickControlsVisibility visibility, ILogger<QuickControlsWindow> logger)
     {
@@ -50,6 +55,7 @@ public sealed partial class QuickControlsWindow : Window
         InitializeComponent();
         _handle = TryGetPlatformHandle()?.Handle ?? 0;
         Win32Properties.AddWndProcHookCallback(this, OnWndProc);
+        Stack.LayoutUpdated += (_, _) => UpdateRegion();
         Deactivated += (_, _) => Dispatcher.UIThread.Post(() =>
         {
             if (!IsActive)
@@ -81,8 +87,16 @@ public sealed partial class QuickControlsWindow : Window
 
     public void Start()
     {
-        _settings.SettingsChanged += (_, _) => Ui.Post(ApplyHotkeySetting);
+        _settings.SettingsChanged += (_, _) => Ui.Post(() =>
+        {
+            ApplyHotkeySetting();
+            if (!_visibility.IsVisible && ApplyBackdrop())
+            {
+                Warm();
+            }
+        });
         ApplyHotkeySetting();
+        ApplyBackdrop();
         Warm();
     }
 
@@ -158,15 +172,28 @@ public sealed partial class QuickControlsWindow : Window
         Build(maxHeight: 600);
         Native.Cloak(_handle, cloaked: true);
         Show();
-        RequestAnimationFrame(_ => RequestAnimationFrame(_ =>
+        AfterFrames(4, () =>
         {
-            _logger.LogInformation("Quick Controls window warmed (transparency {Level})", ActualTransparencyLevel);
+            _logger.LogInformation("Quick Controls window warmed (acrylic {Acrylic}, transparency {Level}, region kind {Region})", _acrylic, ActualTransparencyLevel, RegionKind());
             if (!_visibility.IsVisible)
             {
                 Hide();
             }
-        }));
+        });
     }
+
+    private void AfterFrames(int frames, Action action) =>
+        RequestAnimationFrame(_ =>
+        {
+            if (frames <= 1)
+            {
+                action();
+            }
+            else
+            {
+                AfterFrames(frames - 1, action);
+            }
+        });
 
     private void Toggle(long started)
     {
@@ -195,6 +222,7 @@ public sealed partial class QuickControlsWindow : Window
         var screen = ResolveScreen();
         _workArea = screen.WorkingArea;
         Native.Cloak(_handle, cloaked: true);
+        var backdropChanged = ApplyBackdrop();
         Position = _workArea.TopLeft;
         Width = Math.Min(PanelWidth, (_workArea.Width / screen.Scaling) - (EdgeMargin * 2));
         var blocks = Build(_workArea.Height / screen.Scaling);
@@ -209,8 +237,9 @@ public sealed partial class QuickControlsWindow : Window
             }
 
             Place(RenderScaling);
+            UpdateRegion();
             PlayEntrance();
-            RequestAnimationFrame(_ =>
+            AfterFrames(backdropChanged ? 3 : 1, () =>
             {
                 if (!Current())
                 {
@@ -220,7 +249,13 @@ public sealed partial class QuickControlsWindow : Window
                 Native.Cloak(_handle, cloaked: false);
                 Activate();
                 Native.ForceForeground(_handle);
-                _logger.LogInformation("Quick Controls shown with {Blocks} blocks in {Ms:F0} ms", blocks, Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+                _logger.LogInformation(
+                    "Quick Controls shown with {Blocks} blocks in {Ms:F0} ms (acrylic {Acrylic}, transparency {Level}, region kind {Region})",
+                    blocks,
+                    Stopwatch.GetElapsedTime(started).TotalMilliseconds,
+                    _acrylic,
+                    ActualTransparencyLevel,
+                    RegionKind());
             });
         });
     }
@@ -266,11 +301,10 @@ public sealed partial class QuickControlsWindow : Window
             ? produced
             : [Placeholder()];
         var theme = (ControlTheme)this.FindResource("QuickControlsPanel")!;
-        var solid = IsSolidBackdrop();
-        var panels = blocks.Reverse().Select(block => new ContentControl { Theme = theme, Content = block, ContextMenu = SettingsMenu() }).ToList();
+        var panels = blocks.Reverse().Select(block => new ContentControl { Theme = theme, Content = block, ContextMenu = SettingsMenu(), Classes = { "QuickPanel" } }).ToList();
         foreach (var panel in panels)
         {
-            panel.Classes.Set("Solid", solid);
+            panel.Classes.Set("Acrylic", _acrylic);
             Stack.Children.Add(panel);
         }
 
@@ -289,18 +323,80 @@ public sealed partial class QuickControlsWindow : Window
         return blocks.Count;
     }
 
-    private bool IsSolidBackdrop() => _settings.Current.QuickControlsBackdrop switch
+    private bool WantsAcrylic() =>
+        _settings.Current.QuickControlsBackdrop switch
+        {
+            QuickControlsBackdropMode.Solid => false,
+            QuickControlsBackdropMode.UseAppAppearance => _settings.Current.Backdrop != BackdropMode.Solid,
+            _ => true,
+        }
+        && Registry.GetValue(@"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize", "EnableTransparency", 1) is not 0;
+
+    private bool ApplyBackdrop()
     {
-        QuickControlsBackdropMode.Solid => true,
-        QuickControlsBackdropMode.UseAppAppearance => _settings.Current.Backdrop == BackdropMode.Solid,
-        _ => false,
-    };
+        var acrylic = WantsAcrylic();
+        if (acrylic == _acrylic && _backdropApplied)
+        {
+            return false;
+        }
+
+        (_acrylic, _backdropApplied) = (acrylic, true);
+        TransparencyLevelHint = acrylic
+            ? [WindowTransparencyLevel.AcrylicBlur, WindowTransparencyLevel.Blur, WindowTransparencyLevel.Transparent]
+            : [WindowTransparencyLevel.Transparent];
+        foreach (var panel in Stack.Children)
+        {
+            panel.Classes.Set("Acrylic", acrylic);
+        }
+
+        return true;
+    }
+
+    private void UpdateRegion()
+    {
+        var scale = RenderScaling;
+        var rects = Stack.Children.Select(child => child.Bounds).ToList();
+        if (scale == _regionScale && rects.SequenceEqual(_regionRects))
+        {
+            return;
+        }
+
+        (_regionScale, _regionRects) = (scale, rects);
+        var diameter = (int)Math.Round(16 * scale) + 1;
+        var region = CreateRectRgn(0, 0, 0, 0);
+        foreach (var rect in rects)
+        {
+            var part = CreateRoundRectRgn(
+                (int)Math.Round(rect.X * scale),
+                (int)Math.Round(rect.Y * scale),
+                (int)Math.Round(rect.Right * scale) + 1,
+                (int)Math.Round(rect.Bottom * scale) + 1,
+                diameter,
+                diameter);
+            _ = CombineRgn(region, region, part, RGN_OR);
+            _ = DeleteObject(part);
+        }
+
+        // The window owns the region once SetWindowRgn succeeds, so it is deleted only on failure.
+        if (SetWindowRgn(_handle, region, true) == 0)
+        {
+            _ = DeleteObject(region);
+            _logger.LogWarning("Could not set the Quick Controls window region (error {Error})", Marshal.GetLastPInvokeError());
+        }
+    }
+
+    private int RegionKind()
+    {
+        var probe = CreateRectRgn(0, 0, 0, 0);
+        var kind = GetWindowRgn(_handle, probe);
+        _ = DeleteObject(probe);
+        return kind;
+    }
 
     private static Border Placeholder() => new()
     {
-        Background = (IBrush?)Application.Current?.FindResource("CardBackgroundFillColorDefaultBrush"),
-        CornerRadius = new CornerRadius(8),
-        Padding = new Thickness(16),
+        Classes = { "DeviceCard" },
+        Padding = new Thickness(12),
         Child = new TextBlock { Text = "Pin devices from the Devices page", TextWrapping = TextWrapping.Wrap },
     };
 
@@ -330,9 +426,8 @@ public sealed partial class QuickControlsWindow : Window
         }
     }
 
-    private void PlayEntrance()
-    {
-        Stack.RenderTransform = new TranslateTransform(12, 0);
+    // Fade only: the window region is fixed to the panels' bounds, so a slide would clip the cards at the edge.
+    private void PlayEntrance() =>
         _ = new Animation
         {
             Duration = TimeSpan.FromMilliseconds(250),
@@ -340,11 +435,10 @@ public sealed partial class QuickControlsWindow : Window
             FillMode = FillMode.Forward,
             Children =
             {
-                new KeyFrame { Cue = new Cue(0), Setters = { new Setter(OpacityProperty, 0d), new Setter(TranslateTransform.XProperty, 12d) } },
-                new KeyFrame { Cue = new Cue(1), Setters = { new Setter(OpacityProperty, 1d), new Setter(TranslateTransform.XProperty, 0d) } },
+                new KeyFrame { Cue = new Cue(0), Setters = { new Setter(OpacityProperty, 0d) } },
+                new KeyFrame { Cue = new Cue(1), Setters = { new Setter(OpacityProperty, 1d) } },
             },
         }.RunAsync(Stack);
-    }
 
     private static void FitBlockHeights(List<double> heights, double available)
     {
@@ -391,4 +485,24 @@ public sealed partial class QuickControlsWindow : Window
 
     [DllImport("user32.dll")]
     private static extern bool GetCursorPos(out CursorPoint point);
+
+    private const int RGN_OR = 2;
+
+    [DllImport("gdi32.dll")]
+    private static extern nint CreateRectRgn(int left, int top, int right, int bottom);
+
+    [DllImport("gdi32.dll")]
+    private static extern nint CreateRoundRectRgn(int left, int top, int right, int bottom, int widthEllipse, int heightEllipse);
+
+    [DllImport("gdi32.dll")]
+    private static extern int CombineRgn(nint destination, nint source1, nint source2, int mode);
+
+    [DllImport("gdi32.dll")]
+    private static extern bool DeleteObject(nint handle);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern int SetWindowRgn(nint hWnd, nint region, bool redraw);
+
+    [DllImport("user32.dll")]
+    private static extern int GetWindowRgn(nint hWnd, nint region);
 }

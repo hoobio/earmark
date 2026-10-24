@@ -1,27 +1,25 @@
 <Styles
     xmlns="https://github.com/avaloniaui"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:views="using:Earmark.Desktop.Views">
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <Styles.Resources>
         <ControlTheme x:Key="QuickControlsPanel" TargetType="ContentControl">
+            <Setter Property="Background" Value="{DynamicResource WindowGroundBrush}" />
             <Setter Property="Template">
                 <ControlTemplate>
-                    <Border Background="{DynamicResource WindowGroundBrush}" CornerRadius="{StaticResource OverlayCornerRadius}" ClipToBounds="True">
-                        <Panel>
-                            <Panel x:Name="PART_Glow" IsHitTestVisible="False">
-                                <views:DitheredRadialGradient Fill="{DynamicResource GroundGlowTopLeft}" />
-                                <views:DitheredRadialGradient Fill="{DynamicResource GroundGlowTopRight}" />
-                            </Panel>
-                            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                                <ContentPresenter Margin="12" Content="{TemplateBinding Content}" />
-                            </ScrollViewer>
-                        </Panel>
+                    <Border Background="{TemplateBinding Background}" CornerRadius="{StaticResource OverlayCornerRadius}" ClipToBounds="True">
+                        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                            <ContentPresenter Margin="4" Content="{TemplateBinding Content}" />
+                        </ScrollViewer>
                     </Border>
                 </ControlTemplate>
             </Setter>
-            <Style Selector="^.Solid /template/ Panel#PART_Glow">
-                <Setter Property="IsVisible" Value="False" />
-            </Style>
         </ControlTheme>
     </Styles.Resources>
+
+    <Style Selector="ContentControl.QuickPanel.Acrylic">
+        <Setter Property="Background" Value="#B81F2430" />
+    </Style>
+    <Style Selector="ContentControl.QuickPanel.Acrylic Border.DeviceCard">
+        <Setter Property="Background" Value="#80232834" />
+    </Style>
 </Styles>

@@ -10,7 +10,6 @@
     ShowInTaskbar="False"
     Topmost="True"
     WindowStartupLocation="Manual"
-    TransparencyLevelHint="Transparent"
     Background="Transparent"
     Icon="avares://Earmark/Assets/Earmark.ico">
     <StackPanel x:Name="Stack" Spacing="8" />
