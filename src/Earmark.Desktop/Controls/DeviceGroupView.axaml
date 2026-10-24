@@ -5,7 +5,7 @@
     xmlns:ctl="using:Earmark.Desktop.Controls"
     xmlns:vm="using:Earmark.Desktop.ViewModels.Devices"
     x:DataType="vm:DeviceGroupViewModel">
-    <StackPanel x:Name="Root" Classes="DeviceGroup" Spacing="8">
+    <StackPanel x:Name="Root" Classes="DeviceGroup">
         <Panel x:Name="Header" Classes="GroupHeader" Background="Transparent" DragDrop.AllowDrop="True">
             <TextBlock Classes="BodyStrong GroupTitle" Text="{Binding Title}" IsVisible="{Binding IsNotEditing}" ToolTip.Tip="Double-click to rename" DoubleTapped="OnTitleDoubleTapped" />
             <TextBox x:Name="TitleEditor" Classes="GroupTitleEditor" Text="{Binding Title, Mode=OneWay}" IsVisible="{Binding IsEditing}" KeyDown="OnTitleKeyDown" LostFocus="OnTitleLostFocus" />

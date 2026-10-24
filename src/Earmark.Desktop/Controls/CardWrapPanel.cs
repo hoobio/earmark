@@ -9,7 +9,7 @@ namespace Earmark.Desktop.Controls;
 public sealed class CardWrapPanel : Panel
 {
     public static readonly StyledProperty<double> MinItemWidthProperty = AvaloniaProperty.Register<CardWrapPanel, double>(nameof(MinItemWidth), 320);
-    public static readonly StyledProperty<double> SpacingProperty = AvaloniaProperty.Register<CardWrapPanel, double>(nameof(Spacing), 12);
+    public static readonly StyledProperty<double> SpacingProperty = AvaloniaProperty.Register<CardWrapPanel, double>(nameof(Spacing), 8);
     public static readonly StyledProperty<CardHeightMode> HeightModeProperty = AvaloniaProperty.Register<CardWrapPanel, CardHeightMode>(nameof(HeightMode));
 
     static CardWrapPanel() => AffectsMeasure<CardWrapPanel>(MinItemWidthProperty, SpacingProperty, HeightModeProperty);
@@ -24,9 +24,9 @@ public sealed class CardWrapPanel : Panel
 
     protected override Size ArrangeOverride(Size finalSize)
     {
-        var size = Layout(finalSize.Width, arrange: true);
+        Layout(finalSize.Width, arrange: true);
         Glide.Arranged(this);
-        return size;
+        return finalSize;
     }
 
     private Size Layout(double width, bool arrange)

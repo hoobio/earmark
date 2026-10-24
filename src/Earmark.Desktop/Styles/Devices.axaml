@@ -79,8 +79,8 @@
         <Setter Property="BorderBrush" Value="#FF409FFF" />
     </Style>
     <Style Selector="Border.DeviceCard StackPanel.CardBody">
-        <Setter Property="Margin" Value="14" />
-        <Setter Property="Spacing" Value="12" />
+        <Setter Property="Margin" Value="12" />
+        <Setter Property="Spacing" Value="8" />
     </Style>
     <Style Selector="Border.DeviceCard.Compact StackPanel.CardBody">
         <Setter Property="Margin" Value="8" />
@@ -179,7 +179,7 @@
     <Style Selector="Border.Divider">
         <Setter Property="Height" Value="1" />
         <Setter Property="Background" Value="{DynamicResource RowHairlineBrush}" />
-        <Setter Property="Margin" Value="-14,0" />
+        <Setter Property="Margin" Value="-12,0" />
     </Style>
     <Style Selector="Border.DeviceCard.Compact Border.Divider">
         <Setter Property="Margin" Value="-8,0" />
@@ -212,7 +212,7 @@
     </Style>
 
     <Style Selector="Panel.Strip">
-        <Setter Property="Margin" Value="-14,0" />
+        <Setter Property="Margin" Value="-12,0" />
     </Style>
     <Style Selector="Border.DeviceCard.Compact Panel.Strip">
         <Setter Property="Margin" Value="-8,0" />
@@ -221,7 +221,7 @@
         <Setter Property="IsVisible" Value="False" />
     </Style>
     <Style Selector="Grid.StripBody">
-        <Setter Property="Margin" Value="14,8,14,4" />
+        <Setter Property="Margin" Value="12,8,12,4" />
         <Setter Property="ColumnSpacing" Value="10" />
         <Setter Property="RowSpacing" Value="4" />
     </Style>
@@ -293,10 +293,14 @@
     </Style>
 
     <Style Selector="StackPanel.DeviceGroup">
-        <Setter Property="Margin" Value="0,4,0,0" />
+        <Setter Property="Spacing" Value="4" />
+    </Style>
+    <Style Selector="Panel.GroupHeader">
+        <Setter Property="MinHeight" Value="24" />
     </Style>
     <Style Selector="TextBlock.GroupTitle">
         <Setter Property="Margin" Value="2,0,0,0" />
+        <Setter Property="VerticalAlignment" Value="Center" />
         <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
     </Style>
     <Style Selector="TextBox.GroupTitleEditor">

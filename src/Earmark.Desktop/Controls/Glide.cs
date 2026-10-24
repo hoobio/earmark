@@ -128,7 +128,7 @@ public static class Glide
         };
         try
         {
-            await animation.RunAsync(transform, run.Token);
+            await animation.RunAsync(child, run.Token);
         }
         catch (OperationCanceledException)
         {

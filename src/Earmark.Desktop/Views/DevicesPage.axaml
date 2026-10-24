@@ -5,7 +5,7 @@
     xmlns:ctl="using:Earmark.Desktop.Controls"
     xmlns:vm="using:Earmark.Desktop.ViewModels.Devices"
     x:DataType="vm:DevicesViewModel"
-    Padding="{StaticResource PageGutter}"
+    Padding="12,4,12,12"
     Focusable="True">
     <Grid RowDefinitions="Auto,*" Background="Transparent">
         <Grid Classes="DevicesHeader" ColumnDefinitions="*,Auto">

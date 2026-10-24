@@ -35,7 +35,6 @@ public sealed partial class DeviceGroupView : UserControl
                 old.PropertyChanged -= OnGroupChanged;
             }
 
-            Root.DataContext = Group;
             if (Group is not null)
             {
                 Group.PropertyChanged += OnGroupChanged;
