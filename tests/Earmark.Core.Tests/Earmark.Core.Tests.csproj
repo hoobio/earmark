@@ -18,6 +18,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Earmark.Core\Earmark.Core.csproj" />
+    <ProjectReference Include="..\..\src\Earmark.Audio\Earmark.Audio.csproj" />
   </ItemGroup>
 
 </Project>
