@@ -145,7 +145,19 @@
     <SolidColorBrush x:Key="ComboBoxBorderBrushDisabled" Color="Transparent" />
     <SolidColorBrush x:Key="ComboBoxBackgroundBorderBrushFocused" Color="Transparent" />
     <SolidColorBrush x:Key="ComboBoxBackgroundBorderBrushUnfocused" Color="Transparent" />
-    <SolidColorBrush x:Key="ComboBoxDropDownBackground" Color="#FF2C2C2C" />
+    <SolidColorBrush x:Key="ComboBoxDropDownBackground" Color="#FF2B3140" />
+    <SolidColorBrush x:Key="ComboBoxItemBackground" Color="Transparent" />
+    <SolidColorBrush x:Key="ComboBoxItemBackgroundPointerOver" Color="#FF232834" />
+    <SolidColorBrush x:Key="ComboBoxItemBackgroundPressed" Color="#FF1F2430" />
+    <SolidColorBrush x:Key="ComboBoxItemBackgroundSelected" Color="Transparent" />
+    <SolidColorBrush x:Key="ComboBoxItemBackgroundSelectedUnfocused" Color="Transparent" />
+    <SolidColorBrush x:Key="ComboBoxItemBackgroundSelectedPointerOver" Color="#FF232834" />
+    <SolidColorBrush x:Key="ComboBoxItemBackgroundSelectedPressed" Color="#FF1F2430" />
+    <SolidColorBrush x:Key="ComboBoxItemForegroundSelected" Color="#FF73D0FF" />
+    <SolidColorBrush x:Key="ComboBoxItemForegroundSelectedUnfocused" Color="#FF73D0FF" />
+    <SolidColorBrush x:Key="ComboBoxItemForegroundSelectedPointerOver" Color="#FF73D0FF" />
+    <SolidColorBrush x:Key="ComboBoxItemForegroundSelectedPressed" Color="#FF73D0FF" />
+    <SolidColorBrush x:Key="ComboBoxItemPillFillBrush" Color="Transparent" />
     <SolidColorBrush x:Key="ComboBoxDropDownBorderBrush" Color="Transparent" />
 
     <SolidColorBrush x:Key="SegmentedBackground" Color="#FF1A1F2B" />
