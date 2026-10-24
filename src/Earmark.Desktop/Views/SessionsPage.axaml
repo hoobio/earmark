@@ -24,13 +24,10 @@
                                     <ItemsControl ItemsSource="{Binding Devices}">
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate x:DataType="vm:DeviceLine">
-                                                <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="6" HorizontalAlignment="Right">
-                                                    <Ellipse Width="6" Height="6" Margin="0,7,0,0" VerticalAlignment="Top" Fill="{DynamicResource SystemFillColorSuccessBrush}" IsVisible="{Binding IsActive}" />
-                                                    <StackPanel Grid.Column="1" Orientation="Vertical" HorizontalAlignment="Right">
-                                                        <TextBlock Classes="Body" Text="{Binding Name}" HorizontalAlignment="Right" TextAlignment="Right" TextTrimming="CharacterEllipsis" />
-                                                        <TextBlock Classes="Caption" Text="{Binding Subtext}" IsVisible="{Binding HasSubtext}" HorizontalAlignment="Right" TextAlignment="Right" TextTrimming="CharacterEllipsis" Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
-                                                    </StackPanel>
-                                                </Grid>
+                                                <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Right">
+                                                    <Ellipse Width="6" Height="6" VerticalAlignment="Center" Fill="{DynamicResource SystemFillColorSuccessBrush}" IsVisible="{Binding IsActive}" />
+                                                    <TextBlock Classes="Body" FontWeight="Normal" Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                                                </StackPanel>
                                             </DataTemplate>
                                         </ItemsControl.ItemTemplate>
                                     </ItemsControl>

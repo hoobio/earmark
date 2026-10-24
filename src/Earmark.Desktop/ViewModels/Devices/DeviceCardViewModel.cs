@@ -39,7 +39,7 @@ public sealed class DeviceCardViewModel : Observable
         Endpoint = endpoint;
         Config = config;
         _autoAccent = DeviceVisuals.DeterministicSwatch(key);
-        _nameGlyph = DeviceVisuals.GlyphForName(NameOnly);
+        _nameGlyph = DeviceVisuals.GlyphForName(Endpoint.Name);
         PageOptions = CardOptions.For(owner.Settings, overlay: false, config);
         OverlayOptions = CardOptions.For(owner.Settings, overlay: true, config);
         Apps.CollectionChanged += (_, _) => RaiseApps();
@@ -77,13 +77,7 @@ public sealed class DeviceCardViewModel : Observable
 
     public bool IsRender => Endpoint.Flow == EndpointFlow.Render;
 
-    public string NameOnly => Endpoint.Name;
-
-    public string Subtext => Endpoint.Subtext ?? string.Empty;
-
-    public bool HasSubtext => Subtext.Length > 0;
-
-    public string FullName => Endpoint.FriendlyName;
+    public string Name => Endpoint.PickerName;
 
     public bool IsDefault => Endpoint.IsDefault;
 
@@ -237,7 +231,7 @@ public sealed class DeviceCardViewModel : Observable
         Config = config;
         if (nameChanged)
         {
-            _nameGlyph = DeviceVisuals.GlyphForName(NameOnly);
+            _nameGlyph = DeviceVisuals.GlyphForName(Endpoint.Name);
         }
 
         if (volume is { } v)

@@ -79,8 +79,8 @@ public sealed class SessionsViewModel : NotifyBase
             .Where(session => session.IdentityKey == identity)
             .GroupBy(session => session.CurrentEndpointId, StringComparer.OrdinalIgnoreCase)
             .Select(device => endpoints.GetValueOrDefault(device.Key) is { } endpoint
-                ? new DeviceLine(endpoint.Name, endpoint.Subtext, device.Any(session => session.State == SessionState.Active))
-                : new DeviceLine("(unknown device)", null, device.Any(session => session.State == SessionState.Active)))
+                ? new DeviceLine(endpoint.PickerName, device.Any(session => session.State == SessionState.Active))
+                : new DeviceLine("(unknown device)", device.Any(session => session.State == SessionState.Active)))
             .OrderBy(line => line.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
         return devices.Count == 0 ? null : new DirectionSection(direction, devices);
@@ -114,7 +114,4 @@ public sealed record AppBlock(string Title, string Detail, bool IsActive, IReadO
 
 public sealed record DirectionSection(string Direction, IReadOnlyList<DeviceLine> Devices);
 
-public sealed record DeviceLine(string Name, string? Subtext, bool IsActive)
-{
-    public bool HasSubtext => Subtext is not null;
-}
+public sealed record DeviceLine(string Name, bool IsActive);
