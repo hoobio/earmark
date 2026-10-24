@@ -1,10 +1,6 @@
 <Styles
     xmlns="https://github.com/avaloniaui"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-    <Style Selector="Border.SessionBlock">
-        <Setter Property="CornerRadius" Value="{StaticResource OverlayCornerRadius}" />
-        <Setter Property="ClipToBounds" Value="True" />
-    </Style>
     <Style Selector="Border.SessionRow">
         <Setter Property="Background" Value="{DynamicResource CardBackgroundFillColorDefaultBrush}" />
         <Setter Property="Padding" Value="16,12" />

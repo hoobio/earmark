@@ -65,7 +65,7 @@ public sealed class SessionsViewModel : NotifyBase
                     string.IsNullOrWhiteSpace(first.DisplayName) ? first.ProcessName : first.DisplayName,
                     detail,
                     app.Any(session => session.State == SessionState.Active),
-                    [.. Rows(output, app.Key, endpoints, "Output"), .. Rows(input, app.Key, endpoints, "Input")]);
+                    new[] { Section("Output", output, app.Key, endpoints), Section("Input", input, app.Key, endpoints) }.OfType<DirectionSection>().ToList());
             })
             .OrderBy(app => app.Title, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -73,16 +73,16 @@ public sealed class SessionsViewModel : NotifyBase
 
     public Task ReapplyAsync() => _applier.ApplyAllAsync(force: true);
 
-    private static List<SessionRow> Rows(List<AudioSession> sessions, string identity, Dictionary<string, string> endpoints, string direction) => sessions
-        .Where(session => session.IdentityKey == identity)
-        .GroupBy(session => session.CurrentEndpointId, StringComparer.OrdinalIgnoreCase)
-        .Select(device => new SessionRow(
-            direction,
-            endpoints.GetValueOrDefault(device.Key) ?? "(unknown device)",
-            device.Count() > 1 ? $"{device.Count()} sessions" : string.Empty,
-            device.Any(session => session.State == SessionState.Active)))
-        .OrderBy(row => row.Device, StringComparer.OrdinalIgnoreCase)
-        .ToList();
+    private static DirectionSection? Section(string direction, List<AudioSession> sessions, string identity, Dictionary<string, string> endpoints)
+    {
+        var devices = sessions
+            .Where(session => session.IdentityKey == identity)
+            .GroupBy(session => session.CurrentEndpointId, StringComparer.OrdinalIgnoreCase)
+            .Select(device => new DeviceLine(endpoints.GetValueOrDefault(device.Key) ?? "(unknown device)", device.Any(session => session.State == SessionState.Active)))
+            .OrderBy(line => line.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        return devices.Count == 0 ? null : new DirectionSection(direction, devices);
+    }
 
     private void OnRouteApplied(object? sender, AppliedRoute route)
     {
@@ -108,9 +108,8 @@ public sealed class SessionsViewModel : NotifyBase
     }
 }
 
-public sealed record AppBlock(string Title, string Detail, bool IsActive, IReadOnlyList<SessionRow> Rows);
+public sealed record AppBlock(string Title, string Detail, bool IsActive, IReadOnlyList<DirectionSection> Sections);
 
-public sealed record SessionRow(string Direction, string Device, string Detail, bool IsActive)
-{
-    public bool HasDetail => Detail.Length > 0;
-}
+public sealed record DirectionSection(string Direction, IReadOnlyList<DeviceLine> Devices);
+
+public sealed record DeviceLine(string Name, bool IsActive);
