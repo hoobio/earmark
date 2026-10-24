@@ -35,6 +35,11 @@ public sealed class StartupSettingsApplier : IDisposable
         }
 
         _started = true;
+        if (!AppInfo.IsRelease)
+        {
+            _logger.LogInformation("Launch on startup is not written for the {Channel} channel; only Release builds own the Run value", AppInfo.BuildChannel);
+        }
+
         _settings.SettingsChanged += OnChanged;
         Apply();
     }
@@ -46,8 +51,8 @@ public sealed class StartupSettingsApplier : IDisposable
         try
         {
             var s = _settings.Current;
-            // The Run value is shared by every channel, so a Dev build must not rewrite or delete the installed build's entry.
-            if (!AppInfo.IsDevBuild)
+            // The Run value is shared by every channel, and blocked settings are defaults, so neither may rewrite or delete the installed Release entry.
+            if (AppInfo.IsRelease && !_settings.IsSaveBlocked)
             {
                 if (s.LaunchOnStartup)
                 {

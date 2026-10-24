@@ -54,6 +54,8 @@ public static class AppInfo
 
     public static bool IsPrerelease => string.Equals(BuildChannel, "Prerelease", StringComparison.OrdinalIgnoreCase);
 
+    public static bool IsRelease => string.Equals(BuildChannel, "Release", StringComparison.OrdinalIgnoreCase);
+
     /// <summary>Per-channel storage subfolder so Dev / Prerelease / Release builds keep separate
     /// data (rules, settings, logs) and never clobber each other: "Dev" / "Prerelease" for the
     /// non-stable channels, empty for a stable Release build (which sits at the base folder).</summary>

@@ -82,8 +82,15 @@ public sealed partial class App : Application
     private static async Task LoadEngineAsync(IServiceProvider services, ILogger logger)
     {
         var settings = services.GetRequiredService<SettingsService>();
-        await settings.LoadAsync();
-        logger.LogInformation("Settings loaded (backdrop {Backdrop}, tray icon {Tray})", settings.Current.Backdrop, settings.Current.ShowTrayIcon);
+        try
+        {
+            await settings.LoadAsync();
+            logger.LogInformation("Settings loaded (backdrop {Backdrop}, tray icon {Tray})", settings.Current.Backdrop, settings.Current.ShowTrayIcon);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Settings failed to load; using defaults with saves blocked (copy at {Copy})", settings.CorruptCopyPath ?? "none");
+        }
 
         services.GetRequiredService<StartupSettingsApplier>().Start();
         services.GetRequiredService<NotificationService>().Register();
@@ -97,15 +104,39 @@ public sealed partial class App : Application
         logger.LogInformation("Audio services initialized in {TotalMs} ms (endpoints {EpMs}, sessions {SessMs}, meters {MeterMs})", sw.ElapsedMilliseconds, endpointsMs, sessionsMs, sw.ElapsedMilliseconds - endpointsMs - sessionsMs);
 
         var rules = services.GetRequiredService<IRulesService>();
-        await rules.LoadAsync();
-        logger.LogInformation("Rules loaded ({Count} rules, saves blocked {Blocked})", rules.Rules.Count, rules.IsSaveBlocked);
+        try
+        {
+            await rules.LoadAsync();
+            logger.LogInformation("Rules loaded ({Count} rules, saves blocked {Blocked})", rules.Rules.Count, rules.IsSaveBlocked);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Rules failed to load; starting with no rules and saves blocked (copy at {Copy})", rules.CorruptCopyPath ?? "none");
+        }
     }
 
     private static async Task StartRoutingAsync(IServiceProvider services, ILogger logger)
     {
-        await services.GetRequiredService<DeviceDefaultsService>().SeedDefaultsIfEmptyAsync();
-        services.GetRequiredService<RoutingApplier>().Start();
-        logger.LogInformation("Routing applier started");
+        try
+        {
+            if (services.GetRequiredService<IRulesService>().IsSaveBlocked || services.GetRequiredService<SettingsService>().IsSaveBlocked)
+            {
+                logger.LogWarning("Skipping new-install seeding while rule or settings saves are blocked");
+            }
+            else
+            {
+                await services.GetRequiredService<DeviceDefaultsService>().SeedDefaultsIfEmptyAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Seeding new-install defaults failed");
+        }
+        finally
+        {
+            services.GetRequiredService<RoutingApplier>().Start();
+            logger.LogInformation("Routing applier started");
+        }
     }
 
     private static void ShowShell(IClassicDesktopStyleApplicationLifetime desktop, SingleInstance instance, IServiceProvider services, ILogger logger)
@@ -165,30 +196,36 @@ public sealed partial class App : Application
         }
 
         new UiWatchdog(window, services.GetRequiredService<ILogger<UiWatchdog>>()).Start();
-        _ = OfferUnblockIfCorruptAsync(window, services.GetRequiredService<IRulesService>(), logger);
+        _ = OfferUnblockIfCorruptAsync(window, services.GetRequiredService<SettingsService>(), services.GetRequiredService<IRulesService>(), logger)
+            .ContinueWith(t => logger.LogError(t.Exception, "Corrupt-file dialog failed"), TaskContinuationOptions.OnlyOnFaulted);
         Dispatcher.UIThread.Post(() => WireUpdatePill(window, services.GetRequiredService<UpdateService>(), logger), DispatcherPriority.Background);
     }
 
-    private static async Task OfferUnblockIfCorruptAsync(MainWindow window, IRulesService rules, ILogger logger)
+    private static async Task OfferUnblockIfCorruptAsync(MainWindow window, SettingsService settings, IRulesService rules, ILogger logger)
     {
-        if (!rules.IsSaveBlocked)
+        if (settings.IsSaveBlocked && await OfferUnblockAsync(window, logger, "settings.json", "Settings", settings.CorruptCopyPath, "default settings"))
         {
-            return;
+            settings.UnblockSaves();
+            logger.LogWarning("Settings saves unblocked by the user");
         }
 
-        logger.LogWarning("Rule saves are blocked: rules.json failed to load (copy at {Copy})", rules.CorruptCopyPath ?? "none");
-        var copy = rules.CorruptCopyPath is { } path ? $"A copy of the unreadable file is saved at {path}." : "No copy of the file could be saved.";
-        var unblock = await AppDialogs.ShowMessageAsync(
-            window,
-            "Rules could not be loaded",
-            $"Earmark could not read rules.json, so rule changes are not saved. {copy} Allow saves to start again with an empty rule list, or keep saves blocked and repair the file.",
-            "Allow saves",
-            "Keep blocked");
-        if (unblock)
+        if (rules.IsSaveBlocked && await OfferUnblockAsync(window, logger, "rules.json", "Rules", rules.CorruptCopyPath, "an empty rule list"))
         {
             rules.UnblockSaves();
             logger.LogWarning("Rule saves unblocked by the user");
         }
+    }
+
+    private static Task<bool> OfferUnblockAsync(MainWindow window, ILogger logger, string file, string what, string? copyPath, string fresh)
+    {
+        logger.LogWarning("{What} saves are blocked: {File} failed to load (copy at {Copy}); offering the unblock dialog", what, file, copyPath ?? "none");
+        var copy = copyPath is { } path ? $"A copy of the unreadable file is saved at {path}." : "No copy of the file could be saved.";
+        return AppDialogs.ShowMessageAsync(
+            window,
+            $"{what} could not be loaded",
+            $"Earmark could not read {file}, so {what.ToLowerInvariant()} changes are not saved. {copy} Allow saves to start again with {fresh}, or keep saves blocked and repair the file.",
+            "Allow saves",
+            "Keep blocked");
     }
 
     private static void WireUpdatePill(MainWindow window, UpdateService updates, ILogger logger)
