@@ -1,5 +1,26 @@
 # Changelog
 
+## [2.0.1](https://github.com/hoobio/earmark/compare/v2.0.0...v2.0.1) (2026-10-24)
+
+
+### Features
+
+* **desktop:** deepen the Mirage layer scale to match hoobi-design ([5dc0232](https://github.com/hoobio/earmark/commit/5dc023249cfed69d0256a51eee88f9609f8b63e3))
+* **desktop:** default window size 1050x720 and a one-card minimum width ([5dc0232](https://github.com/hoobio/earmark/commit/5dc023249cfed69d0256a51eee88f9609f8b63e3))
+* **tray:** single click opens Quick Controls, double click restores the window ([5dc0232](https://github.com/hoobio/earmark/commit/5dc023249cfed69d0256a51eee88f9609f8b63e3))
+
+
+### Bug Fixes
+
+* **devices:** stop hover states flashing white ([5dc0232](https://github.com/hoobio/earmark/commit/5dc023249cfed69d0256a51eee88f9609f8b63e3))
+* **quick-controls:** round the artwork background and fit the overlay to its cards ([5dc0232](https://github.com/hoobio/earmark/commit/5dc023249cfed69d0256a51eee88f9609f8b63e3))
+* stop hover flashes, deepen the Mirage layers and split tray clicks ([#73](https://github.com/hoobio/earmark/issues/73)) ([5dc0232](https://github.com/hoobio/earmark/commit/5dc023249cfed69d0256a51eee88f9609f8b63e3))
+
+
+### Tests
+
+* **desktop:** guard hover transitions against white flashes ([5dc0232](https://github.com/hoobio/earmark/commit/5dc023249cfed69d0256a51eee88f9609f8b63e3))
+
 ## [2.0.0](https://github.com/hoobio/earmark/compare/v1.1.0...v2.0.0) (2026-10-24)
 
 
