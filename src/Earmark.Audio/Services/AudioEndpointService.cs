@@ -12,7 +12,7 @@ using NAudio.CoreAudioApi.Interfaces;
 namespace Earmark.Audio.Services;
 
 [SupportedOSPlatform("windows10.0.19041.0")]
-public sealed class AudioEndpointService : IAudioEndpointService, IMMNotificationClient, IDisposable
+public sealed class AudioEndpointService : IAudioEndpointService, IDisposable
 {
     private static readonly TimeSpan SafetyRefreshInterval = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan WatchdogInterval = TimeSpan.FromSeconds(10);
@@ -58,7 +58,7 @@ public sealed class AudioEndpointService : IAudioEndpointService, IMMNotificatio
     private readonly CancellationTokenSource _shutdownCts = new();
 
     private Snapshot _snapshot = Snapshot.Empty;
-    private bool _registered;
+    private MMDeviceNotificationClient? _notifications;
     private bool _disposed;
 
     // Rebuild coalescing state, all guarded by _scheduleGate. A device-change storm
@@ -100,8 +100,13 @@ public sealed class AudioEndpointService : IAudioEndpointService, IMMNotificatio
         // snapshot on their next natural refresh, and the mute subscriptions wire up there too.
         try { RebuildSnapshot(DeviceState.Active); }
         catch (Exception ex) { _logger.LogWarning(ex, "Initial endpoint snapshot failed; serving empty until first event"); }
-        _enumerator.RegisterEndpointNotificationCallback(this);
-        _registered = true;
+        // The events stay on the Windows audio thread, as the NAudio 2 callback did; marshalling them to the captured context would stall on a busy UI thread.
+        _notifications = _enumerator.CreateNotificationClient(useSynchronizationContext: false);
+        _notifications.DeviceStateChanged += (_, _) => RaiseEndpointsChanged();
+        _notifications.DeviceAdded += (_, _) => RaiseEndpointsChanged();
+        _notifications.DeviceRemoved += (_, _) => RaiseEndpointsChanged();
+        _notifications.DefaultDeviceChanged += (_, _) => RaiseDefaultsAndEndpointsChanged();
+        _notifications.PropertyValueChanged += (_, e) => OnPropertyValueChanged(e.PropertyKey);
         _safetyTimer = new Timer(OnSafetyTick, null, SafetyRefreshInterval, SafetyRefreshInterval);
         _watchdogTimer = new Timer(OnWatchdogTick, null, WatchdogInterval, WatchdogInterval);
         _peakSampler = new Timer(
@@ -734,11 +739,7 @@ public sealed class AudioEndpointService : IAudioEndpointService, IMMNotificatio
         }
     }
 
-    void IMMNotificationClient.OnDeviceStateChanged(string deviceId, DeviceState newState) => RaiseEndpointsChanged();
-    void IMMNotificationClient.OnDeviceAdded(string pwstrDeviceId) => RaiseEndpointsChanged();
-    void IMMNotificationClient.OnDeviceRemoved(string deviceId) => RaiseEndpointsChanged();
-    void IMMNotificationClient.OnDefaultDeviceChanged(DataFlow flow, Role role, string defaultDeviceId) => RaiseDefaultsAndEndpointsChanged();
-    void IMMNotificationClient.OnPropertyValueChanged(string pwstrDeviceId, NAudio.CoreAudioApi.PropertyKey key)
+    private void OnPropertyValueChanged(NAudio.CoreAudioApi.PropertyKey key)
     {
         // Refresh on an external rename (Windows Sound "rename", a driver, another app) so the
         // Devices / Rules UI reflects the new name without waiting for a structural event. Filter
@@ -773,19 +774,16 @@ public sealed class AudioEndpointService : IAudioEndpointService, IMMNotificatio
         _watchdogTimer.Dispose();
         _peakSampler.Dispose();
 
-        if (_registered)
+        try
         {
-            try
-            {
-                _enumerator.UnregisterEndpointNotificationCallback(this);
-            }
-            catch
-            {
-                // Ignore errors during shutdown.
-            }
-
-            _registered = false;
+            _notifications?.Dispose();
         }
+        catch
+        {
+            // Ignore errors during shutdown.
+        }
+
+        _notifications = null;
 
         // Pull the subs out under the lock, dispose outside it: MuteSubscription.Dispose
         // releases COM that can marshal to the STA thread, and we never want to hold

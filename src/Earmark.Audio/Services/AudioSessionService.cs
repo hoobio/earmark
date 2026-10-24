@@ -543,16 +543,16 @@ public sealed class AudioSessionService : IAudioSessionService, IAudioSessionMet
             }
         }
 
-        private void OnSessionCreated(object sender, IAudioSessionControl newSession)
+        private void OnSessionCreated(object sender, AudioSessionControl control)
         {
             if (_disposed)
             {
+                control.Dispose();
                 return;
             }
 
             try
             {
-                var control = new AudioSessionControl(newSession);
                 if (Owner.TryMap(control, DeviceId, out var mapped))
                 {
                     Owner._logger.LogInformation(
