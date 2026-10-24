@@ -1,6 +1,7 @@
 using Avalonia.Controls;
 
 using Earmark.Desktop.Controls;
+using Earmark.Desktop.Services;
 using Earmark.Desktop.Services.Devices;
 using Earmark.Desktop.ViewModels.Devices;
 using Earmark.Desktop.Views;
@@ -16,6 +17,7 @@ internal static class DevicesRegistration
             .AddSingleton<DeviceImages>()
             .AddSingleton<DevicesViewModel>()
             .AddSingleton<DevicesPage>()
+            .AddSingleton<TaskbarMediaControls>()
             .AddKeyedSingleton<Func<IReadOnlyList<Control>>>("QuickControlsBlocks", (sp, _) => () => QuickControlsBlocks(sp.GetRequiredService<DevicesViewModel>()));
 
     private static IReadOnlyList<Control> QuickControlsBlocks(DevicesViewModel vm) =>

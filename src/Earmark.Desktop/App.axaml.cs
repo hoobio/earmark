@@ -113,6 +113,7 @@ public sealed partial class App : Application
         var settings = services.GetRequiredService<SettingsService>().Current;
         var window = services.GetRequiredService<MainWindow>();
         window.CreateTrayIcon();
+        services.GetRequiredService<TaskbarMediaControls>().Attach(window);
         services.GetRequiredService<QuickControlsWindow>().Start();
         window.ReapplyRulesRequested += (_, _) => _ = services.GetRequiredService<RoutingApplier>().ApplyAllAsync(force: true)
             .ContinueWith(t => logger.LogError(t.Exception, "Reapply from the tray failed"), TaskContinuationOptions.OnlyOnFaulted);
