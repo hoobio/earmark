@@ -144,6 +144,18 @@
     <Property Id="EXISTINGRUNVALUE">
       <RegistrySearch Id="ExistingRunValue" Root="HKCU" Key="Software\Microsoft\Windows\CurrentVersion\Run" Name="Earmark" Type="raw" />
     </Property>
+    <SetProperty Id="REPOINTRUNVALUE"
+                 Action="SetRepointRunValueTray"
+                 Value='"[INSTALLFOLDER]Earmark.exe" --tray'
+                 Condition="EXISTINGRUNVALUE ~&gt;&lt; INSTALLFOLDER AND EXISTINGRUNVALUE ~&gt;&lt; &quot;--tray&quot;"
+                 After="CostInitialize"
+                 Sequence="execute" />
+    <SetProperty Id="REPOINTRUNVALUE"
+                 Action="SetRepointRunValuePlain"
+                 Value='"[INSTALLFOLDER]Earmark.exe"'
+                 Condition="EXISTINGRUNVALUE ~&gt;&lt; INSTALLFOLDER AND NOT EXISTINGRUNVALUE ~&gt;&lt; &quot;--tray&quot;"
+                 After="CostInitialize"
+                 Sequence="execute" />
     <?endif?>
 
     <Feature Id="Main" Title="Earmark$(var.ChannelLabel)" Level="1" AllowAdvertise="no" Display="expand" ConfigurableDirectory="INSTALLFOLDER">
@@ -179,7 +191,7 @@
     <!-- A tray-parked Earmark cancels WM_CLOSE, so util:CloseApplication cannot free the files; this ends the 1.1.0 Earmark.App.exe and Earmark.exe running from this install folder only. -->
     <SetProperty Id="WixQuietExecCmdLine"
                  Action="SetStopEarmarkCmdLine"
-                 Value='"[System64Folder]WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -Command "Get-Process Earmark,Earmark.App -ErrorAction SilentlyContinue | Where-Object { $_.Path -like &apos;[INSTALLFOLDER]*&apos; } | Stop-Process -Force"'
+                 Value='"[System64Folder]WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -Command "Get-Process Earmark,Earmark.App -ErrorAction SilentlyContinue | Where-Object Path -like &apos;[INSTALLFOLDER]*&apos; | Stop-Process -Force"'
                  Before="StopEarmark"
                  Sequence="execute" />
     <CustomAction Id="StopEarmark"
@@ -234,12 +246,12 @@
       </Component>
       <?if $(var.Channel) = "Release" ?>
       <!-- 1.1.0 registered Earmark.App.exe for login start; repoint an existing value at Earmark.exe so an upgrade keeps starting at login. -->
-      <Component Id="RunAtLoginRepoint" Guid="*" Condition="EXISTINGRUNVALUE">
+      <Component Id="RunAtLoginRepoint" Guid="*" Condition="REPOINTRUNVALUE">
         <RegistryValue Root="HKCU"
                        Key="Software\Microsoft\Windows\CurrentVersion\Run"
                        Name="Earmark"
                        Type="string"
-                       Value="&quot;[INSTALLFOLDER]Earmark.exe&quot; --tray"
+                       Value="[REPOINTRUNVALUE]"
                        KeyPath="yes" />
       </Component>
       <?endif?>
