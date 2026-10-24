@@ -120,7 +120,14 @@ public static class CustomiseDeviceDialog
         };
         var dialog = new FAContentDialog
         {
-            Title = $"Customise {card.NameOnly}",
+            Title = new StackPanel
+            {
+                Children =
+                {
+                    new TextBlock { Text = $"Customise {card.NameOnly}", TextTrimming = TextTrimming.CharacterEllipsis },
+                    new TextBlock { Classes = { "Caption", "Tertiary" }, Text = card.Subtext, IsVisible = card.HasSubtext, TextTrimming = TextTrimming.CharacterEllipsis },
+                },
+            },
             Content = new ScrollViewer { Content = content, MaxHeight = 520 },
             PrimaryButtonText = "Save",
             SecondaryButtonText = "Reset to default",

@@ -46,7 +46,7 @@ public sealed class SessionsViewModel : NotifyBase
     {
         var endpoints = _endpoints.GetEndpoints(EndpointFlow.Render).Concat(_endpoints.GetEndpoints(EndpointFlow.Capture))
             .GroupBy(endpoint => endpoint.Id, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(group => group.Key, group => group.First().DisplayName, StringComparer.OrdinalIgnoreCase);
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
         var output = _sessions.GetSessions().Where(session => !session.IsSystemSounds).ToList();
         var input = _sessions.GetCaptureSessions().Where(session => !session.IsSystemSounds).ToList();
         Apps = output.Concat(input)
@@ -73,12 +73,14 @@ public sealed class SessionsViewModel : NotifyBase
 
     public Task ReapplyAsync() => _applier.ApplyAllAsync(force: true);
 
-    private static DirectionSection? Section(string direction, List<AudioSession> sessions, string identity, Dictionary<string, string> endpoints)
+    private static DirectionSection? Section(string direction, List<AudioSession> sessions, string identity, Dictionary<string, AudioEndpoint> endpoints)
     {
         var devices = sessions
             .Where(session => session.IdentityKey == identity)
             .GroupBy(session => session.CurrentEndpointId, StringComparer.OrdinalIgnoreCase)
-            .Select(device => new DeviceLine(endpoints.GetValueOrDefault(device.Key) ?? "(unknown device)", device.Any(session => session.State == SessionState.Active)))
+            .Select(device => endpoints.GetValueOrDefault(device.Key) is { } endpoint
+                ? new DeviceLine(endpoint.Name, endpoint.Subtext, device.Any(session => session.State == SessionState.Active))
+                : new DeviceLine("(unknown device)", null, device.Any(session => session.State == SessionState.Active)))
             .OrderBy(line => line.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
         return devices.Count == 0 ? null : new DirectionSection(direction, devices);
@@ -112,4 +114,7 @@ public sealed record AppBlock(string Title, string Detail, bool IsActive, IReadO
 
 public sealed record DirectionSection(string Direction, IReadOnlyList<DeviceLine> Devices);
 
-public sealed record DeviceLine(string Name, bool IsActive);
+public sealed record DeviceLine(string Name, string? Subtext, bool IsActive)
+{
+    public bool HasSubtext => Subtext is not null;
+}

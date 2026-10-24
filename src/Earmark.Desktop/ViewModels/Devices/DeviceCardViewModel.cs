@@ -77,9 +77,9 @@ public sealed class DeviceCardViewModel : Observable
 
     public bool IsRender => Endpoint.Flow == EndpointFlow.Render;
 
-    public string NameOnly => Split(Endpoint.FriendlyName).Name;
+    public string NameOnly => Endpoint.Name;
 
-    public string Subtext => Split(Endpoint.FriendlyName).Sub ?? string.Empty;
+    public string Subtext => Endpoint.Subtext ?? string.Empty;
 
     public bool HasSubtext => Subtext.Length > 0;
 
@@ -420,11 +420,5 @@ public sealed class DeviceCardViewModel : Observable
         Raise(nameof(VolumeText));
         Raise(nameof(VolumeAreaOpacity));
         Raise(nameof(MuteTooltip));
-    }
-
-    private static (string Name, string? Sub) Split(string friendly)
-    {
-        var open = friendly.LastIndexOf(" (", StringComparison.Ordinal);
-        return open > 0 && friendly.EndsWith(')') ? (friendly[..open], friendly[(open + 2)..^1]) : (friendly, null);
     }
 }
