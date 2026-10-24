@@ -64,7 +64,7 @@ Only commit and push once green. When committing mixed work in one file, stage t
 
 Rules and settings live under roaming `AppData` for backup; logs live in `LocalAppData` to avoid sync churn. Unknown fields in old `settings.json` files are ignored on load.
 
-Both stores write atomically (`AtomicFile`: write `.tmp`, then move over the target, 5 attempts with backoff to survive OneDrive and antivirus holding the file). A `rules.json` that fails to parse is copied aside, saves are blocked (`IRulesService.IsSaveBlocked`), and the shell offers a dialog to allow saves from an empty list or keep them blocked.
+Both stores write atomically (`AtomicFile`: write `.tmp`, then move over the target, 5 attempts with backoff to survive OneDrive and antivirus holding the file). A `rules.json` or `settings.json` that fails to parse is copied aside (`*.corrupt-<timestamp>.json`), saves are blocked (`IRulesService.IsSaveBlocked`, `SettingsService.IsSaveBlocked`), and the shell offers a dialog to allow saves from empty rules or default settings, or keep them blocked. While either is blocked, default seeding and the Run-value write are skipped; routing still starts.
 
 ## How routing works (read before changing audio code)
 
