@@ -12,8 +12,11 @@
                     <Panel Width="10" VerticalAlignment="Center">
                         <Ellipse Width="10" Height="10" Fill="{DynamicResource SystemFillColorSuccessBrush}" IsVisible="{Binding IsActive}" />
                     </Panel>
-                    <TextBlock Grid.Column="1" Classes="Body" Text="{Binding Device}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
-                    <TextBlock Grid.Column="2" Classes="Caption" Text="{Binding Detail}" VerticalAlignment="Center" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                    <StackPanel Grid.Column="2" VerticalAlignment="Center" HorizontalAlignment="Right">
+                        <TextBlock Classes="Caption" Text="{Binding Direction}" HorizontalAlignment="Right" Foreground="{DynamicResource TextFillColorTertiaryBrush}" />
+                        <TextBlock Classes="Body" Text="{Binding Device}" HorizontalAlignment="Right" TextTrimming="CharacterEllipsis" />
+                        <TextBlock Classes="Caption" Text="{Binding Detail}" IsVisible="{Binding HasDetail}" HorizontalAlignment="Right" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
+                    </StackPanel>
                 </Grid>
             </Border>
         </DataTemplate>
@@ -32,20 +35,7 @@
                             </StackPanel>
                         </Grid>
                     </Border>
-                    <Border Classes="SessionRow SessionLabel" IsVisible="{Binding HasOutput}">
-                        <TextBlock Classes="Caption" Text="Output" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                    </Border>
-                    <ItemsControl ItemsSource="{Binding Output}" ItemTemplate="{StaticResource DeviceRowTemplate}">
-                        <ItemsControl.ItemsPanel>
-                            <ItemsPanelTemplate>
-                                <StackPanel Spacing="1" />
-                            </ItemsPanelTemplate>
-                        </ItemsControl.ItemsPanel>
-                    </ItemsControl>
-                    <Border Classes="SessionRow SessionLabel" IsVisible="{Binding HasInput}">
-                        <TextBlock Classes="Caption" Text="Input" Foreground="{DynamicResource TextFillColorSecondaryBrush}" />
-                    </Border>
-                    <ItemsControl ItemsSource="{Binding Input}" ItemTemplate="{StaticResource DeviceRowTemplate}">
+                    <ItemsControl ItemsSource="{Binding Rows}" ItemTemplate="{StaticResource DeviceRowTemplate}">
                         <ItemsControl.ItemsPanel>
                             <ItemsPanelTemplate>
                                 <StackPanel Spacing="1" />

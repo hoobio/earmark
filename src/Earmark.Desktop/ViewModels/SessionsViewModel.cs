@@ -65,8 +65,7 @@ public sealed class SessionsViewModel : NotifyBase
                     string.IsNullOrWhiteSpace(first.DisplayName) ? first.ProcessName : first.DisplayName,
                     detail,
                     app.Any(session => session.State == SessionState.Active),
-                    Rows(output, app.Key, endpoints),
-                    Rows(input, app.Key, endpoints));
+                    [.. Rows(output, app.Key, endpoints, "Output"), .. Rows(input, app.Key, endpoints, "Input")]);
             })
             .OrderBy(app => app.Title, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -74,10 +73,11 @@ public sealed class SessionsViewModel : NotifyBase
 
     public Task ReapplyAsync() => _applier.ApplyAllAsync(force: true);
 
-    private static List<SessionRow> Rows(List<AudioSession> sessions, string identity, Dictionary<string, string> endpoints) => sessions
+    private static List<SessionRow> Rows(List<AudioSession> sessions, string identity, Dictionary<string, string> endpoints, string direction) => sessions
         .Where(session => session.IdentityKey == identity)
         .GroupBy(session => session.CurrentEndpointId, StringComparer.OrdinalIgnoreCase)
         .Select(device => new SessionRow(
+            direction,
             endpoints.GetValueOrDefault(device.Key) ?? "(unknown device)",
             device.Count() > 1 ? $"{device.Count()} sessions" : string.Empty,
             device.Any(session => session.State == SessionState.Active)))
@@ -108,11 +108,9 @@ public sealed class SessionsViewModel : NotifyBase
     }
 }
 
-public sealed record AppBlock(string Title, string Detail, bool IsActive, IReadOnlyList<SessionRow> Output, IReadOnlyList<SessionRow> Input)
+public sealed record AppBlock(string Title, string Detail, bool IsActive, IReadOnlyList<SessionRow> Rows);
+
+public sealed record SessionRow(string Direction, string Device, string Detail, bool IsActive)
 {
-    public bool HasOutput => Output.Count > 0;
-
-    public bool HasInput => Input.Count > 0;
+    public bool HasDetail => Detail.Length > 0;
 }
-
-public sealed record SessionRow(string Device, string Detail, bool IsActive);

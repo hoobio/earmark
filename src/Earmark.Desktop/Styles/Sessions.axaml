@@ -9,7 +9,4 @@
         <Setter Property="Background" Value="{DynamicResource CardBackgroundFillColorDefaultBrush}" />
         <Setter Property="Padding" Value="16,12" />
     </Style>
-    <Style Selector="Border.SessionLabel">
-        <Setter Property="Padding" Value="16,8" />
-    </Style>
 </Styles>
