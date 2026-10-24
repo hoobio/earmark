@@ -39,6 +39,7 @@ public sealed class AvaloniaSession : IDisposable
         services.AddSingleton(_ => new FileLoggerProvider(Path.Combine(folder, "test.log")));
         services.AddEarmarkCore(Path.Combine(folder, "rules.json"), Path.Combine(folder, "settings.json"));
         services.AddEarmarkInterop();
+        services.AddUpdates();
         var sessions = new SampleSessions();
         services.AddSingleton<IAudioEndpointService>(new SampleEndpoints());
         services.AddSingleton<IAudioSessionService>(sessions);

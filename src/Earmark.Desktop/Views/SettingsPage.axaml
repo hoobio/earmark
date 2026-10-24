@@ -57,7 +57,7 @@
 
                 <TextBlock Text="General" Classes="Caption" Margin="0,0,0,4" />
                 <StackPanel Classes="SettingsGroup">
-                    <views:SettingsCard Header="Launch on startup" Description="Start Earmark automatically when you sign in to Windows." HeaderGlyph="{StaticResource Glyph.PowerButton}">
+                    <views:SettingsCard Header="Launch on startup" Description="{Binding LaunchOnStartupDescription}" IsEnabled="{x:Static vm:SettingsViewModel.CanLaunchOnStartup}" HeaderGlyph="{StaticResource Glyph.PowerButton}">
                         <ToggleSwitch IsChecked="{Binding LaunchOnStartup, Mode=TwoWay}" OnContent="{x:Null}" OffContent="{x:Null}" AutomationProperties.Name="Launch on startup" />
                     </views:SettingsCard>
                 </StackPanel>
@@ -233,11 +233,11 @@
                         <views:SettingsCard Header="Support Earmark" Description="Earmark is free and open source. If it is useful to you, a donation helps keep it maintained." HeaderGlyph="{StaticResource Glyph.Lock}" ActionGlyph="{StaticResource Glyph.OpenInNewWindow}" IsClickEnabled="True" Click="OnDonateClick" />
                         <views:SettingsCard IsVisible="{Binding IsUpdateSupported}" Header="Check for updates" Description="{Binding UpdateStatusText}" HeaderGlyph="{StaticResource Glyph.Download}">
                             <StackPanel Orientation="Horizontal" Spacing="8">
-                                <Button Content="View release" IsVisible="{Binding UpdateAvailable}" Click="OnViewReleaseClick" />
+                                <Button Content="{Binding UpdateActionText}" IsVisible="{Binding UpdateAvailable}" Click="OnViewReleaseClick" />
                                 <Button Content="Check now" IsEnabled="{Binding CanCheck}" Click="OnCheckNowClick" />
                             </StackPanel>
                         </views:SettingsCard>
-                        <views:SettingsCard IsVisible="{Binding IsUpdateSupported}" IsEnabled="{x:Static vm:AboutViewModel.CanAutoCheck}" Header="Check automatically on launch" Description="{x:Static vm:AboutViewModel.AutoCheckDescription}" HeaderGlyph="{StaticResource Glyph.Sync}">
+                        <views:SettingsCard IsVisible="{Binding IsUpdateSupported}" IsEnabled="{x:Static vm:AboutViewModel.CanAutoCheck}" Header="Check automatically on launch" Description="{Binding AutoCheckDescription}" HeaderGlyph="{StaticResource Glyph.Sync}">
                             <ToggleSwitch IsChecked="{Binding AutoCheck, Mode=TwoWay}" OnContent="{x:Null}" OffContent="{x:Null}" AutomationProperties.Name="Check automatically on launch" />
                         </views:SettingsCard>
                     </StackPanel>

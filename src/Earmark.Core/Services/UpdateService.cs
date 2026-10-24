@@ -23,20 +23,26 @@ public sealed class UpdateService : IDisposable
     private readonly ILogger<UpdateService> _logger;
     private readonly HttpClient _http;
     private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly IStoreUpdates? _store;
 
-    public UpdateService(SettingsService settings, bool isPackaged, ILogger<UpdateService> logger)
+    public UpdateService(SettingsService settings, bool isPackaged, IStoreUpdates? store, ILogger<UpdateService> logger)
     {
         _settings = settings ?? throw new ArgumentNullException(nameof(settings));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        IsSupported = !isPackaged;
+        _store = store;
+        IsSupported = !isPackaged || store is not null;
 
         _http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
         // GitHub's API rejects requests without a User-Agent.
         _http.DefaultRequestHeaders.UserAgent.ParseAdd($"Earmark/{AppInfo.Version}");
         _http.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
 
-        Status = isPackaged ? UpdateStatus.NotSupported : UpdateStatus.Unknown;
+        Status = IsSupported ? UpdateStatus.Unknown : UpdateStatus.NotSupported;
     }
+
+    public bool IsStore => _store is not null;
+
+    public Task InstallStoreUpdateAsync() => _store?.InstallAsync() ?? Task.CompletedTask;
 
     public UpdateStatus Status { get; private set; }
 
@@ -70,6 +76,12 @@ public sealed class UpdateService : IDisposable
         try
         {
             SetStatus(UpdateStatus.Checking);
+
+            if (_store is not null)
+            {
+                SetStatus(await _store.CheckAsync(manual).ConfigureAwait(false) ? UpdateStatus.UpdateAvailable : UpdateStatus.UpToDate);
+                return;
+            }
 
             using var response = await _http.GetAsync(AppInfo.ReleasesApiUrl, ct).ConfigureAwait(false);
             response.EnsureSuccessStatusCode();
@@ -150,6 +162,13 @@ public sealed class UpdateService : IDisposable
         _http.Dispose();
         _gate.Dispose();
     }
+}
+
+public interface IStoreUpdates
+{
+    Task<bool> CheckAsync(bool manual);
+
+    Task InstallAsync();
 }
 
 [JsonSerializable(typeof(GitHubRelease[]))]

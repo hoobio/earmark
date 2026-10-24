@@ -5,10 +5,15 @@ using Earmark.Core.WaveLink;
 
 using Microsoft.Extensions.Logging;
 
+using StartupTask = Windows.ApplicationModel.StartupTask;
+using TaskState = Windows.ApplicationModel.StartupTaskState;
+
 namespace Earmark.Audio.Services;
 
 public sealed class StartupSettingsApplier : IDisposable
 {
+    private const string StartupTaskId = "EarmarkStartup";
+
     private readonly SettingsService _settings;
     private readonly FileLoggerProvider _fileLogger;
     private readonly IWaveLinkService _waveLink;
@@ -27,6 +32,10 @@ public sealed class StartupSettingsApplier : IDisposable
         _logger = logger;
     }
 
+    public TaskState? StartupTaskState { get; private set; }
+
+    public event EventHandler? StartupTaskStateChanged;
+
     public void Start()
     {
         if (_started)
@@ -37,7 +46,7 @@ public sealed class StartupSettingsApplier : IDisposable
         _started = true;
         if (!AppInfo.IsRelease)
         {
-            _logger.LogInformation("Launch on startup is not written for the {Channel} channel; only Release builds own the Run value", AppInfo.BuildChannel);
+            _logger.LogInformation("Launch on startup is off for the {Channel} channel; only Release builds start at sign-in", AppInfo.BuildChannel);
         }
 
         _settings.SettingsChanged += OnChanged;
@@ -54,7 +63,11 @@ public sealed class StartupSettingsApplier : IDisposable
             // The Run value is shared by every channel, and blocked settings are defaults, so neither may rewrite or delete the installed Release entry.
             if (AppInfo.IsRelease && !_settings.IsSaveBlocked)
             {
-                if (s.LaunchOnStartup)
+                if (PackageIdentity.IsPackaged)
+                {
+                    _ = ApplyStartupTaskAsync(s.LaunchOnStartup);
+                }
+                else if (s.LaunchOnStartup)
                 {
                     StartupRegistration.Register(s.LaunchToTray);
                 }
@@ -79,6 +92,36 @@ public sealed class StartupSettingsApplier : IDisposable
         catch (Exception ex)
         {
             _logger.LogError(ex, "Applying startup settings failed");
+        }
+    }
+
+    // An MSIX app's HKCU writes land in its private hive, so a packaged build starts at sign-in through the manifest StartupTask, never the Run value.
+    private async Task ApplyStartupTaskAsync(bool enable)
+    {
+        try
+        {
+            var task = await StartupTask.GetAsync(StartupTaskId);
+            var state = task.State;
+            if (enable && state is TaskState.Disabled)
+            {
+                state = await task.RequestEnableAsync();
+            }
+            else if (!enable && state is TaskState.Enabled)
+            {
+                task.Disable();
+                state = task.State;
+            }
+
+            if (state != StartupTaskState)
+            {
+                StartupTaskState = state;
+                _logger.LogInformation("Startup task {TaskId}: {State} (launch on startup {Enable})", StartupTaskId, state, enable);
+                StartupTaskStateChanged?.Invoke(this, EventArgs.Empty);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Startup task {TaskId} could not be applied", StartupTaskId);
         }
     }
 

@@ -1,6 +1,10 @@
 using Earmark.Audio;
+using Earmark.Audio.Services;
 using Earmark.Core;
 using Earmark.Core.Logging;
+using Earmark.Core.Services;
+using Earmark.Core.Settings;
+using Earmark.Desktop.Services;
 using Earmark.Desktop.Views;
 
 using Microsoft.Extensions.DependencyInjection;
@@ -30,6 +34,7 @@ internal static class ServiceRegistration
 
         builder.Services.AddEarmarkCore(Path.Combine(DataDirectory, "rules.json"), Path.Combine(DataDirectory, "settings.json"));
         builder.Services.AddEarmarkInterop();
+        builder.Services.AddUpdates();
 
         builder.Services.AddSingleton<MainWindow>();
         builder.Services
@@ -41,6 +46,12 @@ internal static class ServiceRegistration
 
         return builder;
     }
+
+    public static IServiceCollection AddUpdates(this IServiceCollection services) => services.AddSingleton(sp => new UpdateService(
+        sp.GetRequiredService<SettingsService>(),
+        PackageIdentity.IsPackaged,
+        PackageIdentity.IsPackaged && AppInfo.IsRelease ? new StoreUpdates(sp, sp.GetRequiredService<ILogger<StoreUpdates>>()) : null,
+        sp.GetRequiredService<ILogger<UpdateService>>()));
 
     private static string ChannelPath(string baseDir) => AppInfo.ChannelFolder is { Length: > 0 } channel ? Path.Combine(baseDir, channel) : baseDir;
 }

@@ -212,7 +212,7 @@ public sealed partial class SettingsPage : UserControl
 
     private void OnDonateClick(object? sender, RoutedEventArgs e) => _about.Donate();
 
-    private void OnViewReleaseClick(object? sender, RoutedEventArgs e) => _about.OpenLatestRelease();
+    private async void OnViewReleaseClick(object? sender, RoutedEventArgs e) => await _about.UpdateActionAsync();
 
     private async void OnCheckNowClick(object? sender, RoutedEventArgs e) => await _about.CheckAsync();
 }

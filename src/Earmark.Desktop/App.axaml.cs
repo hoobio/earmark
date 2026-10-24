@@ -238,13 +238,17 @@ public sealed partial class App : Application
         void Refresh()
         {
             pill.IsVisible = updates.Status == UpdateStatus.UpdateAvailable;
-            ToolTip.SetTip(pill, updates.LatestVersion is { } latest ? $"{latest} is available" : null);
+            ToolTip.SetTip(pill, updates.IsStore ? "An update is available in the Microsoft Store" : updates.LatestVersion is { } latest ? $"{latest} is available" : null);
         }
 
         updates.StatusChanged += (_, _) => Ui.Post(Refresh);
         pill.Click += async (_, _) =>
         {
-            if (updates.LatestReleaseUrl is { } url && !await window.Launcher.LaunchUriAsync(new Uri(url)))
+            if (updates.IsStore)
+            {
+                await updates.InstallStoreUpdateAsync();
+            }
+            else if (updates.LatestReleaseUrl is { } url && !await window.Launcher.LaunchUriAsync(new Uri(url)))
             {
                 logger.LogWarning("Could not open {Url}", url);
             }

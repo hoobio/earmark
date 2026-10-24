@@ -3,12 +3,16 @@ using System.Runtime.CompilerServices;
 
 using Avalonia.Media;
 
+using Earmark.Audio.Services;
+using Earmark.Core;
 using Earmark.Core.Services;
 using Earmark.Core.Settings;
 using Earmark.Core.WaveLink;
 using Earmark.Desktop.Services;
 
 using Microsoft.Extensions.Logging;
+
+using StartupTaskState = Windows.ApplicationModel.StartupTaskState;
 
 namespace Earmark.Desktop.ViewModels;
 
@@ -21,17 +25,20 @@ public sealed class SettingsViewModel : NotifyBase
     private readonly SettingsService _settings;
     private readonly IWaveLinkService _waveLink;
     private readonly DeviceDefaultsService _defaults;
+    private readonly StartupSettingsApplier _startup;
     private readonly ILogger<SettingsViewModel> _logger;
     private IReadOnlyList<OverrideRow> _overrides = [];
 
-    public SettingsViewModel(SettingsService settings, IWaveLinkService waveLink, DeviceDefaultsService defaults, AboutViewModel about, ILogger<SettingsViewModel> logger)
+    public SettingsViewModel(SettingsService settings, IWaveLinkService waveLink, DeviceDefaultsService defaults, StartupSettingsApplier startup, AboutViewModel about, ILogger<SettingsViewModel> logger)
     {
         About = about;
         _settings = settings;
         _waveLink = waveLink;
         _defaults = defaults;
+        _startup = startup;
         _logger = logger;
         settings.SettingsChanged += (_, _) => Ui.Post(Reload);
+        startup.StartupTaskStateChanged += (_, _) => Ui.Post(() => Raise(nameof(LaunchOnStartupDescription)));
         waveLink.StateChanged += (_, _) => Ui.Post(() =>
         {
             Raise(nameof(WaveLinkStatus));
@@ -64,7 +71,19 @@ public sealed class SettingsViewModel : NotifyBase
 
     public bool HasOverrides => _overrides.Count > 0;
 
-    public bool LaunchOnStartup { get => S.LaunchOnStartup; set => Set(s => s.LaunchOnStartup = value); }
+    public bool LaunchOnStartup { get => CanLaunchOnStartup && S.LaunchOnStartup; set => Set(s => s.LaunchOnStartup = value); }
+
+    public static bool CanLaunchOnStartup => AppInfo.IsRelease;
+
+    public string LaunchOnStartupDescription => !AppInfo.IsRelease
+        ? $"Off for {AppInfo.BuildChannel} builds. Only release builds start at sign-in."
+        : _startup.StartupTaskState switch
+        {
+            StartupTaskState.DisabledByUser => "Turned off in Task Manager > Startup apps. Turn Earmark on there to start it at sign-in.",
+            StartupTaskState.DisabledByPolicy => "Turned off by your organisation's policy.",
+            StartupTaskState.EnabledByPolicy => "Turned on by your organisation's policy.",
+            _ => "Start Earmark automatically when you sign in to Windows.",
+        };
 
     public bool ShowTrayIcon { get => S.ShowTrayIcon; set => Set(s => s.ShowTrayIcon = value, nameof(ShowTrayIcon), nameof(TrayChildrenEnabled)); }
 

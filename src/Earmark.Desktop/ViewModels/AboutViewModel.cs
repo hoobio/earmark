@@ -40,7 +40,11 @@ public sealed class AboutViewModel : NotifyBase
 
     public static bool CanAutoCheck => !AppInfo.IsDevBuild;
 
-    public static string AutoCheckDescription => AppInfo.IsDevBuild ? "Off for local (Dev) builds." : "Earmark checks GitHub for a newer release when it starts.";
+    public string AutoCheckDescription => AppInfo.IsDevBuild
+        ? "Off for local (Dev) builds."
+        : _update.IsStore ? "Earmark checks the Microsoft Store for an update when it starts." : "Earmark checks GitHub for a newer release when it starts.";
+
+    public string UpdateActionText => _update.IsStore ? "Install update" : "View release";
 
     public string UpdateStatusText => AppInfo.IsDevBuild
         ? "Update checks are off for local (Dev) builds."
@@ -48,7 +52,7 @@ public sealed class AboutViewModel : NotifyBase
         {
             UpdateStatus.Checking => "Checking for updates...",
             UpdateStatus.UpToDate => "You are on the latest version.",
-            UpdateStatus.UpdateAvailable => $"Update available: {_update.LatestVersion}",
+            UpdateStatus.UpdateAvailable => _update.IsStore ? "An update is available in the Microsoft Store." : $"Update available: {_update.LatestVersion}",
             UpdateStatus.Failed => "Could not check for updates. Try again later.",
             _ => string.Empty,
         };
@@ -65,7 +69,16 @@ public sealed class AboutViewModel : NotifyBase
 
     public Task CheckAsync() => _update.CheckForUpdatesAsync(manual: true);
 
-    public void OpenLatestRelease() => Open(_update.LatestReleaseUrl ?? AppInfo.ReleasesPageUrl);
+    public Task UpdateActionAsync()
+    {
+        if (_update.IsStore)
+        {
+            return _update.InstallStoreUpdateAsync();
+        }
+
+        Open(_update.LatestReleaseUrl ?? AppInfo.ReleasesPageUrl);
+        return Task.CompletedTask;
+    }
 
     public void OpenReleases() => Open(AppInfo.ReleasesPageUrl);
 
