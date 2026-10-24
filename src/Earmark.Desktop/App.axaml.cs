@@ -121,7 +121,14 @@ public sealed partial class App : Application
         });
 
         var args = desktop.Args ?? [];
-        var tray = StartupArgs.HasArgument(args, StartupArgs.TrayArgument) || settings.LaunchToTray;
+        var openPage = StartupArgs.GetValue(args, StartupArgs.OpenArgumentPrefix);
+        if (openPage is not null)
+        {
+            window.Navigate(openPage);
+            logger.LogInformation("Opened page {Page} from the command line", openPage);
+        }
+
+        var tray = openPage is null && (StartupArgs.HasArgument(args, StartupArgs.TrayArgument) || settings.LaunchToTray);
         var noActivate = StartupArgs.HasArgument(args, StartupArgs.NoActivateArgument);
         if (tray || noActivate)
         {

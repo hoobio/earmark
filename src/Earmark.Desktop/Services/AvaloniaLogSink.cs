@@ -6,7 +6,7 @@ namespace Earmark.Desktop.Services;
 
 public sealed class AvaloniaLogSink(ILogger logger) : ILogSink
 {
-    private static readonly HashSet<string> Areas = [LogArea.Visual, LogArea.Win32Platform, "OpenGL", "WinUIComposition"];
+    private static readonly HashSet<string> Areas = [LogArea.Visual, LogArea.Win32Platform, LogArea.Binding, LogArea.Property, "OpenGL", "WinUIComposition"];
 
     public bool IsEnabled(LogEventLevel level, string area) => level >= LogEventLevel.Warning && Areas.Contains(area);
 
