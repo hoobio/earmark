@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.1.3](https://github.com/hoobio/earmark/compare/v2.1.2...v2.1.3) (2026-10-31)
+
+
+### Miscellaneous Chores
+
+* **deps:** update dependency microsoft.windows.sdk.buildtools to 10.0.28000.2957 ([#100](https://github.com/hoobio/earmark/issues/100)) ([718bfd5](https://github.com/hoobio/earmark/commit/718bfd55ac5133af29a66bfc3395bea552b0d330))
+* **deps:** update dotnet monorepo ([#98](https://github.com/hoobio/earmark/issues/98)) ([0412428](https://github.com/hoobio/earmark/commit/0412428017a2106685ae196e28f44c1d1f7f09f7))
+
 ## [2.1.2](https://github.com/hoobio/earmark/compare/v2.1.1...v2.1.2) (2026-10-24)
 
 
