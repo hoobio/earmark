@@ -1,5 +1,20 @@
 # Changelog
 
+## [2.1.3](https://github.com/hoobio/earmark/compare/v2.1.2...v2.1.3) (2026-11-05)
+
+
+### Documentation
+
+* remove CLAUDE.md, Claude Code reads AGENTS.md directly ([#102](https://github.com/hoobio/earmark/issues/102)) ([5ac5826](https://github.com/hoobio/earmark/commit/5ac5826dcfd00bb6b1851c52d8c09ff8514b2e83))
+
+
+### Miscellaneous Chores
+
+* **deps:** update actions/setup-dotnet digest to 0f4a354 ([#104](https://github.com/hoobio/earmark/issues/104)) ([cd4b446](https://github.com/hoobio/earmark/commit/cd4b446ad580025ec9b71b1b02de9c2737fc6581))
+* **deps:** update avalonia monorepo to 12.1.5 ([#103](https://github.com/hoobio/earmark/issues/103)) ([15601f9](https://github.com/hoobio/earmark/commit/15601f98d4098eaf273ef714f6aeb6074e844e05))
+* **deps:** update dependency microsoft.windows.sdk.buildtools to 10.0.28000.2957 ([#100](https://github.com/hoobio/earmark/issues/100)) ([718bfd5](https://github.com/hoobio/earmark/commit/718bfd55ac5133af29a66bfc3395bea552b0d330))
+* **deps:** update dotnet monorepo ([#98](https://github.com/hoobio/earmark/issues/98)) ([0412428](https://github.com/hoobio/earmark/commit/0412428017a2106685ae196e28f44c1d1f7f09f7))
+
 ## [2.1.2](https://github.com/hoobio/earmark/compare/v2.1.1...v2.1.2) (2026-10-24)
 
 
