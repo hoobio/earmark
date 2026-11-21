@@ -38,7 +38,7 @@ taskkill //F //IM Earmark.exe >/dev/null 2>&1; sleep 1
 dotnet build src/Earmark.Desktop/Earmark.Desktop.csproj -c Debug -p:Platform=x64 2>&1 | tail -10 \
   && { EXE="src/Earmark.Desktop/bin/x64/Debug/net10.0-windows10.0.26100.0/win-x64/Earmark.exe"; \
        nohup "$EXE" --no-activate --monitor=rightmost >/dev/null 2>&1 & disown; sleep 4; \
-       ls -t /c/Users/AlexHoogeveen-Hill/AppData/Local/Earmark/Dev/logs/*.log | head -1 | xargs head -20; }
+       ls -t "$LOCALAPPDATA"/Earmark/Dev/logs/*.log | head -1 | xargs head -20; }
 ```
 
 - `set -o pipefail` keeps the build's exit code through `| tail`, so launch fires only on a green build.
@@ -54,7 +54,7 @@ This repo is sometimes edited by multiple agents at once, so a build can go red 
 
 Each agent builds with its own output tree so builds never lock each other's files: add `--artifacts-path <dir>` to `dotnet build` and `dotnet test`. The exe is then `<dir>\bin\Earmark.Desktop\debug_win-x64\Earmark.exe`. Only one Earmark runs at a time (single instance), so launches are serialised by the caller.
 
-Only commit and push once green. When committing mixed work in one file, stage the whole file.
+When committing mixed work in one file, stage the whole file.
 
 ## Where state lives
 
@@ -166,8 +166,7 @@ Earmark follows the Steward companion's hard-won Avalonia practice:
 - **Do not use `[MarshalAs(UnmanagedType.HString)]`** - same reason. Use `IntPtr` + the `HString` helper.
 - **Do not reintroduce `Process.MainModule.FileName`** - blocks on anti-cheat games. Use `ProcessPath.TryGet`.
 - **Compiled bindings are on** (`AvaloniaUseCompiledBindingsByDefault`). Every view and template with a binding needs `x:DataType`, or the build fails.
-- **CA rules are errors in CI.** `Directory.Build.props` sets `TreatWarningsAsErrors` and `AnalysisLevel` `latest-recommended`. Build with 0 warnings; silenced rules are listed in `.editorconfig` (`CA1848`, `CA1873`, `CA1816`, ...). Do not add suppressions to get a build through.
-- **Variable fonts do not render per weight.** Ship static per-weight TTFs (`HankenGrotesk-Regular/SemiBold/Bold`) in `Assets/Fonts`, with their licences beside them.
+- **CA rules are errors in CI.** `Directory.Build.props` sets `TreatWarningsAsErrors` and `AnalysisLevel` `latest-recommended`. Build with 0 warnings; silenced rules are listed in `.editorconfig` (`CA1848`, `CA1873`, `CA1816`, ...).- **Variable fonts do not render per weight.** Ship static per-weight TTFs (`HankenGrotesk-Regular/SemiBold/Bold`) in `Assets/Fonts`, with their licences beside them.
 - **Cross-thread UI**: engine callbacks are off the UI thread; touching a control or an `ObservableCollection` bound to one from them throws or corrupts. Use `Ui.Post`.
 - **`Microsoft.Win32.Registry`** is in the Windows TFM; adding the package triggers `NU1510`.
 - **CsWin32**: `Earmark.Audio` generates interop from `NativeMethods.txt`; add a name there instead of hand-writing a `DllImport`.
@@ -202,7 +201,7 @@ All packages are built by `.github/workflows/build.yaml`, per architecture (x64 
 
 ## Conventional commits & release-please
 
-All commits and PR titles MUST follow [Conventional Commits](https://www.conventionalcommits.org/); release-please reads `main` history to compute versions and the changelog. This repo is **not** an ADO project, so **no `AB#NNNNN` suffix** (unlike Nintex repos).
+All commits and PR titles MUST follow [Conventional Commits](https://www.conventionalcommits.org/); release-please reads `main` history to compute versions and the changelog. This repo is **not** an ADO project, so **no `AB#NNNNN` suffix**.
 
 Format: `<type>[optional scope]: <description>`, first line under 72 chars, imperative mood, no trailing period.
 
@@ -213,8 +212,7 @@ Format: `<type>[optional scope]: <description>`, first line under 72 chars, impe
 
 Breaking change (MAJOR): `!` after type (`feat!: ...`) or a `BREAKING CHANGE:` footer.
 
-**No emoji / no gitmoji** - they break the conventional-commit regex (`pr-title-check.yaml`), so such commits produce no changelog entry or bump. This overrides the gitmoji preference in personal global instructions for this repo.
-
+**No emoji / no gitmoji** - they break the conventional-commit regex (`pr-title-check.yaml`), so such commits produce no changelog entry or bump.
 ### Multi-change PRs (squash merge)
 
 The PR description body becomes the squash commit message release-please parses. To produce multiple changelog entries, append extra bare conventional-commit footers at the **bottom** of the description, **each separated by a blank line**:
@@ -241,7 +239,7 @@ BREAKING-CHANGE: rename ApplicationOutput field "Priority" to "Order"
 
 - `pr-title-check.yaml` validates the PR title (no `AB#` required); required for release-please.
 - `release-please.yaml` logic lives in the `release-please` job of `build.yaml`; it needs secret `RELEASE_PLEASE_APP_PRIVATE_KEY` and variable `RELEASE_PLEASE_APP_ID`.
-- Branch model: feature work on a branch, PR to `main`, release-please drafts the release PR. Do not push directly to `main`.
+- Branch model: feature work on a branch, PR to `main`, release-please drafts the release PR.
 
 ## Verifying behaviour after a change
 
